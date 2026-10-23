@@ -55,9 +55,20 @@ class Params:
     # 1 = a breakout with no resistance above may BUY, target = entry + projected_rr × risk.
     breakout_projected_ok: int = 0
     projected_rr: float = 2.0
+    # SELL (a held stock) needs this confidence; the default equals the BUY threshold.
+    confidence_sell_min: float = 0.75
+    # Stop under the entry: stop_atr_mult x ATR14, never closer than stop_min_pct % of the
+    # price (0 = the 1% floor only) and never further than 10%.
+    stop_atr_mult: float = 1.5
+    stop_min_pct: float = 0.0
     # ── Trading (paper and signals) ──
     max_positions: int = 5
     max_hold_sessions: int = 30
+    # Sessions a BUY limit order stays in the book (1 = the next session only); while the
+    # engine keeps saying BUY its limit and levels follow the newest decision.
+    buy_order_sessions: int = 1
+    # 1 = a limit fills when the session's low TOUCHES the limit (0 = only when traded through).
+    limit_fill_touch: int = 0
     # Share sold at T1 (the rest runs to T2, or the trailing stop).
     t1_sell_fraction: float = 0.5
     # 1 = sell the rest at T2; 0 = let it run on the trailing stop.
@@ -76,6 +87,9 @@ class Params:
     fb_buffer: float = 1.5             # a held stock stays while it ranks in the top buffer x K
     fb_market_ma: int = 200            # invested only while VNINDEX closes above this average (checked weekly)
     fb_rebalance_months: int = 1       # rebuild at the end of every N-th month (1 = monthly, 3 = quarterly)
+    fb_market_daily: int = 0           # 1 = market filter checked every session with a hysteresis band
+    fb_market_buffer_pct: float = 2.0  # ...on above MA x (1 + b%), off below MA x (1 - b%)
+    fb_momentum_weight: float = 0.0    # weight of rank(6-month return) added to the score (0 = off)
 
 
 # What the calibration may change, and how: (low, high, step).
@@ -98,6 +112,13 @@ TUNABLE: dict[str, tuple[float, float, float]] = {
     "t1_sell_fraction": (0.0, 1.0, 0.25),
     "risk_per_trade_pct": (0.5, 2.5, 0.25),
     "max_positions": (3, 10, 1),
+    # Added 2026-10-23 (see BAO_CAO_RA_SOAT_2026-10-23.md, part C).
+    "breakout_projected_ok": (0, 1, 1),
+    "confidence_sell_min": (0.55, 0.85, 0.025),
+    "stop_atr_mult": (1.0, 3.0, 0.5),
+    "stop_min_pct": (0.0, 5.0, 1.0),
+    "buy_order_sessions": (1, 3, 1),
+    "limit_fill_touch": (0, 1, 1),
 }
 # ...and the momentum rotation's, calibrated separately.
 MOMENTUM_TUNABLE: dict[str, tuple[float, float, float]] = {
@@ -120,6 +141,9 @@ FACTOR_FIXED: dict[str, tuple[float, float, float]] = {
     "fb_buffer": (1.0, 2.0, 0.25),
     "fb_market_ma": (150, 250, 25),
     "fb_rebalance_months": (1, 3, 1),
+    "fb_market_daily": (0, 1, 1),
+    "fb_market_buffer_pct": (0.0, 5.0, 1.0),
+    "fb_momentum_weight": (0.0, 1.0, 0.5),
 }
 BOUNDS = {**TUNABLE, **MOMENTUM_TUNABLE, **FACTOR_FIXED}
 

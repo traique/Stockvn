@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from tradingagents.agents.rating import parse_rating
-from tradingagents.dataflows.files import locked
+from tradingagents.dataflows.files import locked, replace_file
 
 
 class TradingMemoryLog:
@@ -56,8 +56,16 @@ class TradingMemoryLog:
             rating = rating or parse_rating(final_trade_decision)
             tag = f"[{trade_date} | {ticker} | {rating} | pending]"
             entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
-            with open(self._log_path, "a", encoding="utf-8") as f:
-                f.write(entry)
+            # Written whole, through a temp file: a crash in a plain append left half an entry
+            # that swallowed the next one (its tag line was never seen again).
+            existing = self._log_path.read_text(encoding="utf-8") if self._log_path.exists() else ""
+            text = existing + entry
+
+            def write(temp: str) -> None:
+                with open(temp, "w", encoding="utf-8") as handle:
+                    handle.write(text)
+
+            replace_file(self._log_path, write)
 
     def settling(self, wait: bool = True):
         """Hold the log for one settlement pass at a time, across threads and processes.

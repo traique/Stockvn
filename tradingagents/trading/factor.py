@@ -321,10 +321,15 @@ def _average_ranks(values: list[float]) -> list[float]:
     return ranks
 
 
-def rank(closes: Mapping[str, list[float]], order: list[str] | None = None) -> list[Ranked]:
+MOMENTUM_SESSIONS = 126       # ~6 months: the return the optional momentum term ranks
+
+
+def rank(closes: Mapping[str, list[float]], order: list[str] | None = None,
+         momentum_weight: float = 0.0) -> list[Ranked]:
     """The scored names, best first. ``closes``: each name's closes on the same
     sessions (the last SCORE_WINDOW, NaN where it did not trade). Ties in the score
-    go to the lower volatility, then to the earlier name of ``order``."""
+    go to the lower volatility, then to the earlier name of ``order``.
+    ``momentum_weight`` > 0 adds that weight x rank(return over MOMENTUM_SESSIONS)."""
     names = [s for s in (order or list(closes)) if s in closes]
     rows = []
     for symbol in names:
@@ -339,12 +344,17 @@ def rank(closes: Mapping[str, list[float]], order: list[str] | None = None) -> l
         top = np.nanmax(px)
         if not math.isfinite(px[-1]) or not top > 0:
             continue
-        rows.append((symbol, float(np.std(returns, ddof=1)), float(px[-1] / top)))
+        valid = px[~np.isnan(px)]
+        back = valid[-MOMENTUM_SESSIONS - 1] if len(valid) > MOMENTUM_SESSIONS else valid[0]
+        mom = float(px[-1] / back - 1) if back > 0 else 0.0
+        rows.append((symbol, float(np.std(returns, ddof=1)), float(px[-1] / top), mom))
     if not rows:
         return []
-    r_vol = _average_ranks([-v for _, v, _ in rows])
-    r_hi = _average_ranks([h for _, _, h in rows])
-    ranked = [Ranked(s, a + b, v, h) for (s, v, h), a, b in zip(rows, r_vol, r_hi, strict=True)]
+    r_vol = _average_ranks([-v for _, v, _, _ in rows])
+    r_hi = _average_ranks([h for _, _, h, _ in rows])
+    r_mom = _average_ranks([m for _, _, _, m in rows]) if momentum_weight > 0 else [0.0] * len(rows)
+    ranked = [Ranked(s, a + b + momentum_weight * c, v, h)
+              for (s, v, h, _), a, b, c in zip(rows, r_vol, r_hi, r_mom, strict=True)]
     position = {s: i for i, s in enumerate(names)}
     return sorted(ranked, key=lambda r: (-r.score, r.vol, position[r.symbol]))
 
@@ -372,6 +382,23 @@ def market_ok(vni_closes: list[float], ma: int) -> bool:
     if len(closes) < ma:
         return False
     return bool(closes[-1] > closes[-ma:].mean())
+
+
+def market_ok_band(vni_closes: list[float], ma: int, buffer_pct: float, was_on: bool) -> bool:
+    """The filter with a hysteresis band: it turns on above MA x (1 + b%) and off below
+    MA x (1 - b%); in between it keeps its state (``was_on``). Checked every session
+    (``fb_market_daily``), so a dip under the average mid-week does not wait for Friday."""
+    closes = np.asarray([c for c in vni_closes if _finite(c)], dtype=float)
+    ma = max(int(ma), 1)
+    if len(closes) < ma:
+        return False
+    avg = closes[-ma:].mean()
+    b = max(float(buffer_pct), 0.0) / 100
+    if closes[-1] > avg * (1 + b):
+        return True
+    if closes[-1] < avg * (1 - b):
+        return False
+    return bool(was_on)
 
 
 def _week(day: str) -> str:
@@ -410,8 +437,13 @@ def decide(book: Ledger, day: str, next_day: str | None, vni_closes: list[float]
     # A week end or month end the previous session was not known to be (a holiday guessed wrong).
     late_week = bool(prev) and _week(prev) != week and meta.get("fb_week") != _week(prev)
     late_month = bool(prev) and _month(prev) != month and meta.get("fb_month") != _month(prev)
-    checked = "fb_on" not in meta or week_end or late_week
-    on = market_ok(vni_closes, params.fb_market_ma) if checked else bool(meta.get("fb_on"))
+    daily = bool(getattr(params, "fb_market_daily", 0))
+    checked = daily or "fb_on" not in meta or week_end or late_week
+    if daily:
+        on = market_ok_band(vni_closes, params.fb_market_ma, getattr(params, "fb_market_buffer_pct", 0.0),
+                            bool(meta.get("fb_on", False)))
+    else:
+        on = market_ok(vni_closes, params.fb_market_ma) if checked else bool(meta.get("fb_on"))
     meta["fb_on"] = on
     if week_end:
         meta["fb_week"] = week
@@ -496,7 +528,8 @@ def run(data, params: Params, *, start: str | None = None, end: str | None = Non
             window = calendar[max(0, i - SCORE_WINDOW):i]
             names = universe(day) if universe is not None else list(data.symbols or data.bars)
             names = [s for s in names if day in data.bars.get(s, {})]
-            return rank({s: aligned_closes(closes[s], window) for s in names}, names)
+            return rank({s: aligned_closes(closes[s], window) for s in names}, names,
+                        momentum_weight=getattr(params, "fb_momentum_weight", 0.0))
 
         decision = decide(ledger, day, next_day, values[:i][-max(params.fb_market_ma, 1):], params, ranking)
         last = {s: data.bars[s][day].close for s in set(decision.basket) | set(ledger.positions)

@@ -208,7 +208,8 @@ def run(data: Dataset, params: Params, *, start: str | None = None, end: str | N
             if base is None:
                 continue
             signals.append(_signal(symbol, replace(base, params=params, is_holding=symbol in ledger.positions)))
-        ledger.plan_orders(day, signals, max_positions=params.max_positions)
+        ledger.plan_orders(day, signals, max_positions=params.max_positions,
+                           buy_sessions=getattr(params, "buy_order_sessions", 1))
     return ledger
 
 

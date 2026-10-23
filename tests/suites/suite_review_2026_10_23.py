@@ -143,4 +143,159 @@ log.add("2026-10-23", SimpleNamespace(symbol="FPT", action="BUY", price=95000.0,
                                       last_bar_date="2026-10-22"), {"verdict": "AGREE", "confidence": 70, "reason": "x"})
 t.ok("morning run dated 23/10 on the 22/10 close is scored from 22/10", log.rows()[-1]["day"] == "2026-10-22")
 
+# ═══ Round 2 (same day): part B leftovers and the part C parameters ═══
+from dataclasses import replace  # noqa: E402
+
+from tradingagents.quant import params as qp, policy  # noqa: E402
+from tradingagents.trading import factor  # noqa: E402
+from tradingagents.trading.ledger import Bar, Ledger, Order, Position, Signal, _ExitRules  # noqa: E402
+
+RULES = _ExitRules(max_hold_sessions=30, t1_sell_fraction=0.5, use_t2=True)
+P = qp.DEFAULT
+
+# ── a BUY order that lives several sessions ──
+def book(ttl):
+    L = Ledger(cash=1e9, start_cash=1e9)
+    sig = Signal("AAA", "BUY", 0.8, 10000.0, 9900.0, 10050.0, 9000.0, 11000.0, 12000.0, 10.0)
+    L.plan_orders("2026-01-05", [sig], max_positions=5, buy_sessions=ttl)
+    return L, sig
+
+L, sig = book(1)
+L.process_session({"AAA": Bar("2026-01-06", 10200, 10300, 10100, 10200, 10000, "HOSE", 1e6)}, rules=RULES)
+L.end_of_session("2026-01-06")
+t.ok("one-session order (default): not filled, gone after its session", not L.orders and not L.positions)
+L, sig = book(2)
+L.process_session({"AAA": Bar("2026-01-06", 10200, 10300, 10100, 10200, 10000, "HOSE", 1e6)}, rules=RULES)
+L.end_of_session("2026-01-06")
+t.ok("two-session order survives an unfilled session", len(L.orders) == 1 and L.orders[0].sessions_left == 1)
+L.plan_orders("2026-01-06", [replace(sig, entry_high=10150.0, stop=9100.0)], max_positions=5, buy_sessions=2)
+t.ok("still BUY: the open order follows the newest limit and stop, no second order",
+     len(L.orders) == 1 and L.orders[0].limit == 10150.0 and L.orders[0].stop == 9100.0)
+f = L.process_session({"AAA": Bar("2026-01-07", 10100, 10200, 10000, 10100, 10200, "HOSE", 1e6)}, rules=RULES)
+t.ok("fills on its second session at the limit", [(x.side, x.price) for x in f] == [("BUY", 10150.0)] and not L.orders)
+L, sig = book(3)
+L.process_session({"AAA": Bar("2026-01-06", 10200, 10300, 10100, 10200, 10000, "HOSE", 1e6)}, rules=RULES)
+L.end_of_session("2026-01-06")
+L.plan_orders("2026-01-06", [replace(sig, action="WATCH")], max_positions=5, buy_sessions=3)
+t.ok("engine no longer says BUY: the open order is cancelled", not L.orders)
+L = Ledger(cash=1e9, start_cash=1e9)
+L.orders.append(Order("BBB", "BUY", 1000, 10000.0, "2026-01-01", stop=9000.0))
+touch = _ExitRules(limit_fill_touch=True)
+f = L.process_session({"BBB": Bar("2026-01-02", 10200, 10300, 10000, 10100, 10100, "HOSE", 1e6)}, rules=touch)
+t.ok("limit_fill_touch: low == limit fills at the limit", [(x.side, x.price) for x in f] == [("BUY", 10000.0)])
+
+# ── stop distance floor and the SELL threshold ──
+stats = SimpleNamespace(volatility=5.0, rsi14=50.0, trend_3m=5.0)
+enh = SimpleNamespace(atr14=150.0)        # 1.5% ATR at 10.000: 1.5 x ATR = 2.25%
+sr = SimpleNamespace(support=None, resistance=None, support_prior=None, resistance_prior=None)
+stop_default = policy._compute_stop_target(10000.0, enh, stats, 0.0, "buy", sr, "HOSE", None, P)[0]
+stop_floor = policy._compute_stop_target(10000.0, enh, stats, 0.0, "buy", sr, "HOSE", None,
+                                         replace(P, stop_min_pct=4.0))[0]
+t.ok("stop_min_pct widens a too-tight ATR stop", stop_default == 9780.0 and stop_floor == 9600.0, (stop_default, stop_floor))
+t.ok("new tunables are in TUNABLE with bounds", all(k in qp.TUNABLE for k in
+     ("breakout_projected_ok", "confidence_sell_min", "stop_atr_mult", "stop_min_pct", "buy_order_sessions", "limit_fill_touch")))
+t.ok("coerce clamps them", qp.coerce({"buy_order_sessions": 9}).buy_order_sessions == 3)
+
+# ── factor: hysteresis band and the momentum term ──
+closes = [100.0] * 199 + [103.0]
+t.ok("band: 3% above MA200 turns on", factor.market_ok_band(closes, 200, 2.0, False))
+t.ok("band: 1% above MA keeps the previous state", factor.market_ok_band([100.0] * 199 + [101.0], 200, 2.0, False) is False
+     and factor.market_ok_band([100.0] * 199 + [101.0], 200, 2.0, True) is True)
+t.ok("band: 3% below turns off", factor.market_ok_band([100.0] * 199 + [97.0], 200, 2.0, True) is False)
+import numpy as np  # noqa: E402
+
+rng = np.random.default_rng(1)
+flat = list(100 + np.cumsum(rng.normal(0, 0.2, 252)))
+trend = list(np.linspace(80, 100, 252) + rng.normal(0, 0.2, 252))
+base = factor.rank({"FLAT": flat, "TREND": trend})
+mom = factor.rank({"FLAT": flat, "TREND": trend}, momentum_weight=1.0)
+t.ok("momentum weight lifts the trending name", mom[0].symbol == "TREND" and mom[0].score > base[0].score, (base, mom))
+
+# ── market scan: VNDirect's pre-adjustment for a coming ex-date is undone for the board ──
+from vnbot.market_scan import MarketCloses  # noqa: E402
+
+mc = MarketCloses(_common.ROOT / "mc")
+rows_by_day = {
+    "2026-03-02": [{"code": "GVR", "floor": "HOSE", "close": 25700, "raw": 26100, "value": 1e9}],
+    "2026-03-03": [{"code": "GVR", "floor": "HOSE", "close": 25732, "raw": 26100, "value": 1e9}],
+}
+mc.update("2026-03-03", fetch=lambda d: rows_by_day.get(d, []), budget=100, today="2026-03-03")
+series, _floors, _value = mc.series(["GVR"], "2026-03-03")
+t.ok("closes on the board's basis until the ex-date (x raw/adClose of the newest session)",
+     series["GVR"] == [round(25700 * 26100 / 25732, 1), 26100.0], series)
+
+# ── critic settle: no lock held while bars are fetched; outcomes merged ──
+from vnbot import critic as cr  # noqa: E402
+
+clog = cr.CriticLog(_common.ROOT / "critic2.json")
+clog.add("2026-01-05", SimpleNamespace(symbol="AAA", action="BUY", price=10000.0, stop_price=9000.0,
+                                       target_price=12000.0, last_bar_date="2026-01-05"),
+         {"verdict": "AGREE", "confidence": 70, "reason": "x"})
+
+
+def bars(code, day):
+    assert not clog._lock.locked(), "lock held during the fetch"
+    return [{"High": 12500.0, "Low": 11000.0, "Close": 12200.0}]
+
+
+n = clog.settle(bars)
+t.ok("settled outside the lock", n == 1 and clog.rows()[-1]["outcome"] is not None)
+
+# ── memory log: an entry lands whole ──
+from tradingagents.memory.log import TradingMemoryLog  # noqa: E402
+
+mlog = TradingMemoryLog({"memory_log_path": str(_common.ROOT / "mem.md")})
+mlog.store_decision("FPT", "2026-01-05", "**Rating**: BUY\n\nx", rating="BUY")
+mlog.store_decision("HPG", "2026-01-05", "**Rating**: SELL\n\ny", rating="SELL")
+text = (_common.ROOT / "mem.md").read_text(encoding="utf-8")
+t.ok("two entries, both tagged", text.count("<!-- ENTRY_END -->") == 2 and "| HPG |" in text and "| FPT |" in text)
+
+# ── listing saved on disk survives an outage ──
+from tradingagents.dataflows import symbols as sy  # noqa: E402
+from tradingagents.dataflows.vendors import vci  # noqa: E402
+
+sy._listing_path = lambda: str(_common.ROOT / "vci_listing.json")
+vci.fetch_listing = lambda: [{"symbol": "ABC", "board": "UPCOM"}]
+t.ok("listing fetched and saved", sy.exchange_of("ABC") == "UPCOM" and Path(sy._listing_path()).exists())
+
+
+def boom():
+    raise RuntimeError("VCI down")
+
+
+vci.fetch_listing = boom
+t.ok("VCI down: the saved listing answers", sy.exchange_of("ABC") == "UPCOM")
+
+# ── price cache rules around 15:05 (part B.8) ──
+cache_dir2 = _common.ROOT / "cache2"
+cache_dir2.mkdir()
+p2 = cache_dir2 / "x.csv"
+p2.write_text("Date,Open,High,Low,Close,Volume\n2026-10-23,1,1,1,1,1\n")
+day = pd.Timestamp("2026-10-23")
+
+
+def at(h, m):
+    return datetime(2026, 10, 23, h, m, tzinfo=vn_rules.VN_TZ)
+
+
+os.utime(p2, (at(14, 50).timestamp(),) * 2)
+vn_rules.now_vn = lambda: at(15, 6)
+t.ok("a 14:50 download is not fresh for today's run after 15:05", not ohlcv._cache_is_fresh(str(p2), day, day))
+t.ok("...but is fresh for a run dated yesterday", ohlcv._cache_is_fresh(str(p2), day - pd.Timedelta(days=1), day))
+os.utime(p2, (at(15, 6).timestamp(),) * 2)
+vn_rules.now_vn = lambda: at(15, 8)
+t.ok("a 15:06 download is fresh for today's run", ohlcv._cache_is_fresh(str(p2), day, day))
+t.ok("_final_through: 15:04 -> yesterday, 15:06 -> today",
+     ohlcv._final_through(at(15, 4)) == day - pd.Timedelta(days=1) and ohlcv._final_through(at(15, 6)) == day)
+frame = pd.DataFrame({"Date": pd.to_datetime(["2026-10-22", "2026-10-23"]), "Close": [1.0, 2.0]})
+t.ok("today's bar dropped before 15:05, kept after",
+     len(ohlcv.drop_forming_bar(frame, day, now=at(15, 4))) == 1 and len(ohlcv.drop_forming_bar(frame, day, now=at(15, 6))) == 2)
+from tradingagents.dataflows import money_flows as mf  # noqa: E402
+
+d1, d2 = pd.Timestamp("2026-03-02"), pd.Timestamp("2026-03-03")
+cached = pd.DataFrame({"Date": [d1], "AAA": [20.0]})
+refs = pd.DataFrame({"AAA": [10.0]}, index=[d2])          # reference of 03-03 on today's basis = 10 (a 2:1 bonus)
+out = mf._rebase(cached, refs, [d1, d2])
+t.ok("breadth closes re-based x0.5 at a 2:1 junction", float(out.loc[out["Date"] == d1, "AAA"].iloc[0]) == 10.0, out)
+
 t.done()

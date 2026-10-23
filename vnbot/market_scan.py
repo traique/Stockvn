@@ -76,7 +76,11 @@ def fetch_day(day: str) -> list[dict]:
 
 class MarketCloses:
     """``{"basis": the day the closes are adjusted to, "floors": {code: exchange},
-    "days": {day: {code: [close, value]}}, "empty": [sessions the source has nothing for]}``."""
+    "days": {day: {code: [close, value]}}, "empty": [sessions the source has nothing for],
+    "pre": {"day": the newest session fetched, "factor": {code: raw close / adjusted close
+    on that session}}}``. The factor undoes VNDirect's adjustment for an announced ex-date
+    that has not come yet, so ``series`` is on the price board's basis (``te.levels`` is
+    compared with board prices); it is 1 once the ex-date has passed."""
 
     def __init__(self, directory: Path):
         self.path = Path(directory) / "external" / "market_closes.json"
@@ -91,7 +95,21 @@ class MarketCloses:
         data.setdefault("days", {})
         data.setdefault("floors", {})
         data.setdefault("empty", [])
+        if not isinstance(data.get("pre"), dict) or not isinstance(data["pre"].get("factor"), dict):
+            data["pre"] = {"day": "", "factor": {}}
         return data
+
+    @staticmethod
+    def _note_pre(data: dict, day: str, rows: list[dict]) -> None:
+        """Keep ``raw / close`` of the newest session fetched (see the class docstring)."""
+        if day < (data["pre"].get("day") or ""):
+            return
+        factor = {}
+        for r in rows:
+            raw, close = r.get("raw"), r.get("close")
+            if raw and close and abs(raw / close - 1) > te.REBASE_PCT / 100:
+                factor[r["code"]] = round(raw / close, 6)
+        data["pre"] = {"day": day, "factor": factor}
 
     def _write(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +143,7 @@ class MarketCloses:
             fresh = {r["code"]: r["close"] for r in rows}
             if not fresh:
                 return 0, f"nguồn giá chưa trả phiên {last[8:10]}/{last[5:7]}"
+            self._note_pre(data, last, rows)
             for code, (old, _value) in list(data["days"][last].items()):
                 new = fresh.get(code)
                 if new and old and abs(new / old - 1) > te.REBASE_PCT / 100:
@@ -152,6 +171,7 @@ class MarketCloses:
                 continue
             data["days"][day] = {r["code"]: [r["close"], r["value"]] for r in rows}
             data["floors"].update({r["code"]: r["floor"] for r in rows if r.get("floor")})
+            self._note_pre(data, day, rows)
             time.sleep(FETCH_PAUSE)
         keep = set(wanted)
         data["days"] = {d: v for d, v in data["days"].items() if d in keep}
@@ -182,11 +202,12 @@ class MarketCloses:
         data = self._read()
         days = sorted(d for d in data["days"] if d <= as_of)
         wanted = set(codes)
+        pre = data["pre"]["factor"] if data["pre"].get("day", "") <= as_of or not days else {}
         closes = {c: [] for c in wanted}
         for d in days:
             for code, (close, _val) in data["days"][d].items():
                 if code in wanted and close:
-                    closes[code].append(close)
+                    closes[code].append(round(close * pre.get(code, 1.0), 1) if code in pre else close)
         recent = days[-VALUE_SESSIONS:]
         value = {c: sum((data["days"][d].get(c) or [0, 0])[1] or 0 for d in recent) / max(len(recent), 1) for c in wanted}
         return closes, {c: data["floors"].get(c) for c in wanted}, value

@@ -144,9 +144,16 @@ def _expire(book, prev: str | None) -> list:
     """
     if not prev:
         return []
-    stale = [o for o in book.orders if o.created < prev]
+
+    def lapsed(o) -> bool:
+        # An order still alive for several sessions is fine as long as the session before
+        # S was processed with it in the book (``Order.last_session``); otherwise a session
+        # it was meant for passed unprocessed.
+        return o.created < prev and (getattr(o, "last_session", "") or o.created) < prev
+
+    stale = [o for o in book.orders if lapsed(o)]
     if stale:
-        book.orders = [o for o in book.orders if o.created >= prev]
+        book.orders = [o for o in book.orders if not lapsed(o)]
     return stale
 
 
@@ -1958,7 +1965,8 @@ class TradingBot:
         paper.process_session(bars, params=params)
         paper.end_of_session(day, market.close(vn_rules.BENCHMARK, day))
         signals, real_only, errors = self._signals_for(day, paper, real if final else None, universe, params)
-        paper.plan_orders(day, signals, max_positions=params.max_positions)
+        paper.plan_orders(day, signals, max_positions=params.max_positions,
+                          buy_sessions=getattr(params, "buy_order_sessions", 1))
         paper.meta["last_day"] = day
         paper.save(self.paper_path)
         if final:
@@ -2120,7 +2128,7 @@ class TradingBot:
             frame = market.frame(symbol, day)
             series = {d.strftime("%Y-%m-%d"): float(c) for d, c in zip(frame["Date"], frame["Close"], strict=True)}
             closes[symbol] = factor.aligned_closes(series, window)
-        return factor.rank(closes, names)
+        return factor.rank(closes, names, momentum_weight=getattr(params, "fb_momentum_weight", 0.0))
 
     @property
     def universe_path(self) -> Path:
@@ -2491,6 +2499,8 @@ class TradingBot:
             t1_before = bool(held and held.t1_done)
             fill = real.record_fill(side, symbol, qty, price, day, stop=stop, target1=target1, target2=target2,
                                     reason="báo khớp")
+            if side == "BUY":
+                self._mark_fill_close(real.positions.get(symbol), day)
             real.meta["last_day"] = max(day, str(real.meta.get("last_day") or ""))
             real.save(self._book_path(book))
         if side == "BUY":
@@ -2512,6 +2522,22 @@ class TradingBot:
         if pos is not None and pos.t1_done and not t1_before:
             text += f" Đã chốt T1: stop phần còn lại ({_fmt(pos.qty)} cp) dời về hoà vốn {_fmt(pos.stop)}."
         return text
+
+    @staticmethod
+    def _mark_fill_close(pos, day: str) -> None:
+        """Mark a position the owner reported to the last CLOSE on or before the fill day, so
+        ``mark_to_history`` can see an ex-date between that day and the first evening run
+        (a fill price says nothing about the price basis). Best effort: the mark stays
+        empty when the price source does not answer."""
+        if pos is None:
+            return
+        try:
+            bar = _Market(day).bar(pos.symbol, day)
+        except Exception as exc:  # noqa: BLE001 - the mark is a convenience, the fill is booked
+            logger.info("No close to mark %s on %s: %s", pos.symbol, day, exc)
+            return
+        if bar is not None and bar.tradable and bar.date <= day and (not pos.last_date or bar.date >= pos.last_date):
+            pos.last_price, pos.last_date = float(bar.close), bar.date
 
     def record_free_shares(self, symbol: str, qty: int, day: str | None = None, book: str = "real") -> str:
         """Book bonus shares or a stock dividend credited to the real account (/thuong;
@@ -2612,10 +2638,11 @@ class TradingBot:
             except LedgerLoadError as exc:
                 lines.append(f"💼 Thật: ⚠️ {exc}")
                 return "\n".join(lines)
-            real.settle_to(today_vn())
             lines.append(f"💼 Thật: tiền {_fmt(real.cash)}")
+            # Sellable now by the time of day (a lot bought on T sells from 13:00 of T+2), as the
+            # intraday alerts count it; settle_to(today) would call it "about" from the morning.
             lines += [f"- {p.symbol} {_fmt(p.qty)} @ {_fmt(p.avg_price)}, stop {_fmt(p.stop)}, T1 {_fmt(p.target1)}"
-                      + ("" if p.settled_qty >= p.qty else f" [{_fmt(p.settled_qty)} cp đã về]")
+                      + ("" if _t2_now(p)[0] >= p.qty else f" [{_fmt(_t2_now(p)[0])} cp bán được, {_t2_now(p)[1]}]")
                       for p in real.positions.values()] or ["- (chưa ghi vị thế nào)"]
         return "\n".join(lines)
 

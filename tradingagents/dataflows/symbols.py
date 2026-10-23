@@ -57,13 +57,67 @@ def listing_entry(symbol: str) -> dict | None:
     code = normalize_symbol(symbol)
     try:
         rows = vci.fetch_listing()
+        _save_listing(rows)
     except Exception as exc:  # noqa: BLE001 - listing is enrichment, never fatal
-        logger.warning("VCI listing unavailable: %s", exc)
-        return None
+        rows = _saved_listing()
+        if rows is None:
+            logger.warning("VCI listing unavailable: %s", exc)
+            return None
+        logger.info("VCI listing unavailable (%s); using the copy saved on disk", exc)
     for row in rows:
         if str(row.get("symbol", "")).upper() == code:
             return row
     return None
+
+
+_LISTING_FILE = "vci_listing.json"
+_LISTING_SAVE_SECONDS = 3600
+
+
+def _listing_path():
+    import os
+
+    from tradingagents.dataflows.config import get_config
+
+    return os.path.join(get_config()["data_cache_dir"], _LISTING_FILE)
+
+
+def _save_listing(rows) -> None:
+    """Keep the last good listing on disk (at most once an hour), so an outage of VCI does
+    not turn every exchange into "unknown": an unknown exchange widens the tick grid and
+    makes the ex-date gap check read a legitimate UPCoM floor day (-14%) as a suspect gap."""
+    import json
+    import os
+    import time
+
+    from tradingagents.dataflows.files import replace_file
+
+    if not rows:
+        return
+    path = _listing_path()
+    try:
+        if os.path.exists(path) and time.time() - os.path.getmtime(path) < _LISTING_SAVE_SECONDS:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        def write(temp: str) -> None:
+            with open(temp, "w", encoding="utf-8") as handle:
+                json.dump(rows, handle)
+
+        replace_file(path, write)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug("Listing not saved: %s", exc)
+
+
+def _saved_listing():
+    import json
+
+    try:
+        with open(_listing_path(), encoding="utf-8") as handle:
+            rows = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return rows if isinstance(rows, list) and rows else None
 
 
 def exchange_of(symbol: str) -> str | None:

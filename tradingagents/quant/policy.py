@@ -664,12 +664,13 @@ def _compute_stop_target(
         return None, None, None, "watch"
 
     atr = enhanced.atr14 if enhanced is not None else None
+    min_risk = price * max(1.0, params.stop_min_pct) / 100
     if atr is not None and atr > 0:
-        risk_amount = feat.clamp(atr * 1.5, price * 0.01, price * 0.10)
+        risk_amount = feat.clamp(atr * params.stop_atr_mult, min_risk, price * 0.10)
         basis = "atr"
     else:
         risk_pct = feat.clamp(stats.volatility, 3, 8)
-        risk_amount = price * risk_pct / 100
+        risk_amount = max(price * risk_pct / 100, min_risk)
         basis = "volatility_pct"
 
     rsi = stats.rsi14
@@ -684,8 +685,8 @@ def _compute_stop_target(
 
         if support is not None and 0 < support < price and (price - support) <= risk_amount * 2:
             stop = feat.round_order_price(
-                support * 0.99, exchange
-            )  # dưới support 1 chút, tránh bị quét nhiễu đúng vùng hỗ trợ
+                min(support * 0.99, price - min_risk), exchange
+            )  # dưới support 1 chút, tránh bị quét nhiễu đúng vùng hỗ trợ; không sát hơn stop_min_pct
             basis = f"{basis}+support"
         else:
             stop = feat.round_order_price(price - risk_amount, exchange)
@@ -919,7 +920,8 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
         # SELL chỉ có ý nghĩa khi đang thật sự giữ mã - không giữ thì
         # "SELL" là khuyến nghị vô nghĩa (không có gì để bán); trường hợp đó
         # tín hiệu giảm chỉ có tác dụng "đừng mua mới" (NO_TRADE).
-        if confidence >= p.confidence_buy_min:
+        # Ngưỡng SELL riêng (mặc định bằng ngưỡng BUY): thoát sớm hơn khi hiệu chỉnh cho phép.
+        if confidence >= (p.confidence_sell_min if holding else p.confidence_buy_min):
             if holding:
                 action, direction = "SELL", "exit"
             else:

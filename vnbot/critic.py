@@ -169,19 +169,28 @@ class CriticLog:
     def settle(self, bars_after: Callable[[str, str], list[dict]]) -> int:
         """Settle what the following bars now decide; ``bars_after(code, day)`` gives the
         sessions after ``day`` as dicts with High, Low, Close. Returns how many settled."""
+        # The bars are fetched OUTSIDE the lock (a network call per row): /phanbien and the
+        # verdicts must not wait on the downloads. The outcomes are merged under the lock.
+        with self._lock:
+            pending = [dict(r) for r in self._read() if r.get("outcome") is None]
+        outcomes: dict[tuple[str, str], dict] = {}
+        for row in pending:
+            try:
+                bars = bars_after(row["code"], row["day"])
+            except Exception as exc:  # noqa: BLE001 - one code's data must not stop the rest
+                logger.warning("Critic settle %s %s: %s", row["code"], row["day"], exc)
+                continue
+            outcome = settle_one(row, bars)
+            if outcome is not None:
+                outcomes[(row["day"], row["code"])] = outcome
+        if not outcomes:
+            return 0
         with self._lock:
             rows = self._read()
             settled = 0
             for row in rows:
-                if row.get("outcome") is not None:
-                    continue
-                try:
-                    bars = bars_after(row["code"], row["day"])
-                except Exception as exc:  # noqa: BLE001 - one code's data must not stop the rest
-                    logger.warning("Critic settle %s %s: %s", row["code"], row["day"], exc)
-                    continue
-                outcome = settle_one(row, bars)
-                if outcome is not None:
+                outcome = outcomes.get((row.get("day"), row.get("code")))
+                if outcome is not None and row.get("outcome") is None:
                     row["outcome"] = outcome
                     settled += 1
             if settled:

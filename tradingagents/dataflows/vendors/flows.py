@@ -191,7 +191,10 @@ def fetch_market_flows(start: str, end: str) -> pd.DataFrame:
 
 
 def fetch_hose_day(day: str) -> pd.DataFrame:
-    """Every HOSE stock's bar for one day: code, adjusted close, change, ceiling/floor hits."""
+    """Every HOSE stock's bar for one day: code, adjusted close, change, ceiling/floor hits.
+    Prices here are in THOUSANDS of VND (as VNDirect sends them), unlike every other frame of
+    the package; the breadth consumer only compares them with each other. Multiply by 1000
+    before mixing them with ``load_ohlcv`` prices."""
     body = http.get_json(
         VNDIRECT_PRICES, vendor="VNDirect", timeout=30,
         params={"q": f"floor:HOSE~date:{day}~type:STOCK", "size": 1000},
@@ -210,19 +213,23 @@ def fetch_hose_day(day: str) -> pd.DataFrame:
 
 def fetch_market_day(day: str) -> list[dict]:
     """Every listed stock's session ``day`` (HOSE, HNX, UPCoM) in one request: ``{code,
-    floor, close (adjusted, VND), value (matched, VND)}``; [] when the day is not out (yet).
-    The adjusted closes are on the basis of the day they are fetched."""
+    floor, close (adjusted, VND), raw (the close as traded, VND), value (matched, VND)}``;
+    [] when the day is not out (yet). The adjusted closes are on the basis of the day they
+    are fetched - VNDirect also adjusts them for an ANNOUNCED ex-date still to come, so on
+    the latest session ``raw / close`` is the factor that puts the series back on the
+    board's basis until that ex-date (``vnbot.market_scan.MarketCloses``)."""
     body = http.get_json(
         VNDIRECT_PRICES, vendor="VNDirect", timeout=40, retries=0,     # the caller asks again later
-        params={"q": f"date:{day}~type:STOCK", "size": 3000, "fields": "code,floor,adClose,nmValue,date"},
+        params={"q": f"date:{day}~type:STOCK", "size": 3000, "fields": "code,floor,adClose,close,nmValue,date"},
     )
     out = []
     for r in (body or {}).get("data") or []:
         code = str(r.get("code") or "").upper()
-        close, value = _num(r.get("adClose")), _num(r.get("nmValue"))
+        close, value, raw = _num(r.get("adClose")), _num(r.get("nmValue")), _num(r.get("close"))
         if not code or not close > 0 or str(r.get("date") or day)[:10] != day:
             continue
         out.append({"code": code, "floor": str(r.get("floor") or "").upper(), "close": round(close * 1000),
+                    "raw": round(raw * 1000) if raw > 0 else round(close * 1000),
                     "value": value if value > 0 else 0.0})
     return out
 

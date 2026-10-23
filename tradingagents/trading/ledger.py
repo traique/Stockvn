@@ -215,6 +215,8 @@ class Order:
     target2: float | None = None
     ref: float | None = None   # price the size was computed at (for an order at the open)
     stop_pct: float = 0.0      # stop this % under the fill price, when no absolute stop is given
+    sessions_left: int = 1     # sessions the order may still be filled in (1 = the next only)
+    last_session: str = ""     # the last session processed with the order in the book
 
 
 @dataclass
@@ -235,12 +237,14 @@ class _ExitRules:
     t1_sell_fraction: float = 0.5
     use_t2: bool = True
     trail_pct: float = 0.0
+    limit_fill_touch: bool = False   # a buy limit fills when the low touches it (else: traded through)
 
     @classmethod
     def of(cls, params, max_hold_sessions: int) -> _ExitRules:
         if params is None:
             return cls(max_hold_sessions=max_hold_sessions)
-        return cls(params.max_hold_sessions, params.t1_sell_fraction, bool(params.use_t2), params.trail_pct)
+        return cls(params.max_hold_sessions, params.t1_sell_fraction, bool(params.use_t2), params.trail_pct,
+                   bool(getattr(params, "limit_fill_touch", 0)))
 
 
 def _fee(value: float, side: str) -> float:
@@ -381,11 +385,14 @@ class Ledger:
             bar = bars.get(order.symbol)
             if bar is None or order.created >= bar.date:
                 continue
-            self.orders.remove(order)
-            if order.side == "BUY" and order.symbol not in self.positions and bar.tradable:
-                fill = self._buy(order, bar, self.cash - close_cash)
-                if fill:
-                    fills.append(fill)
+            if order.side != "BUY" or order.symbol in self.positions:
+                self.orders.remove(order)          # a SELL had its session (filled in _exits, or lapsed)
+                continue
+            fill = self._buy(order, bar, self.cash - close_cash, rules) if bar.tradable else None
+            if fill:
+                fills.append(fill)
+                self.orders.remove(order)
+            # Unfilled: ``end_of_session`` counts the session off ``sessions_left`` and drops it at 0.
         for symbol, pos in self.positions.items():
             bar = bars.get(symbol)
             if bar is not None and bar.tradable:
@@ -464,8 +471,13 @@ class Ledger:
         return self.process_session({symbol: bar}, rules=_ExitRules.of(params, max_hold_sessions))
 
     def end_of_session(self, date: str, benchmark: float | None = None) -> None:
-        """Drop the orders that had their session (suspended symbols included) and record NAV."""
-        self.orders = [o for o in self.orders if o.created >= date]
+        """Count this session off every order that had it (suspended symbols included), drop
+        the ones out of sessions, and record NAV."""
+        for order in self.orders:
+            if order.created < date:
+                order.sessions_left -= 1
+                order.last_session = date
+        self.orders = [o for o in self.orders if o.created >= date or o.sessions_left > 0]
         if not self.start_date:
             self.start_date = date
         if benchmark is not None and not finite(benchmark):
@@ -473,13 +485,15 @@ class Ledger:
         self.history = [h for h in self.history if h["date"] != date]
         self.history.append({"date": date, "nav": round(self.nav()), "benchmark": benchmark})
 
-    def _buy(self, order: Order, bar: Bar, cash: float) -> Fill | None:
+    def _buy(self, order: Order, bar: Bar, cash: float, rules: _ExitRules | None = None) -> Fill | None:
         if bar.locked_up:
             return None
+        touch = bool(rules and rules.limit_fill_touch)
         if order.limit is None:
             price = _fill_price(bar.open, "BUY", bar)
-        elif bar.low < order.limit:
-            # Traded through the limit: at the open plus slippage if that is lower, else at the limit.
+        elif bar.low < order.limit or (touch and bar.low <= order.limit):
+            # Traded through the limit (or touched it, when the rules allow): at the open plus
+            # slippage if that is lower, else at the limit.
             price = min(_fill_price(bar.open, "BUY", bar), order.limit) if bar.open < order.limit else order.limit
         else:
             return None
@@ -784,13 +798,26 @@ class Ledger:
         return note
 
     # ── orders for the next session ──
-    def plan_orders(self, date: str, signals: list[Signal], *, max_positions: int) -> list[Order]:
+    def plan_orders(self, date: str, signals: list[Signal], *, max_positions: int,
+                    buy_sessions: int = 1) -> list[Order]:
         """Orders for the session after ``date`` from the engine's decisions at its close.
 
         No pyramiding: a held symbol gets no BUY, and a symbol with an open order of
-        a side gets no second one (a session planned twice does not double the orders)."""
+        a side gets no second one (a session planned twice does not double the orders).
+        A BUY order lives ``buy_sessions`` sessions; one still in the book follows the
+        newest decision (limit and levels) while the engine keeps saying BUY, and is
+        cancelled when it stops."""
         new: list[Order] = []
         by_symbol = {s.symbol: s for s in signals}
+        for order in list(self.orders):
+            sig = by_symbol.get(order.symbol)
+            if order.side != "BUY" or sig is None or order.created >= date:
+                continue
+            if sig.action == "BUY" and _positive(sig.entry_high) and _positive(sig.stop):
+                order.limit, order.stop, order.target1, order.target2 = sig.entry_high, sig.stop, sig.target1, sig.target2
+                order.ref = sig.price if _positive(sig.price) else order.ref
+            else:
+                self.orders.remove(order)
         open_sells = {o.symbol for o in self.orders if o.side == "SELL"}
         open_buys = {o.symbol for o in self.orders if o.side == "BUY"}
         for symbol, pos in self.positions.items():
@@ -818,7 +845,8 @@ class Ledger:
                 continue
             new.append(Order(sig.symbol, "BUY", qty, sig.entry_high, date,
                              f"BUY conf {sig.confidence:.2f}", sig.stop, sig.target1, sig.target2,
-                             ref=sig.price if _positive(sig.price) else None))
+                             ref=sig.price if _positive(sig.price) else None,
+                             sessions_left=max(1, int(buy_sessions))))
             open_buys.add(sig.symbol)
             available -= qty * sig.entry_high * (1 + vn_rules.BUY_FEE_PCT / 100)
             slots -= 1
