@@ -366,8 +366,7 @@ def confirm(account: ts.TaiSan, *, replace: bool) -> str:
                                  "(sổ cũ được lưu bản sao).")
         ts.derive(entries)
         if account.journal_path.exists():
-            stamp = ts.now_vn().strftime("%Y%m%d-%H%M%S")
-            account.journal_path.rename(account.journal_path.with_name(f"journal.jsonl.bak-{stamp}"))
+            account.backup_journal()
         account._append(entries)
         prices = pending.get("prices") or {}
 

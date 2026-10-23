@@ -416,6 +416,7 @@ class TaiSan:
         self._lock = threading.RLock()
         self._live: tuple[float, dict] = (0.0, {})
         self.rebuilding = False
+        self._bad_lines: set[str] = set()
 
     # ── the journal ──
     def entries(self) -> list[Entry]:
@@ -430,7 +431,9 @@ class TaiSan:
             try:
                 out.append(Entry.from_dict(json.loads(line)))
             except (ValueError, TypeError, KeyError) as exc:
-                logger.warning("Tài sản: unreadable journal line skipped (%s)", exc)
+                if line not in self._bad_lines:          # said once, not at every read
+                    self._bad_lines.add(line)
+                    logger.warning("Tài sản: unreadable journal line skipped (%s)", exc)
         return out
 
     def book(self, *, upto: str | None = None) -> Book:
@@ -450,6 +453,16 @@ class TaiSan:
             handle.write(text.encode("utf-8"))
             handle.flush()
             os.fsync(handle.fileno())
+
+    def backup_journal(self) -> Path:
+        """Move the journal aside as ``journal.jsonl.bak-<time>`` (never over an earlier copy)."""
+        stamp = now_vn().strftime("%Y%m%d-%H%M%S")
+        backup, n = self.journal_path.with_name(f"journal.jsonl.bak-{stamp}"), 1
+        while backup.exists():
+            n += 1
+            backup = self.journal_path.with_name(f"journal.jsonl.bak-{stamp}-{n}")
+        self.journal_path.rename(backup)
+        return backup
 
     def _next_id(self, entries: list[Entry]) -> int:
         return max((e.id for e in entries), default=0) + 1
@@ -797,19 +810,25 @@ class TaiSan:
 
     # ── daily upkeep: closes, rights, the history rebuild ──
     def symbols_held_since(self, start: str) -> dict[str, tuple[str, str]]:
-        """{symbol: (first day held, last day held)} of every holding from ``start``."""
+        """{symbol: (first day, last day)} of every holding from ``start``: a stock held
+        before ``start`` from ``start``; a stock sold until its sale day (held at the close
+        of every session before it); a stock still held until today."""
         spans: dict[str, list[str]] = {}
+        prev: set[str] = set()
 
         def seen(day, book):
+            nonlocal prev
+            now = set(book.holdings)
             if day >= start:
-                for symbol in book.holdings:
-                    span = spans.setdefault(symbol, [day, day])
+                for symbol in now | prev:
+                    # not seen since ``start`` but held before: held from ``start``
+                    span = spans.setdefault(symbol, [start if symbol in prev else day, day])
                     span[1] = day
+            prev = now
         derive(self.entries(), on_day=seen)
         today = today_vn()
-        for symbol in self.book().holdings:
-            if symbol in spans:
-                spans[symbol][1] = today
+        for symbol in prev:
+            spans.setdefault(symbol, [start, today])[1] = today
         return {s: (a, b) for s, (a, b) in spans.items()}
 
     def rebuild(self, *, through: str | None = None) -> int:
@@ -1420,9 +1439,7 @@ class TaiSan:
         with self._lock:
             if not self.journal_path.exists():
                 return "Danh mục Tài sản đang trống, không có gì để xoá."
-            stamp = now_vn().strftime("%Y%m%d-%H%M%S")
-            backup = self.journal_path.with_name(f"journal.jsonl.bak-{stamp}")
-            self.journal_path.rename(backup)
+            backup = self.backup_journal()
 
             def change(s):
                 for key in ("levels", "marks", "alerts", "events", "notes"):
