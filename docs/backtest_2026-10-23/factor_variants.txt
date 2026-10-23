@@ -1,0 +1,22 @@
+
+=== PHÒNG THỦ (VN100 hôm nay - thiên lệch sống sót, 98 mã, 900 phiên; train ..2024-08-13, test 2024-08-13..) ===
+mặc định (tuần, MA200) [toàn bộ]           lãi  +32.51%  VNI  +15.18%  DD 12.11%  lệnh 115  thắng  41.0%  điểm  +26.45
+mặc định (tuần, MA200) [train]             lãi  +12.88%  VNI  -15.80%  DD  9.11%  lệnh  56  thắng  47.8%  điểm   +8.32
+mặc định (tuần, MA200) [test]              lãi  +16.87%  VNI  +36.80%  DD 12.32%  lệnh  68  thắng  32.8%  điểm  +10.71
+C7a kiểm tra hằng ngày, đệm 2% [toàn bộ]   lãi  +31.13%  VNI  +15.18%  DD 14.18%  lệnh  75  thắng  43.1%  điểm  +24.04
+C7a kiểm tra hằng ngày, đệm 2% [train]     lãi  +14.79%  VNI  -15.80%  DD  7.27%  lệnh  39  thắng  41.4%  điểm  +11.15
+C7a kiểm tra hằng ngày, đệm 2% [test]      lãi  +14.15%  VNI  +36.80%  DD 13.85%  lệnh  45  thắng  40.0%  điểm   +7.22
+C7a kiểm tra hằng ngày, đệm 0% [toàn bộ]   lãi  +29.37%  VNI  +15.18%  DD 17.12%  lệnh 157  thắng  38.8%  điểm  +20.81
+C7a kiểm tra hằng ngày, đệm 0% [train]     lãi  +15.97%  VNI  -15.80%  DD  8.31%  lệnh  79  thắng  46.4%  điểm  +11.81
+C7a kiểm tra hằng ngày, đệm 0% [test]      lãi  +10.89%  VNI  +36.80%  DD 17.01%  lệnh  88  thắng  30.8%  điểm   +2.38
+C7b động lượng 0.5 [toàn bộ]               lãi  +44.31%  VNI  +15.18%  DD 13.18%  lệnh 123  thắng  38.9%  điểm  +37.72
+C7b động lượng 0.5 [train]                 lãi  +24.18%  VNI  -15.80%  DD 10.58%  lệnh  58  thắng  52.1%  điểm  +18.89
+C7b động lượng 0.5 [test]                  lãi  +14.10%  VNI  +36.80%  DD 13.83%  lệnh  74  thắng  23.4%  điểm   +7.18
+C7b động lượng 1.0 [toàn bộ]               lãi  +38.96%  VNI  +15.18%  DD 17.00%  lệnh 135  thắng  38.4%  điểm  +30.46
+C7b động lượng 1.0 [train]                 lãi  +29.29%  VNI  -15.80%  DD 10.67%  lệnh  64  thắng  51.9%  điểm  +23.95
+C7b động lượng 1.0 [test]                  lãi   +4.24%  VNI  +36.80%  DD 18.29%  lệnh  81  thắng  22.5%  điểm   -4.91
+C7a+b hằng ngày 2% + động lượng 0.5 [toàn bộ] lãi  +36.30%  VNI  +15.18%  DD 15.20%  lệnh  86  thắng  46.1%  điểm  +28.70
+C7a+b hằng ngày 2% + động lượng 0.5 [train] lãi  +20.48%  VNI  -15.80%  DD  8.92%  lệnh  44  thắng  55.9%  điểm  +16.02
+C7a+b hằng ngày 2% + động lượng 0.5 [test] lãi   +8.97%  VNI  +36.80%  DD 16.36%  lệnh  52  thắng  28.6%  điểm   +0.79
+
+DONE

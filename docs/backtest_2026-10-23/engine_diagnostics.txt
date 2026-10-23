@@ -1,0 +1,51 @@
+=== Phân bố action của engine (mặc định) trên 25249 cặp (mã, phiên) ===
+{'NO_TRADE': 18645, 'WATCH': 6590, 'BUY': 14}
+Vì sao WATCH/NO_TRADE: {'khác': 11980, 'confidence chưa đạt': 5962, 'regime risk-off/unknown': 2821, 'mâu thuẫn': 1906, 'chưa có tín hiệu': 1274, 'RR dưới ngưỡng': 829, 'không có kháng cự thật': 442, 'phiên rủi ro (hard_no_buy)': 21}
+
+=== Lệnh đặt / khớp / tỷ trọng đầu tư trung bình ===
+mặc định                     tín hiệu BUY   12  lệnh đặt   12  khớp  12  tỷ trọng đầu tư TB   2.8%  lãi +5.42%
+buy_order_sessions=3         tín hiệu BUY   12  lệnh đặt   12  khớp  12  tỷ trọng đầu tư TB   2.8%  lãi +5.42%
+limit_fill_touch=1           tín hiệu BUY   12  lệnh đặt   12  khớp  12  tỷ trọng đầu tư TB   2.8%  lãi +5.42%
+
+=== Đợt 2: nới cổng chặn (train ..2024-08-13, test 2024-08-13..) ===
+mặc định [toàn bộ]                               lãi   +5.42%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15  đầu tư TB  2.8%
+mặc định [train]                                 lãi   -1.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+mặc định [test]                                  lãi   +7.29%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+skip_near_resistance=1 [toàn bộ]                 lãi   +5.28%  DD  8.67%  lệnh  27  thắng  44.4%  điểm   +0.94  đầu tư TB  7.1%
+skip_near_resistance=1 [train]                   lãi   -2.02%  DD  7.24%  lệnh  13  thắng  31.2%  điểm   -5.64
+skip_near_resistance=1 [test]                    lãi   +7.33%  DD  5.35%  lệnh  14  thắng  55.0%  điểm   +4.66
+min_rr_ratio=1.2 [toàn bộ]                       lãi   +0.16%  DD  9.03%  lệnh  22  thắng  37.0%  điểm   -4.36  đầu tư TB  4.7%
+min_rr_ratio=1.2 [train]                         lãi   -3.33%  DD  6.65%  lệnh  10  thắng  25.0%  điểm   -6.66
+min_rr_ratio=1.2 [test]                          lãi   +3.47%  DD  4.66%  lệnh  12  thắng  46.7%  điểm   +1.14
+skip_near + min_rr 1.2 [toàn bộ]                 lãi   -2.72%  DD 14.75%  lệnh  36  thắng  37.0%  điểm  -10.10  đầu tư TB  8.4%
+skip_near + min_rr 1.2 [train]                   lãi   -8.25%  DD 12.59%  lệnh  19  thắng  18.2%  điểm  -14.54
+skip_near + min_rr 1.2 [test]                    lãi   +6.01%  DD  6.01%  lệnh  17  thắng  54.2%  điểm   +3.00
+skip_near + breakout_projected [toàn bộ]         lãi  +12.71%  DD 10.10%  lệnh  64  thắng  50.6%  điểm   +7.66  đầu tư TB 17.5%
+skip_near + breakout_projected [train]           lãi   +8.31%  DD 10.10%  lệnh  31  thắng  57.8%  điểm   +3.26
+skip_near + breakout_projected [test]            lãi   +4.30%  DD  7.70%  lệnh  33  thắng  43.2%  điểm   +0.45
+confidence_buy_min=0.65 [toàn bộ]                lãi   +4.18%  DD  6.47%  lệnh  14  thắng  44.4%  điểm   +0.94  đầu tư TB  3.3%
+confidence_buy_min=0.65 [train]                  lãi   -3.46%  DD  6.32%  lệnh   8  thắng  22.2%  điểm   -6.62
+confidence_buy_min=0.65 [test]                   lãi   +7.81%  DD  2.01%  lệnh   6  thắng  66.7%  điểm   +6.80
+risk_per_trade_pct=2.0 [toàn bộ]                 lãi   +5.09%  DD  5.95%  lệnh  12  thắng  50.0%  điểm   +2.12  đầu tư TB  3.4%
+risk_per_trade_pct=2.0 [train]                   lãi   -2.56%  DD  5.37%  lệnh   6  thắng  28.6%  điểm   -5.25
+risk_per_trade_pct=2.0 [test]                    lãi   +7.59%  DD  2.43%  lệnh   6  thắng  66.7%  điểm   +6.38
+risk 2.0 + max_positions 8 [toàn bộ]             lãi   +5.09%  DD  5.95%  lệnh  12  thắng  50.0%  điểm   +2.12  đầu tư TB  3.4%
+risk 2.0 + max_positions 8 [train]               lãi   -2.56%  DD  5.37%  lệnh   6  thắng  28.6%  điểm   -5.25
+risk 2.0 + max_positions 8 [test]                lãi   +7.59%  DD  2.43%  lệnh   6  thắng  66.7%  điểm   +6.38
+stop_min_pct=3 + flow 0.15 [toàn bộ]             lãi   +7.77%  DD  4.42%  lệnh  13  thắng  55.6%  điểm   +5.56  đầu tư TB  3.4%
+stop_min_pct=3 + flow 0.15 [train]               lãi   -1.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+stop_min_pct=3 + flow 0.15 [test]                lãi   +9.92%  DD  2.05%  lệnh   7  thắng  72.7%  điểm   +8.89
+skip_near + stop_min 3 + flow 0.15 [toàn bộ]     lãi   +4.97%  DD 10.09%  lệnh  28  thắng  44.4%  điểm   -0.07  đầu tư TB  7.8%
+skip_near + stop_min 3 + flow 0.15 [train]       lãi   -2.02%  DD  7.24%  lệnh  13  thắng  31.2%  điểm   -5.64
+skip_near + stop_min 3 + flow 0.15 [test]        lãi   +7.06%  DD  5.07%  lệnh  15  thắng  55.0%  điểm   +4.53
+skip_near + risk 2.0 + stop_min 3 [toàn bộ]      lãi   +7.69%  DD  8.88%  lệnh  25  thắng  47.1%  điểm   +3.25  đầu tư TB  8.4%
+skip_near + risk 2.0 + stop_min 3 [train]        lãi   -2.03%  DD  8.54%  lệnh  13  thắng  31.2%  điểm   -6.30
+skip_near + risk 2.0 + stop_min 3 [test]         lãi  +10.07%  DD  5.63%  lệnh  12  thắng  61.1%  điểm   +7.25
+dist_min_drop_pct=0.5 [toàn bộ]                  lãi   +0.52%  DD  7.51%  lệnh  19  thắng  34.8%  điểm   -3.23  đầu tư TB  4.1%
+dist_min_drop_pct=0.5 [train]                    lãi   -4.83%  DD  7.30%  lệnh  11  thắng  16.7%  điểm   -8.48
+dist_min_drop_pct=0.5 [test]                     lãi   +5.82%  DD  2.10%  lệnh   8  thắng  54.5%  điểm   +4.77
+distribution_day_threshold=6 [toàn bộ]           lãi   -2.59%  DD 10.45%  lệnh  23  thắng  29.6%  điểm   -7.82  đầu tư TB  4.5%
+distribution_day_threshold=6 [train]             lãi   -6.28%  DD  8.71%  lệnh  13  thắng  14.3%  điểm  -10.63
+distribution_day_threshold=6 [test]              lãi   +4.08%  DD  3.22%  lệnh  10  thắng  46.2%  điểm   +2.47
+
+DONE

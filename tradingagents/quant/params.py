@@ -60,7 +60,10 @@ class Params:
     # Stop under the entry: stop_atr_mult x ATR14, never closer than stop_min_pct % of the
     # price (0 = the 1% floor only) and never further than 10%.
     stop_atr_mult: float = 1.5
-    stop_min_pct: float = 0.0
+    # 3% since 2026-10-23: a 1.5 x ATR stop of a calm stock sat inside one session's band and
+    # was swept; on the 2022-2025 VN30 replay the floor never hurt and lowered the drawdown
+    # (docs/backtest_2026-10-23). 0 = the old 1% floor.
+    stop_min_pct: float = 3.0
     # ── Trading (paper and signals) ──
     max_positions: int = 5
     max_hold_sessions: int = 30

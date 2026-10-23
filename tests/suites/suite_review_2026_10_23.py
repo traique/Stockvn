@@ -188,10 +188,12 @@ t.ok("limit_fill_touch: low == limit fills at the limit", [(x.side, x.price) for
 stats = SimpleNamespace(volatility=5.0, rsi14=50.0, trend_3m=5.0)
 enh = SimpleNamespace(atr14=150.0)        # 1.5% ATR at 10.000: 1.5 x ATR = 2.25%
 sr = SimpleNamespace(support=None, resistance=None, support_prior=None, resistance_prior=None)
+stop_old = policy._compute_stop_target(10000.0, enh, stats, 0.0, "buy", sr, "HOSE", None, replace(P, stop_min_pct=0.0))[0]
 stop_default = policy._compute_stop_target(10000.0, enh, stats, 0.0, "buy", sr, "HOSE", None, P)[0]
 stop_floor = policy._compute_stop_target(10000.0, enh, stats, 0.0, "buy", sr, "HOSE", None,
                                          replace(P, stop_min_pct=4.0))[0]
-t.ok("stop_min_pct widens a too-tight ATR stop", stop_default == 9780.0 and stop_floor == 9600.0, (stop_default, stop_floor))
+t.ok("stop_min_pct widens a too-tight ATR stop (old 2.25%, default 3%, 4%)",
+     stop_old == 9780.0 and stop_default == 9700.0 and stop_floor == 9600.0, (stop_old, stop_default, stop_floor))
 t.ok("new tunables are in TUNABLE with bounds", all(k in qp.TUNABLE for k in
      ("breakout_projected_ok", "confidence_sell_min", "stop_atr_mult", "stop_min_pct", "buy_order_sessions", "limit_fill_touch")))
 t.ok("coerce clamps them", qp.coerce({"buy_order_sessions": 9}).buy_order_sessions == 3)

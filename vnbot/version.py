@@ -26,7 +26,7 @@ from pathlib import Path
 
 VERSION = "v14"
 RELEASED = "2026-10-23"
-RELEASE_BUILD = "5427087"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "b8749e5"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
@@ -35,6 +35,8 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Sổ ảo: vị thế 1 lô chạm T1 nay bán toàn bộ (trước không bán mà vẫn dời stop về hoà vốn)",
         "Khối ngoại tính theo khớp lệnh, không gồm thoả thuận; Output Guard hết bỏ sót dòng AI giả nhãn hệ thống",
         "Cache giá dùng được ngày nghỉ khi nguồn lỗi; Zoom webhook không chặn web; hoàn hạn mức AI khi lỗi mạng",
+        "Stop không sát hơn 3% giá (stop_min_pct); 6 tham số mới cho hiệu chỉnh, 3 cho Phòng thủ (chỉ đổi tay)",
+        "Backtest 2022-2025 các phương án: docs/backtest_2026-10-23; quét 300 mã về đúng bảng giá tới ngày GDKHQ",
     )),
     ("v13", "2026-10-22", (
         "Bot quét 300 mã thanh khoản cao: nhắn danh sách đổi chiều lúc 14:46, /stvthitruong",

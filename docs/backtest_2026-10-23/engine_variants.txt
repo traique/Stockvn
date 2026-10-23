@@ -1,0 +1,52 @@
+
+=== QUANT ENGINE (VN30, 30 mã, 900 phiên 2022-03-17..2025-10-24; train ..2024-08-13, test 2024-08-13..) ===
+mặc định [toàn bộ]                         lãi   +5.42%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15
+mặc định [train]                           lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+mặc định [test]                            lãi   +7.29%  VNI  +36.80%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+C1 breakout_projected_ok=1 [toàn bộ]       lãi   +6.18%  VNI  +15.18%  DD 10.53%  lệnh  64  thắng  47.1%  điểm   +0.92
+C1 breakout_projected_ok=1 [train]         lãi   +5.26%  VNI  -15.80%  DD 10.53%  lệnh  31  thắng  55.8%  điểm   -0.01
+C1 breakout_projected_ok=1 [test]          lãi   +0.83%  VNI  +36.80%  DD  9.06%  lệnh  33  thắng  38.1%  điểm   -3.70
+C1 breakout + projected_rr 2.5 [toàn bộ]   lãi   +8.89%  VNI  +15.18%  DD 10.53%  lệnh  64  thắng  47.6%  điểm   +3.62
+C1 breakout + projected_rr 2.5 [train]     lãi   +6.83%  VNI  -15.80%  DD 10.53%  lệnh  31  thắng  57.1%  điểm   +1.56
+C1 breakout + projected_rr 2.5 [test]      lãi   +1.84%  VNI  +36.80%  DD  8.80%  lệnh  33  thắng  38.1%  điểm   -2.56
+C2 buy_order_sessions=2 [toàn bộ]          lãi   +5.42%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15
+C2 buy_order_sessions=2 [train]            lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C2 buy_order_sessions=2 [test]             lãi   +7.29%  VNI  +36.80%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+C2 buy_order_sessions=3 [toàn bộ]          lãi   +5.42%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15
+C2 buy_order_sessions=3 [train]            lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C2 buy_order_sessions=3 [test]             lãi   +7.29%  VNI  +36.80%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+C2 limit_fill_touch=1 [toàn bộ]            lãi   +5.42%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15
+C2 limit_fill_touch=1 [train]              lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C2 limit_fill_touch=1 [test]               lãi   +7.29%  VNI  +36.80%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+C3 trail_pct=8 [toàn bộ]                   lãi   +0.88%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   -1.39
+C3 trail_pct=8 [train]                     lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C3 trail_pct=8 [test]                      lãi   +2.70%  VNI  +36.80%  DD  2.54%  lệnh   6  thắng  66.7%  điểm   +1.43
+C3 trail_pct=10, use_t2=0 [toàn bộ]        lãi   +5.42%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15
+C3 trail_pct=10, use_t2=0 [train]          lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C3 trail_pct=10, use_t2=0 [test]           lãi   +7.29%  VNI  +36.80%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+C4 stop_min_pct=3 [toàn bộ]                lãi   +5.67%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.40
+C4 stop_min_pct=3 [train]                  lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C4 stop_min_pct=3 [test]                   lãi   +7.56%  VNI  +36.80%  DD  1.74%  lệnh   6  thắng  66.7%  điểm   +6.69
+C4 stop_atr_mult=2.0 [toàn bộ]             lãi   -1.21%  VNI  +15.18%  DD  1.35%  lệnh   2  thắng   0.0%  điểm   -1.89
+C4 stop_atr_mult=2.0 [train]               lãi   -0.86%  VNI  -15.80%  DD  0.91%  lệnh   1  thắng   0.0%  điểm   -1.31
+C4 stop_atr_mult=2.0 [test]                lãi   -0.36%  VNI  +36.80%  DD  0.72%  lệnh   1  thắng   0.0%  điểm   -0.72
+C4 stop_atr_mult=2.5, stop_min_pct=3 [toàn bộ] lãi   +0.00%  VNI  +15.18%  DD  0.00%  lệnh   0  thắng   nan%  điểm   +0.00
+C4 stop_atr_mult=2.5, stop_min_pct=3 [train] lãi   +0.00%  VNI  -15.80%  DD  0.00%  lệnh   0  thắng   nan%  điểm   +0.00
+C4 stop_atr_mult=2.5, stop_min_pct=3 [test] lãi   +0.00%  VNI  +36.80%  DD  0.00%  lệnh   0  thắng   nan%  điểm   +0.00
+C5 confidence_sell_min=0.65 [toàn bộ]      lãi   +5.42%  VNI  +15.18%  DD  4.54%  lệnh  12  thắng  50.0%  điểm   +3.15
+C5 confidence_sell_min=0.65 [train]        lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C5 confidence_sell_min=0.65 [test]         lãi   +7.29%  VNI  +36.80%  DD  1.94%  lệnh   6  thắng  66.7%  điểm   +6.32
+C6 flow_weight=0.10 [toàn bộ]              lãi   +5.56%  VNI  +15.18%  DD  4.52%  lệnh  12  thắng  50.0%  điểm   +3.30
+C6 flow_weight=0.10 [train]                lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C6 flow_weight=0.10 [test]                 lãi   +7.43%  VNI  +36.80%  DD  1.95%  lệnh   6  thắng  66.7%  điểm   +6.46
+C6 flow_weight=0.15 [toàn bộ]              lãi   +7.24%  VNI  +15.18%  DD  4.42%  lệnh  13  thắng  55.6%  điểm   +5.03
+C6 flow_weight=0.15 [train]                lãi   -1.80%  VNI  -15.80%  DD  4.42%  lệnh   6  thắng  28.6%  điểm   -4.01
+C6 flow_weight=0.15 [test]                 lãi   +9.40%  VNI  +36.80%  DD  2.23%  lệnh   7  thắng  72.7%  điểm   +8.29
+max_hold_sessions=45 [toàn bộ]             lãi   +2.93%  VNI  +15.18%  DD  6.23%  lệnh  12  thắng  43.8%  điểm   -0.18
+max_hold_sessions=45 [train]               lãi   -3.52%  VNI  -15.80%  DD  4.72%  lệnh   6  thắng  14.3%  điểm   -5.88
+max_hold_sessions=45 [test]                lãi   +6.86%  VNI  +36.80%  DD  3.99%  lệnh   6  thắng  66.7%  điểm   +4.87
+confidence_buy_min=0.70 [toàn bộ]          lãi   +5.01%  VNI  +15.18%  DD  5.50%  lệnh  13  thắng  47.1%  điểm   +2.26
+confidence_buy_min=0.70 [train]            lãi   -2.63%  VNI  -15.80%  DD  5.37%  lệnh   7  thắng  25.0%  điểm   -5.32
+confidence_buy_min=0.70 [test]             lãi   +7.75%  VNI  +36.80%  DD  2.00%  lệnh   6  thắng  66.7%  điểm   +6.75
+
+DONE

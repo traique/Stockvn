@@ -87,8 +87,58 @@ Guard thứ hai (`create_output_guard`) không kiểm tra lại văn bản mà `
 
 ---
 
+## E. Đợt 2 cùng ngày: sửa mục B, cài mục C và backtest
+
+### E.1 Mục B đã sửa thêm (commit `27bcc7f`)
+B1 hệ số `raw/adClose` cho quét 300 mã (mức đổi chiều về đúng bảng giá tới ngày GDKHQ) · B2 `/khop mua` ghi mốc giá đóng cửa ngày khớp (phát hiện GDKHQ trước lần đánh dấu đầu) · B3 `/danhmuc` hiện số cổ phiếu bán được theo giờ (chiều T+2) · B4 `CriticLog.settle` tải nến ngoài khoá · B5 bộ nhớ ghi nguyên tử · B6 listing VCI lưu đĩa, dùng lại khi VCI lỗi · B7 ghi rõ đơn vị nghìn đồng của `fetch_hose_day` · B8 thêm test cho luật cache/nến đang hình thành và `_rebase` độ rộng. **Chưa làm:** B9 (các mục cũ của bản 21/10: thiên lệch sống sót của hiệu chỉnh, GDKHQ UPCoM, OAuth `state` - luồng "Add App Now" của Marketplace không gửi `state` nên không bắt buộc được, khoá đăng nhập theo IP sau proxy).
+
+### E.2 Mục C: tham số mới (mặc định = hành vi cũ, trừ một thay đổi ở E.4)
+`breakout_projected_ok` vào `TUNABLE`; `confidence_sell_min`; `stop_atr_mult`, `stop_min_pct`; `buy_order_sessions` (lệnh mua sống nhiều phiên, giới hạn/stop theo quyết định mới, huỷ khi engine hết BUY); `limit_fill_touch`; Phòng thủ: `fb_market_daily` + `fb_market_buffer_pct`, `fb_momentum_weight`. C8 (cảnh báo "vào vùng mua" cho Phòng thủ) **không làm**: lệnh của Phòng thủ/Động lượng là lệnh giá mở cửa, không có vùng mua để so.
+
+### E.3 Backtest (chi tiết, log và script: `docs/backtest_2026-10-23/`)
+Dữ liệu 900 phiên 17/03/2022 → 24/10/2025, rổ **hôm nay** (thiên lệch sống sót - chỉ dùng để so các phương án với nhau). Train tới 13/08/2024, Test sau đó. VNINDEX: toàn bộ +15,2%, train −15,8%, test +36,8%.
+
+**Quant Engine (VN30):**
+
+| Phương án | Toàn bộ lãi / DD / lệnh | Train lãi | Test lãi / DD | Đầu tư TB |
+|---|---|---|---|---|
+| Mặc định v13 | +5,4% / 4,5% / 12 | −1,8% | +7,3% / 1,9% | 2,8% |
+| C1 breakout_projected_ok=1 | +6,2% / 10,5% / 64 | +5,3% | +0,8% / 9,1% | - |
+| C1 + skip_near_resistance=1 | **+12,7%** / 10,1% / 64 | **+8,3%** | +4,3% / 7,7% | 17,5% |
+| C2 buy_order_sessions=2–3, limit_fill_touch | = mặc định | = | = | 12/12 lệnh khớp |
+| C3 trail_pct=8 | +0,9% | −1,8% | +2,7% | - |
+| C4 stop_min_pct=3 | +5,7% / 4,5% / 12 | −1,8% | +7,6% / **1,7%** | 2,8% |
+| C4 stop_atr_mult=2.0 | −1,2% / 2 lệnh | | | - |
+| C5 confidence_sell_min=0.65 | = mặc định | | | |
+| C6 flow_weight=0.15 | +7,2% / 4,4% / 13 | −1,8% | **+9,4%** / 2,2% | - |
+| stop_min 3 + flow 0.15 | +7,8% / 4,4% / 13 | −1,8% | +9,9% / 2,1% | 3,4% |
+| skip_near + risk 2.0 + stop_min 3 | +7,7% / 8,9% / 25 | −2,0% | **+10,1%** / 5,6% | 8,4% |
+| min_rr_ratio=1.2, dist_threshold=6, dist_min_drop=0.5, confidence 0.65/0.70 | xấu hơn mặc định | | | |
+
+Chẩn đoán: trên 25.249 cặp (mã, phiên) engine chỉ ra **14 BUY**; WATCH/NO_TRADE vì confidence chưa đạt (5.962), regime risk-off/thiếu VNINDEX (2.821), tín hiệu mâu thuẫn (1.906); cổng R:R chỉ chặn 829 và "không có kháng cự" 442. Tỷ trọng đầu tư trung bình 2,8% NAV: **engine là sổ gần như toàn tiền mặt**, lãi thấp là vì không đầu tư chứ không phải vì chọn sai. 12 tín hiệu BUY → 12 lệnh → 12 khớp: giả thuyết C2 (lệnh không khớp vì giá bỏ chạy) **sai**, nên C2 không đổi gì.
+
+**Phòng thủ (VN100 hôm nay):**
+
+| Phương án | Toàn bộ lãi / DD | Train lãi / DD | Test lãi / DD |
+|---|---|---|---|
+| Mặc định (MA200 tuần) | +32,5% / 12,1% | +12,9% / 9,1% | **+16,9%** / 12,3% |
+| C7a kiểm tra hằng ngày, đệm 2% | +31,1% / 14,2% | +14,8% / **7,3%** | +14,2% / 13,9% |
+| C7a hằng ngày, đệm 0% | +29,4% / 17,1% | +16,0% / 8,3% | +10,9% / 17,0% |
+| C7b động lượng 0.5 | **+44,3%** / 13,2% | **+24,2%** / 10,6% | +14,1% / 13,8% |
+| C7b động lượng 1.0 | +39,0% / 17,0% | +29,3% / 10,7% | +4,2% / 18,3% |
+| C7a+b | +36,3% / 15,2% | +20,5% / 8,9% | +9,0% / 16,4% |
+
+### E.4 Quyết định
+- **Đổi mặc định một tham số:** `stop_min_pct = 3` (khoảng stop không sát hơn 3% giá; trước đây 1,5 × ATR có thể chỉ 2,2% - nằm trong biên độ một phiên). Trên mọi tổ hợp thử, sàn 3% không làm xấu đi và giảm sụt giảm; mức 3% thấp hơn biên độ HOSE 7% nên không đổi bản chất chiến lược. Sổ ảo/lệnh thật từ v14 dùng mức này; `quant_params.json` cũ không có khoá này sẽ lấy mặc định mới.
+- **Không đổi mặc định** các tham số còn lại, nhưng tất cả đã nằm trong `TUNABLE` để hiệu chỉnh đêm thử trên dữ liệu mới:
+  - `flow_weight` 0,15 cho kết quả test tốt nhất (+9,4%, thắng 73%) nhưng dữ liệu dòng tiền chỉ có từ 2024 (train không đổi) → bằng chứng mới một cửa sổ, để calibrate quyết định.
+  - `skip_near_resistance=1 + breakout_projected_ok=1` là cách duy nhất làm engine **đầu tư thật** (17,5% NAV, 64 lệnh, train +8,3% khi VNINDEX −15,8%) nhưng test chỉ +4,3% so với +7,3% của mặc định và sụt giảm 10%. Nếu anh muốn engine giao dịch nhiều hơn, đây là bộ nên bật thử trên sổ ảo (`quant_params.json`), không bật cho tài khoản thật ngay.
+  - Phòng thủ với `fb_momentum_weight=0.5`: train vượt trội (+24,2% so với +12,9%) nhưng test kém hơn (+14,1% so với +16,9%) và rổ VN100 hôm nay thiên lệch sống sót → **giữ bộ đã kiểm định 15/10**; để ở `FACTOR_FIXED` cho lần kiểm định điểm-theo-thời-gian sau.
+  - Trail stop, ngưỡng SELL riêng, R:R 1,2, nới ngày phân phối: không giúp hoặc xấu hơn.
+- **Hệ quả quan trọng cho mục tiêu lợi nhuận:** trên 2022–2025 Phòng thủ (+32,5%, DD 12%) là sổ duy nhất thắng VNINDEX (+15,2%) và cũng đứng vững khi VNINDEX −15,8%; Quant Engine giữ tiền mặt gần như toàn thời gian. Chiến lược mặc định cho tín hiệu thật (`SIGNAL_STRATEGY=factor`) là đúng; engine nên xem như bộ lọc tham khảo, không phải nguồn lợi nhuận, trừ khi bật bộ "đầu tư thật" ở trên và theo dõi vài tháng trên sổ ảo.
+
 ## D. Những gì đã kiểm tra và không thấy lỗi
 
 Luật bước giá/trần sàn (đúng từng mức giá), T+2 theo lịch có ngày lễ, khớp lệnh sổ ảo (gap qua stop, trần/sàn trắng bên, nến lỗi), chạy bù không trùng, ghi file nguyên tử, không nhìn trước tương lai trong `simulator`/`factor`/`momentum`/`ledger` (quyết định trên nến D, khớp từ D+1), mật khẩu web so sánh an toàn, CSRF, giới hạn 64 KB, chữ ký Zoom, chỉ id được phép mới ra lệnh Telegram, HTML báo cáo escape đầy đủ, vòng gọi tool có giới hạn, LLM trả sai định dạng không làm sập, toán SMA20/MACD của ước tính đổi chiều.
 
-**Kết luận:** v14 an toàn để upload (18/18 bộ đạt, mã bản dựng đã đóng dấu). Mục B.1 và B.2 nên sửa tiếp trong bản sau; mục C.1-C.3 là nơi có thể tăng lợi nhuận rõ nhất, nhưng phải kiểm định bằng sổ ảo trước khi dùng cho tiền thật.
+**Kết luận:** v14 an toàn để upload (18/18 bộ đạt, mã bản dựng đã đóng dấu). Mục B đã sửa (trừ B9), mục C đã cài và backtest (mục E): chỉ `stop_min_pct=3` được đổi mặc định; các tham số còn lại để hiệu chỉnh đêm hoặc bật tay trên sổ ảo trước khi dùng cho tiền thật.
