@@ -158,7 +158,7 @@ Hai lịch chạy độc lập (giờ Việt Nam):
   5. Mỗi tối, trước khi tính lệnh, bot định giá tài khoản thật theo giá đóng cửa (khối lượng mua đề xuất tính trên tổng tài sản theo giá thị trường, không theo giá vốn).
   6. **Cổ tức, cổ phiếu thưởng:** khi giá bị điều chỉnh quyền, bot tự chia stop/T1/T2 theo tỷ lệ điều chỉnh (như tài khoản ảo) và báo ⚖️, nhưng **không tự đổi số cổ phiếu**: khi cổ phiếu thưởng/cổ tức về tài khoản, báo `/thuong MÃ SỐ_CP`; cổ tức tiền mặt thì cập nhật `/von` khi tiền về. Nếu nguồn dữ liệu chưa điều chỉnh lịch sử giá (giá giảm vượt biên độ), bot báo ⚠️ và không báo chạm stop cho mã đó hôm ấy; sau 3 phiên vẫn chưa điều chỉnh thì bot ước tính tỷ lệ từ khoảng trống giá.
 - **Đêm đầu tiên chạy lâu hơn** (khoảng 20–30 phút): bot tải lịch sử khối ngoại, tự doanh và ETF cho cả rổ, cùng khoảng 400 phiên độ rộng HOSE (mỗi phiên một lượt gọi). Dữ liệu được lưu dần, nên khởi động lại giữa chừng không mất phần đã tải.
-- **Cách tự hiệu chỉnh và các giới hạn:** xem README chính, mục "Bot giao dịch tự hiệu chỉnh". Từ bản sửa 21/10/2026: dữ liệu kiểm tra (60 phiên gần nhất) chỉ được dùng **một lần** - sau mỗi đêm đã đem bộ thử ra kiểm tra (đổi hay không), chiến lược đó chờ đủ 60 phiên mới mới xét tiếp; và bộ thử phải thắng bộ hiện tại hơn **2 lần mức nhiễu** (độ lệch điểm của các bộ lân cận trên cùng dữ liệu kiểm tra). Trên dữ liệu ngẫu nhiên, bản cũ đổi tham số khoảng 4 lần/năm, bản mới không đổi lần nào. Muốn tắt: `AUTO_CALIBRATE=0`. Muốn quay về ngưỡng gốc: xoá `data/results/quant_params.json`.
+- **Cách tự hiệu chỉnh và các giới hạn:** xem README chính, mục "Bot giao dịch tự hiệu chỉnh". Quy tắc: dữ liệu kiểm tra (60 phiên gần nhất) chỉ được dùng **một lần** - sau mỗi đêm đã đem bộ thử ra kiểm tra (đổi hay không), chiến lược đó chờ đủ 60 phiên mới mới xét tiếp; và bộ thử phải thắng bộ hiện tại hơn **2 lần mức nhiễu** (độ lệch điểm của các bộ lân cận trên cùng dữ liệu kiểm tra). Trên dữ liệu ngẫu nhiên, bản cũ đổi tham số khoảng 4 lần/năm, bản mới không đổi lần nào. Muốn tắt: `AUTO_CALIBRATE=0`. Muốn quay về ngưỡng gốc: xoá `data/results/quant_params.json`.
 - **Tham số thêm ngày 23/10/2026** (mặc định = hành vi cũ; hiệu chỉnh đêm được thử từng bước; kết quả backtest trong `BAO_CAO_RA_SOAT_2026-10-23.md`, mục E): `breakout_projected_ok` (0/1, MUA mã phá đỉnh không còn kháng cự, mục tiêu `projected_rr` × rủi ro), `confidence_sell_min` (ngưỡng SELL riêng khi đang giữ, mặc định 0,75), `stop_atr_mult` và `stop_min_pct` (khoảng stop = hệ số × ATR, không sát hơn % này), `buy_order_sessions` (lệnh mua giới hạn sống bao nhiêu phiên, giới hạn và stop theo quyết định mới nhất, huỷ khi engine hết BUY), `limit_fill_touch` (1 = khớp khi giá thấp nhất chạm giới hạn). Phòng thủ có thêm `fb_market_daily` + `fb_market_buffer_pct` (lọc MA200 kiểm tra hằng ngày với vùng đệm) và `fb_momentum_weight` (động lượng 6 tháng trong điểm xếp hạng), **không tự hiệu chỉnh**, chỉ đổi tay trong `quant_params.json` sau khi kiểm định.
 
 ### So sánh với sieutinhieu.vn (tuỳ chọn, dùng cá nhân)
@@ -357,13 +357,13 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 
 Bot ghi số phiên bản ở một chỗ (`vnbot/version.py`) và hiện ở:
 
-- **Web:** nút nhỏ `v7` cạnh logo ở mọi trang (chuyển đỏ `v7 ⚠` nếu code khác bản phát hành), dòng cuối trang, trang **`/phienban`** (bản đang chạy, mã bản dựng, thời gian chạy, lịch sử phiên bản, cách cập nhật), và `/health`.
+- **Web:** nút nhỏ `v1.0.0` cạnh logo ở mọi trang (chuyển đỏ `v1.0.0 ⚠` nếu code khác bản phát hành), dòng cuối trang, trang **`/phienban`** (bản đang chạy, mã bản dựng, thời gian chạy, lịch sử phiên bản, cách cập nhật), và `/health`.
 - **Telegram / Zoom:** lệnh **`/phienban`**, dòng đầu của `/trogiup` và `/trangthai`.
-- **Tự báo khi cập nhật:** lần khởi động đầu tiên sau khi upload bản mới, bot nhắn vào Telegram/Zoom “🆕 Bot đã cập nhật: v6 → v7” kèm những gì mới; khởi động lại bình thường thì không nhắn.
+- **Tự báo khi cập nhật:** lần khởi động đầu tiên sau khi upload bản mới, bot nhắn vào Telegram/Zoom “🆕 Bot đã cập nhật: v1.0.0 → v1.0.1” kèm những gì mới; khởi động lại bình thường thì không nhắn.
 
 **Mã bản dựng** (7 ký tự, ví dụ `1a2b3c4`) là dấu vân tay của toàn bộ code đang chạy. Cùng một bộ file cho cùng một mã trên mọi máy, nên bot biết server có chạy **đúng bản phát hành** không. Báo **khác bản phát hành** nghĩa là upload thiếu file, lẫn file của bản cũ, hoặc code đã bị sửa: hãy upload lại đủ gói.
 
-Khi tự sửa code và muốn đánh số bản mới: tăng `VERSION`, thêm dòng vào `NOTES` trong `vnbot/version.py`, rồi chạy `python -m vnbot.version --stamp` để ghi mã bản dựng mới.
+Số phiên bản theo dạng `vMAJOR.MINOR.PATCH` (bản đầu tiên `v1.0.0`, lịch sử trước đó đã bỏ). Khi tự sửa code và muốn đánh số bản mới: tăng `VERSION`, thêm dòng vào `NOTES` trong `vnbot/version.py`, rồi chạy `python -m vnbot.version --stamp` để ghi mã bản dựng mới.
 
 ## 12. Bộ kiểm thử (chạy trước khi cập nhật bot)
 

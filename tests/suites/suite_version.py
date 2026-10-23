@@ -16,8 +16,9 @@ from vnbot import version as ver  # noqa: E402
 # ── the release notes ──
 names = [v for v, _, _ in ver.NOTES]
 t.ok("VERSION is the newest release in NOTES", names[0] == ver.VERSION and ver.NOTES[0][1] == ver.RELEASED, names)
-nums = [int(v.lstrip("v")) for v in names]
-t.ok("NOTES newest first, no gap or repeat", nums == list(range(nums[0], nums[0] - len(nums), -1)), nums)
+nums = [tuple(int(x) for x in v.lstrip("v").split(".")) for v in names]
+t.ok("versions are vMAJOR.MINOR.PATCH, newest first, no repeat",
+     all(len(n) == 3 for n in nums) and nums == sorted(nums, reverse=True) and len(set(nums)) == len(nums), nums)
 t.ok("dates YYYY-MM-DD, never newer than the release", all(re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) and d <= ver.RELEASED
                                                            for _, d, _ in ver.NOTES))
 t.ok("every release says what changed (short lines)", all(notes and all(0 < len(n) <= 110 for n in notes)
@@ -84,9 +85,10 @@ t.ok("uptime reads well", ver.uptime(ver.STARTED + 3 * 86400 + 2 * 3600 + 5 * 60
 t.ok("changes since an old version: every release after it", [v for v, _, _ in ver.changes_since("v4")] == names[:names.index("v4")])
 first_start = ver.update_notice("")
 t.ok("first start with versions: says which version runs", first_start.startswith(f"🏷️ Bot đang chạy TradingAgents VN {ver.VERSION}"))
-upd = ver.update_notice(f"{names[1]} 1234567")
-t.ok("an update: 'old → new' with the new notes", upd.startswith(f"🆕 Bot đã cập nhật: {names[1]} → {ver.VERSION}")
-     and ver.NOTES[0][2][0] in upd and ver.NOTES[1][2][0] not in upd, upd)
+previous = names[1] if len(names) > 1 else "v0.9.0"      # an unknown older version: every note is new
+upd = ver.update_notice(f"{previous} 1234567")
+t.ok("an update: 'old → new' with the new notes", upd.startswith(f"🆕 Bot đã cập nhật: {previous} → {ver.VERSION}")
+     and ver.NOTES[0][2][0] in upd and (len(ver.NOTES) < 2 or ver.NOTES[1][2][0] not in upd), upd)
 t.ok("an ordinary restart: nothing to say", ver.update_notice(f"{ver.VERSION} {b}") is None)
 t.ok("same version, other code: warned", ver.update_notice(f"{ver.VERSION} 1234567").startswith("⚠️ Code của bot vừa đổi"))
 t.ok("info() for /health and the page", ver.info()["version"] == ver.VERSION and ver.info()["release"] is True)

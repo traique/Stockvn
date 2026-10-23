@@ -1,14 +1,14 @@
 # Báo cáo rà soát toàn bộ dự án - 23/10/2026
 
-**Phạm vi:** toàn bộ gói `tradingagents-vn-botkeep-v13` (148 file, khoảng 31.000 dòng Python). Đọc tay phần lõi ra quyết định (policy, engine, features, ledger, factor, momentum, calibrate, simulator, vn_rules); bốn lượt rà soát song song cho trader/jobs/intraday, dataflows, web/Telegram/Zoom/LLM và chuỗi agent/graph/memory. Mỗi phát hiện đều được chạy lại bằng code thật trước khi ghi vào đây; hai phát hiện về dữ liệu được đối chiếu với API thật của VCI và VNDirect.
+**Phạm vi:** toàn bộ mã nguồn trước bản phát hành v1.0.0 (148 file, khoảng 31.000 dòng Python). Đọc tay phần lõi ra quyết định (policy, engine, features, ledger, factor, momentum, calibrate, simulator, vn_rules); bốn lượt rà soát song song cho trader/jobs/intraday, dataflows, web/Telegram/Zoom/LLM và chuỗi agent/graph/memory. Mỗi phát hiện đều được chạy lại bằng code thật trước khi ghi vào đây; hai phát hiện về dữ liệu được đối chiếu với API thật của VCI và VNDirect.
 
-**Kết quả:** mã nguồn nhìn chung chắc chắn: luật T+2, ngày lễ, GDKHQ, chạy bù, khớp lệnh, bảo mật web/Telegram/Zoom đều đúng và có test. Không tìm thấy lỗi làm mất dữ liệu tài khoản thật. Tìm được **14 lỗi đã sửa trong bản v14** và **9 lỗi/điểm yếu chưa sửa** (ghi rõ bên dưới để anh quyết định). Bộ kiểm thử: 18/18 bộ đạt (thêm bộ `review_2026_10_23`, 20 kiểm tra; `ledger_fills` thêm 2).
+**Kết quả:** mã nguồn nhìn chung chắc chắn: luật T+2, ngày lễ, GDKHQ, chạy bù, khớp lệnh, bảo mật web/Telegram/Zoom đều đúng và có test. Không tìm thấy lỗi làm mất dữ liệu tài khoản thật. Tìm được **14 lỗi đã sửa (bản v1.0.0)** và **9 lỗi/điểm yếu chưa sửa** (ghi rõ bên dưới để anh quyết định). Bộ kiểm thử: 18/18 bộ đạt (thêm bộ `review_2026_10_23`, 20 kiểm tra; `ledger_fills` thêm 2).
 
 Thuật ngữ: *T1/T2* là mục tiêu chốt lời 1 và 2; *stop* là giá cắt lỗ; *lô* là 100 cổ phiếu; *sổ ảo (paper)* là tài khoản giả lập của bot; *Output Guard* là lớp code kiểm tra lại văn bản AI.
 
 ---
 
-## A. Đã sửa (v14)
+## A. Đã sửa (v1.0.0)
 
 ### Phải sửa (ảnh hưởng tiền hoặc quyết định)
 
@@ -67,7 +67,7 @@ Guard thứ hai (`create_output_guard`) không kiểm tra lại văn bản mà `
 6. **Sàn không xác định (VCI listing lỗi) làm phát hiện gap trên UPCoM quá chặt**: phiên sàn -14% hợp lệ bị coi là GDKHQ chưa điều chỉnh → khoá tín hiệu 66 phiên. Sửa: cache listing cuối cùng ra đĩa.
 7. **`fetch_hose_day` trả giá đơn vị nghìn đồng** trong khi mọi frame khác là VND (hiện chỉ dùng tỷ lệ nên chưa sai; ai dùng thêm sẽ lệch 1000 lần).
 8. **Chưa có test cho luật cache/nến đang hình thành** (`_cache_is_fresh`, `_final_through`, `drop_forming_bar`, `money_flows._rebase`): đổi `<` thành `<=` ở đó test vẫn xanh. Bộ mới chỉ phủ đường dự phòng cache.
-9. **Các mục "Chưa sửa" của bản 21/10 vẫn còn** (hiệu chỉnh trên rổ hiện tại - thiên lệch sống sót; GDKHQ UPCoM; OAuth `state`; khoá đăng nhập theo IP).
+9. **Các điểm yếu đã biết từ trước vẫn còn** (hiệu chỉnh trên rổ hiện tại - thiên lệch sống sót; GDKHQ UPCoM; OAuth `state`; khoá đăng nhập theo IP).
 
 ---
 
@@ -90,7 +90,7 @@ Guard thứ hai (`create_output_guard`) không kiểm tra lại văn bản mà `
 ## E. Đợt 2 cùng ngày: sửa mục B, cài mục C và backtest
 
 ### E.1 Mục B đã sửa thêm (commit `27bcc7f`)
-B1 hệ số `raw/adClose` cho quét 300 mã (mức đổi chiều về đúng bảng giá tới ngày GDKHQ) · B2 `/khop mua` ghi mốc giá đóng cửa ngày khớp (phát hiện GDKHQ trước lần đánh dấu đầu) · B3 `/danhmuc` hiện số cổ phiếu bán được theo giờ (chiều T+2) · B4 `CriticLog.settle` tải nến ngoài khoá · B5 bộ nhớ ghi nguyên tử · B6 listing VCI lưu đĩa, dùng lại khi VCI lỗi · B7 ghi rõ đơn vị nghìn đồng của `fetch_hose_day` · B8 thêm test cho luật cache/nến đang hình thành và `_rebase` độ rộng. **Chưa làm:** B9 (các mục cũ của bản 21/10: thiên lệch sống sót của hiệu chỉnh, GDKHQ UPCoM, OAuth `state` - luồng "Add App Now" của Marketplace không gửi `state` nên không bắt buộc được, khoá đăng nhập theo IP sau proxy).
+B1 hệ số `raw/adClose` cho quét 300 mã (mức đổi chiều về đúng bảng giá tới ngày GDKHQ) · B2 `/khop mua` ghi mốc giá đóng cửa ngày khớp (phát hiện GDKHQ trước lần đánh dấu đầu) · B3 `/danhmuc` hiện số cổ phiếu bán được theo giờ (chiều T+2) · B4 `CriticLog.settle` tải nến ngoài khoá · B5 bộ nhớ ghi nguyên tử · B6 listing VCI lưu đĩa, dùng lại khi VCI lỗi · B7 ghi rõ đơn vị nghìn đồng của `fetch_hose_day` · B8 thêm test cho luật cache/nến đang hình thành và `_rebase` độ rộng. **Chưa làm:** B9 (các điểm yếu đã biết từ trước: thiên lệch sống sót của hiệu chỉnh, GDKHQ UPCoM, OAuth `state` - luồng "Add App Now" của Marketplace không gửi `state` nên không bắt buộc được, khoá đăng nhập theo IP sau proxy).
 
 ### E.2 Mục C: tham số mới (mặc định = hành vi cũ, trừ một thay đổi ở E.4)
 `breakout_projected_ok` vào `TUNABLE`; `confidence_sell_min`; `stop_atr_mult`, `stop_min_pct`; `buy_order_sessions` (lệnh mua sống nhiều phiên, giới hạn/stop theo quyết định mới, huỷ khi engine hết BUY); `limit_fill_touch`; Phòng thủ: `fb_market_daily` + `fb_market_buffer_pct`, `fb_momentum_weight`. C8 (cảnh báo "vào vùng mua" cho Phòng thủ) **không làm**: lệnh của Phòng thủ/Động lượng là lệnh giá mở cửa, không có vùng mua để so.
@@ -102,7 +102,7 @@ Dữ liệu 900 phiên 17/03/2022 → 24/10/2025, rổ **hôm nay** (thiên lệ
 
 | Phương án | Toàn bộ lãi / DD / lệnh | Train lãi | Test lãi / DD | Đầu tư TB |
 |---|---|---|---|---|
-| Mặc định v13 | +5,4% / 4,5% / 12 | −1,8% | +7,3% / 1,9% | 2,8% |
+| Mặc định cũ | +5,4% / 4,5% / 12 | −1,8% | +7,3% / 1,9% | 2,8% |
 | C1 breakout_projected_ok=1 | +6,2% / 10,5% / 64 | +5,3% | +0,8% / 9,1% | - |
 | C1 + skip_near_resistance=1 | **+12,7%** / 10,1% / 64 | **+8,3%** | +4,3% / 7,7% | 17,5% |
 | C2 buy_order_sessions=2–3, limit_fill_touch | = mặc định | = | = | 12/12 lệnh khớp |
@@ -129,7 +129,7 @@ Chẩn đoán: trên 25.249 cặp (mã, phiên) engine chỉ ra **14 BUY**; WATC
 | C7a+b | +36,3% / 15,2% | +20,5% / 8,9% | +9,0% / 16,4% |
 
 ### E.4 Quyết định
-- **Đổi mặc định một tham số:** `stop_min_pct = 3` (khoảng stop không sát hơn 3% giá; trước đây 1,5 × ATR có thể chỉ 2,2% - nằm trong biên độ một phiên). Trên mọi tổ hợp thử, sàn 3% không làm xấu đi và giảm sụt giảm; mức 3% thấp hơn biên độ HOSE 7% nên không đổi bản chất chiến lược. Sổ ảo/lệnh thật từ v14 dùng mức này; `quant_params.json` cũ không có khoá này sẽ lấy mặc định mới.
+- **Đổi mặc định một tham số:** `stop_min_pct = 3` (khoảng stop không sát hơn 3% giá; trước đây 1,5 × ATR có thể chỉ 2,2% - nằm trong biên độ một phiên). Trên mọi tổ hợp thử, sàn 3% không làm xấu đi và giảm sụt giảm; mức 3% thấp hơn biên độ HOSE 7% nên không đổi bản chất chiến lược. Sổ ảo/lệnh thật từ v1.0.0 dùng mức này; `quant_params.json` cũ không có khoá này sẽ lấy mặc định mới.
 - **Không đổi mặc định** các tham số còn lại, nhưng tất cả đã nằm trong `TUNABLE` để hiệu chỉnh đêm thử trên dữ liệu mới:
   - `flow_weight` 0,15 cho kết quả test tốt nhất (+9,4%, thắng 73%) nhưng dữ liệu dòng tiền chỉ có từ 2024 (train không đổi) → bằng chứng mới một cửa sổ, để calibrate quyết định.
   - `skip_near_resistance=1 + breakout_projected_ok=1` là cách duy nhất làm engine **đầu tư thật** (17,5% NAV, 64 lệnh, train +8,3% khi VNINDEX −15,8%) nhưng test chỉ +4,3% so với +7,3% của mặc định và sụt giảm 10%. Nếu anh muốn engine giao dịch nhiều hơn, đây là bộ nên bật thử trên sổ ảo (`quant_params.json`), không bật cho tài khoản thật ngay.
@@ -141,4 +141,4 @@ Chẩn đoán: trên 25.249 cặp (mã, phiên) engine chỉ ra **14 BUY**; WATC
 
 Luật bước giá/trần sàn (đúng từng mức giá), T+2 theo lịch có ngày lễ, khớp lệnh sổ ảo (gap qua stop, trần/sàn trắng bên, nến lỗi), chạy bù không trùng, ghi file nguyên tử, không nhìn trước tương lai trong `simulator`/`factor`/`momentum`/`ledger` (quyết định trên nến D, khớp từ D+1), mật khẩu web so sánh an toàn, CSRF, giới hạn 64 KB, chữ ký Zoom, chỉ id được phép mới ra lệnh Telegram, HTML báo cáo escape đầy đủ, vòng gọi tool có giới hạn, LLM trả sai định dạng không làm sập, toán SMA20/MACD của ước tính đổi chiều.
 
-**Kết luận:** v14 an toàn để upload (18/18 bộ đạt, mã bản dựng đã đóng dấu). Mục B đã sửa (trừ B9), mục C đã cài và backtest (mục E): chỉ `stop_min_pct=3` được đổi mặc định; các tham số còn lại để hiệu chỉnh đêm hoặc bật tay trên sổ ảo trước khi dùng cho tiền thật.
+**Kết luận:** v1.0.0 an toàn để upload (18/18 bộ đạt, mã bản dựng đã đóng dấu). Mục B đã sửa (trừ B9), mục C đã cài và backtest (mục E): chỉ `stop_min_pct=3` được đổi mặc định; các tham số còn lại để hiệu chỉnh đêm hoặc bật tay trên sổ ảo trước khi dùng cho tiền thật.

@@ -7,7 +7,7 @@ changes.
   ``tradingagents/``, ``vnbot/`` and ``main_botkeep.py``, this file excepted). The same
   files give the same fingerprint on any machine, so it tells whether the server runs
   exactly the released code (``RELEASE_BUILD``) or a partial upload / a local edit.
-- After changing the code on purpose: raise ``VERSION``, add its ``NOTES``, then
+- After changing the code on purpose: raise ``VERSION`` (vMAJOR.MINOR.PATCH), add its ``NOTES``, then
   ``python -m vnbot.version --stamp`` writes the new ``RELEASE_BUILD`` here.
 
 Light: standard library only (the boot page imports it before the app is up).
@@ -24,72 +24,18 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v14"
+VERSION = "v1.0.0"
 RELEASED = "2026-10-23"
-RELEASE_BUILD = "b8749e5"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "d6fd284"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
+# Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("v14", "2026-10-23", (
-        "Rà soát toàn bộ mã nguồn: sửa 14 lỗi, thêm 20 kiểm tra (xem BAO_CAO_RA_SOAT_2026-10-23.md)",
-        "Sổ ảo: vị thế 1 lô chạm T1 nay bán toàn bộ (trước không bán mà vẫn dời stop về hoà vốn)",
-        "Khối ngoại tính theo khớp lệnh, không gồm thoả thuận; Output Guard hết bỏ sót dòng AI giả nhãn hệ thống",
-        "Cache giá dùng được ngày nghỉ khi nguồn lỗi; Zoom webhook không chặn web; hoàn hạn mức AI khi lỗi mạng",
-        "Stop không sát hơn 3% giá (stop_min_pct); 6 tham số mới cho hiệu chỉnh, 3 cho Phòng thủ (chỉ đổi tay)",
-        "Backtest 2022-2025 các phương án: docs/backtest_2026-10-23; quét 300 mã về đúng bảng giá tới ngày GDKHQ",
-    )),
-    ("v13", "2026-10-22", (
-        "Bot quét 300 mã thanh khoản cao: nhắn danh sách đổi chiều lúc 14:46, /stvthitruong",
-        "Đối chiếu với Siêu tín hiệu sau 15:15, cộng dồn độ chính xác qua các phiên",
-        "Giá trong phiên lấy từ bảng giá một lần cho cả danh sách; tự điều chỉnh ngày GDKHQ",
-    )),
-    ("v12", "2026-10-22", (
-        "/stvxoa danhmuc: xoá ngay toàn bộ danh mục Siêu tín hiệu (mã, tiền mặt, lệnh đã ghi), không hoàn tác",
-    )),
-    ("v11", "2026-10-22", (
-        "Đổi chiều trong phiên cho mọi mã đang theo dõi: bot tự ước tính, nhắn khi giá qua mức",
-        "/stvdoichieu: mã đã qua/sát mức đổi chiều; ngoài giờ: mức đổi chiều phiên tới",
-        "Sau đóng cửa báo mã đổi chiều trong phiên nhưng trang không chốt",
-    )),
-    ("v10", "2026-10-22", (
-        "Quét cả 60 mã watchlist cùng danh mục (mã trùng hỏi 1 lần): báo tín hiệu MUA/BÁN mới của ngày",
-        "Báo đổi chiều trong phiên mà trang cho xem miễn phí (chưa chốt) nếu là mã đang theo dõi",
-        "/stvquet quét cả danh mục lẫn watchlist",
-    )),
-    ("v9", "2026-10-22", (
-        "Ghi được lệnh mua lô lẻ (dưới 100 cp, không cần bội số 100): /stvkhop và /khop",
-    )),
-    ("v8", "2026-10-22", (
-        "Siêu tín hiệu: bỏ đề xuất mua cho danh mục của anh - anh tự quyết định mua",
-        "Quét 15 phút/lần các mã đang giữ, nhắn ngay khi trang có tín hiệu BÁN (/stvquet: quét ngay)",
-        "Lãi/lỗ thực tế: giá khớp hiện tại, đã trừ phí bán và thuế; /stvcosan cho cổ phiếu có sẵn",
-    )),
-    ("v7", "2026-10-22", (
-        "Số phiên bản trên web (đầu trang, cuối trang, trang /phienban) và Telegram/Zoom (/phienban)",
-        "Mã bản dựng: biết server có chạy đúng bản phát hành không",
-        "Bot tự báo khi được cập nhật lên phiên bản mới",
-    )),
-    ("v6", "2026-10-21", (
-        "Siêu tín hiệu: watchlist riêng 60 mã (/stvtheodoi) và danh mục riêng (/stvdanhmuc)",
-        "Tin nhắn Siêu tín hiệu chia mục, mỗi mã một dòng, dễ đọc trên điện thoại",
-    )),
-    ("v5", "2026-10-21", (
-        "Bộ kiểm thử offline trong tests/ (python tests/run_all.py)",
-        "Sửa giá trần UPCoM sai một bước giá; chặn timestamp Zoom lạ gây lỗi 500",
-    )),
-    ("v4", "2026-10-21", (
-        "Bản tin sáng Siêu tín hiệu gửi Zoom (Telegram dự phòng)",
-        "Tài khoản thật riêng theo Siêu tín hiệu: /stvvon, /stvkhop, /stvthuong, /stvsang",
-    )),
-    ("v3", "2026-10-21", (
-        "So sánh với sieutinhieu.vn: sổ ảo, /stv, dòng 📡 trong /nhanh",
-    )),
-    ("v2", "2026-10-21", (
-        "Cảnh báo VNINDEX trong phiên, chờ nến trễ, thanh khoản tính theo tiền",
-    )),
-    ("v1", "2026-10-21", (
-        "Sổ thật: cổ tức/thưởng, NAV theo giá thị trường, T+2 theo lịch nghỉ",
-        "Hiệu chỉnh tham số không học thuộc dữ liệu kiểm tra; ghép đôi Zoom an toàn",
+    ("v1.0.0", "2026-10-23", (
+        "Bản phát hành đầu tiên: web, Telegram, Zoom, ba sổ ảo (Phòng thủ, Quant Engine, Động lượng), tín hiệu thật",
+        "Rà soát toàn bộ mã nguồn: 22 lỗi đã sửa, 64 kiểm tra hồi quy mới (BAO_CAO_RA_SOAT_2026-10-23.md)",
+        "Stop không sát hơn 3% giá; 6 tham số mới cho hiệu chỉnh đêm, 3 cho Phòng thủ (chỉ đổi tay)",
+        "Backtest 2022-2025 các phương án: docs/backtest_2026-10-23",
     )),
 )
 
@@ -128,7 +74,7 @@ def _ddmmyyyy(day: str) -> str:
 
 
 def label(short: bool = False) -> str:
-    """"v7 · 22/10/2026 · bản dựng 1a2b3c4" (``short``: "v7")."""
+    """"v1.0.0 · 23/10/2026 · bản dựng 1a2b3c4" (``short``: "v1.0.0")."""
     if short:
         return VERSION
     mark = "" if is_release() else " (đã sửa)"

@@ -33,7 +33,7 @@ from vnbot import ui
 logger = logging.getLogger(__name__)
 
 APP_NAME = "TradingAgents VN"
-UPDATED_VI, UPDATED_EN = "21/10/2026", "October 21, 2026"
+UPDATED_VI, UPDATED_EN = "23/10/2026", "October 23, 2026"
 SLASH = "vnbot"
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
