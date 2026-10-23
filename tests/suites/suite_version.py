@@ -82,7 +82,10 @@ t.ok("/phienban text: version, build, check, uptime, what's new",
      and "Chạy từ " in txt and f"Có gì mới ở {ver.VERSION}" in txt and max(len(x) for x in txt.splitlines()) <= 110, txt)
 t.ok("uptime reads well", ver.uptime(ver.STARTED + 3 * 86400 + 2 * 3600 + 5 * 60) == "3 ngày 2 giờ 5 phút"
      and ver.uptime(ver.STARTED + 59) == "0 phút")
-t.ok("changes since an old version: every release after it", [v for v, _, _ in ver.changes_since("v4")] == names[:names.index("v4")])
+oldest = names[-1]
+t.ok("changes since the oldest listed release: every release after it",
+     [v for v, _, _ in ver.changes_since(oldest)] == names[:names.index(oldest)])
+t.ok("changes since an unknown version: only the current release", [v for v, _, _ in ver.changes_since("v0.0.1")] == names[:1])
 first_start = ver.update_notice("")
 t.ok("first start with versions: says which version runs", first_start.startswith(f"🏷️ Bot đang chạy TradingAgents VN {ver.VERSION}"))
 previous = names[1] if len(names) > 1 else "v0.9.0"      # an unknown older version: every note is new
