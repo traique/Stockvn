@@ -1,0 +1,33 @@
+# Render Blueprint – tạo Web Service free tier cho bot (Dashboard > New > Blueprint, hoặc tạo tay theo README)
+services:
+  - type: web
+    name: okx-ai-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: INSTANCE_NAME
+        value: render
+      - key: MODE
+        value: paper
+      - key: DATABASE_URL
+        sync: false        # dán chuỗi Supabase 'Session pooler' (…pooler.supabase.com:5432) vào dashboard Render
+      - key: PEER_URL
+        sync: false        # URL của instance Botkeep (nếu có public URL)
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: AI_PROVIDER_ORDER
+        value: openrouter
+      - key: DASHBOARD_USER
+        value: admin
+      - key: DASHBOARD_PASS
+        sync: false
