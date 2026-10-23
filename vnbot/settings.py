@@ -196,5 +196,7 @@ def graph_config(settings: Settings) -> dict:
         max_risk_discuss_rounds=settings.risk_rounds,
         max_tool_rounds=settings.max_tool_rounds,
         checkpoint_enabled=False,
+        # The memory log is re-read on every run: keep it bounded on a 2 GB host.
+        memory_log_max_entries=300,
     )
     return config

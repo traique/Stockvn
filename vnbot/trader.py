@@ -684,6 +684,9 @@ class TradingBot:
             if signals is None:
                 signals, real_only, errors = self._signals_for(
                     target, paper, real, self.universe() if universe is None else universe, params)
+                # Saved as ``_engine_session`` does: the next retry of this day (late bars, /chay)
+                # must not analyse the whole basket again, and /khop must see today's levels.
+                self._write_json("signals.json", {"day": target, "signals": {s.symbol: s.__dict__ for s in signals}})
         if mom_decision is None:
             mom_decision = self._decision_from_meta(mom_book, params)
         if fb_decision is None:
@@ -862,12 +865,22 @@ class TradingBot:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Siêu tín hiệu real book not marked: %s", exc)
         todo, skipped = _pending(sessions, _book_day(book))
+        early = []
+        if target == today_vn() and _now_vn().strftime("%H:%M") < external.SITE_FINAL_TIME:
+            # The site posts the day's signals from ~15:08: a state fetched before that is
+            # yesterday's. Processing ``target`` now would stamp the book at it with no BUY
+            # of the day and never replay it (``_with_stv`` returns once the book is at the
+            # day); leave it for the next run (``is_done`` keeps the scheduler and /chay coming back).
+            early = [s for s in todo if s >= target]
+            todo = [s for s in todo if s < target]
         for s in todo:
             self._stv_session(s, sessions, book, market, store, symbols)
         st = book.stats()
         x = external
         lines = [f"📡 SỔ ẢO SIÊU TÍN HIỆU · phiên {x._ddmm(target)}",
                  "Tham khảo, không ảnh hưởng lệnh của bot · khớp giá mở cửa phiên sau, có phí",
+                 *([f"⏳ Chưa tới {external.SITE_FINAL_TIME}: trang chưa chốt tín hiệu phiên {x._ddmm(target)}, "
+                    "sổ ảo xử lý phiên này ở lượt chạy sau."] if early else []),
                  f"NAV {_fmt(st['nav'])} ({st['return_pct']:+.2f}% từ {x._ddmm(book.start_date or target)})"
                  + (f" · VNINDEX {st['benchmark_pct']:+.2f}%" if st["benchmark_pct"] is not None else "")
                  + f" · sụt giảm tối đa {st['max_drawdown_pct']:.2f}%"]
@@ -2315,9 +2328,11 @@ class TradingBot:
         draft.orders = []
         last = {}
         for symbol in set(decision.basket) | set(real.positions):
-            close = market.close(symbol, day)
-            if close is not None:
-                last[symbol] = close
+            # Only names that traded on ``day`` (as the paper books do): a suspended name
+            # must not get a BUY sized on an old close.
+            bar = market.bar(symbol, day)
+            if bar is not None and bar.tradable:
+                last[symbol] = bar.close
         orders = planner(draft, day, decision, last, params)
         for o in orders:
             pos = real.positions.get(o.symbol)

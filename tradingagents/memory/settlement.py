@@ -74,9 +74,13 @@ def fetch_returns(
     # Require the full holding window to have traded. A rerun before it has
     # leaves the entry pending to retry next run, rather than settling on a
     # premature partial return (#1169).
-    if len(stock) <= holding_days:
+    # The decision is taken on the close of ``trade_date`` (the bar the engine read), so the
+    # earliest fill is the NEXT session: entry at that session's close, exit ``holding_days``
+    # sessions later. Entering at the decision day's own close would score a price nobody
+    # could trade (the ledger and the bot fill on the next session).
+    if len(stock) <= holding_days + 1:
         return None, None, None, None
-    entry, exit_ = stock.index[0], stock.index[holding_days]
+    entry, exit_ = stock.index[1], stock.index[1 + holding_days]
     # The window is the stock's own sessions; the benchmark is valued at its
     # last close by each end, so both returns span the same dates even when
     # the stock was suspended for some sessions.
@@ -84,7 +88,7 @@ def fetch_returns(
     if bench.empty or bench.index[0] > entry or bench.index[-1] < exit_:
         return None, None, None, None
 
-    raw = float((stock.iloc[holding_days] - stock.iloc[0]) / stock.iloc[0])
+    raw = float((stock.iloc[1 + holding_days] - stock.iloc[1]) / stock.iloc[1])
     bench_entry, bench_exit = bench.asof(entry), bench.asof(exit_)
     bench_ret = float((bench_exit - bench_entry) / bench_entry)
     alpha = raw - bench_ret

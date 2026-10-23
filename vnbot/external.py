@@ -126,6 +126,7 @@ def estimate_on() -> bool:
 
 
 WATCH_FROM, WATCH_UNTIL = "15:15", "16:00"     # the watchlist scans after the close (the day's signals ~15:08)
+SITE_FINAL_TIME = "15:10"                      # from here the site's per-stock state is the day's, not yesterday's
 HOLDINGS_OUTSIDE_WATCHLIST = 20     # the owner's stocks bought outside the watchlist, fetched too
 
 
@@ -536,7 +537,7 @@ class SignalStore:
         from tradingagents.dataflows.vendors import sieutinhieu as stv
 
         now = _now()
-        if now.strftime("%Y-%m-%d") != day or now.strftime("%H:%M") < "15:10":
+        if now.strftime("%Y-%m-%d") != day or now.strftime("%H:%M") < SITE_FINAL_TIME:
             return ""
         try:
             stv.refuse_until(float(self._read().get("refused_until") or 0))

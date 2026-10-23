@@ -19,6 +19,7 @@ from __future__ import annotations
 import html
 import logging
 import secrets
+import threading
 import time
 from datetime import datetime
 from urllib.parse import urlencode
@@ -252,6 +253,9 @@ def authorize_url(client_id: str, base: str, state: str) -> str:
         "response_type": "code", "client_id": client_id, "redirect_uri": base + "/zoom/oauth/callback", "state": state})
 
 
+_exchange_slots = threading.BoundedSemaphore(2)
+
+
 def exchange_code(zoom, code: str, redirect_uri: str, post=None) -> tuple[int, dict]:
     r = (post or requests.post)("https://zoom.us/oauth/token", timeout=15,
                                 data={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
@@ -338,10 +342,17 @@ def register(app, settings, zoom, *, guard, post_guard, notify=None, post=None) 
             return _installed_page()          # the same callback twice (a code works once): already installed
         status, data = 0, {"error": "ZOOM_CLIENT_ID/ZOOM_CLIENT_SECRET chưa cấu hình"}
         if zoom.config.client_id and zoom.config.client_secret:
+            # This public page is unauthenticated and the exchange is a 15 s blocking call:
+            # at most two at a time, so a flood of fake codes cannot occupy every worker.
+            if not _exchange_slots.acquire(blocking=False):
+                return HTMLResponse(public_page("Thử lại sau", "<h1>Đang bận</h1><p>Hãy thử lại sau ít giây.</p>"),
+                                    status_code=429)
             try:
                 status, data = exchange_code(zoom, code, redirect_uri, post)
             except requests.RequestException as exc:
                 status, data = 0, {"error": str(exc)}
+            finally:
+                _exchange_slots.release()
         if status == 200 and "access_token" in data:
             # No token is kept: the chatbot uses its own client_credentials token.
             zoom.state.set("install", {"ts": time.time(), "scope": data.get("scope", ""), "code": code[-12:]})

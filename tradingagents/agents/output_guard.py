@@ -34,8 +34,11 @@ UNKNOWN_PRICE_NOTE = (
     "trong bản quyết định của hệ thống."
 )
 
-# The decision lines the renderers write themselves from the engine's output:
-# their action and numbers are the system's, not the model's, so they are not checked.
+# The decision lines the renderers write themselves from the engine's output
+# (schemas.render_*): their action and numbers are the system's, not the model's,
+# so they are not checked. Only a line that is EXACTLY one of them is exempt: a
+# model (or quoted news) line that merely starts with "**Recommendation**:" is
+# narrative and is checked like any other.
 _SYSTEM_LINE_PREFIXES = (
     "**Rating**:", "**Recommendation**:", "**Action**:", "FINAL TRANSACTION PROPOSAL:",
     "**Entry Zone**:", "**Stop Loss**:", "**Target 1**:", "**Target 2**:",
@@ -44,11 +47,31 @@ _SYSTEM_LINE_PREFIXES = (
 )
 
 
-def _narrative(text: str) -> str:
-    return "\n".join(
-        line for line in (text or "").splitlines()
-        if not line.strip().startswith(_SYSTEM_LINE_PREFIXES)
-    )
+def _system_lines(decision: dict) -> frozenset[str]:
+    """The exact lines the renderers write for this decision."""
+    from tradingagents.agents.schemas import _vnd, plan_lines
+
+    action = decision.get("action") or "NO_TRADE"
+    lines = {
+        f"**Rating**: {action}",
+        f"**Recommendation**: {action} (hành động của hệ thống định lượng)",
+        f"**Action**: {action} (hành động của hệ thống định lượng)",
+        f"FINAL TRANSACTION PROPOSAL: **{action}**",
+        f"**Price Target**: {_vnd(decision.get('target_price'))}",
+    }
+    try:
+        lines.update(plan_lines(decision))
+    except Exception:  # noqa: BLE001 - a partial decision still gets the header lines
+        pass
+    return frozenset(lines)
+
+
+def _is_system_line(line: str, system_lines: frozenset[str]) -> bool:
+    return line.strip() in system_lines
+
+
+def _narrative(text: str, system_lines: frozenset[str]) -> str:
+    return "\n".join(line for line in (text or "").splitlines() if not _is_system_line(line, system_lines))
 
 
 def _allowed_text(state) -> str:
@@ -75,11 +98,12 @@ def guard_text(text: str, state, *, label: str) -> tuple[str, str | None]:
     action = vn_context.action_of(state)
     summary = decision.get("deterministic_summary") or engine.render_summary_from_state(decision)
     allowed = engine.COMPATIBLE_ACTIONS.get(action, frozenset({action}))
-    narrative = _narrative(text)
+    system_lines = _system_lines(decision)
+    narrative = _narrative(text, system_lines)
     conflicts = rfmt.find_action_conflicts(narrative, allowed)
     if conflicts:
         logger.warning("%s contradicted the system action %s: %s", label, action, conflicts[:5])
-        head = next((line for line in text.splitlines() if line.strip().startswith(_SYSTEM_LINE_PREFIXES)), "")
+        head = next((line for line in text.splitlines() if _is_system_line(line, system_lines)), "")
         kept = f"{head}\n\n" if head else ""
         return (
             f"{kept}{CONFLICT_NOTE}\n\n{summary}",
@@ -127,6 +151,8 @@ def create_output_guard():
             ("trader_investment_plan", "Trader"),
             ("final_trade_decision", "Portfolio Manager"),
         ):
+            if any(n.startswith(f"{label}:") for n in notes):
+                continue      # already checked and rewritten by guard_early: a second pass would repeat its note
             guarded, note = guard_text(state.get(key) or "", state, label=label)
             if note:
                 notes.append(note)

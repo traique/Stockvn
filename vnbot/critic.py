@@ -133,6 +133,9 @@ class CriticLog:
         write_text_atomic(self.path, json.dumps(rows[-MAX_KEPT:], ensure_ascii=False))
 
     def add(self, day: str, result, verdict: dict) -> None:
+        # Scored from the close the engine decided on: a morning run dated ``day`` analyses
+        # the previous close, and its first tradable session is ``day`` itself, not the next.
+        day = str(getattr(result, "last_bar_date", None) or day)[:10]
         row = {"day": day, "code": result.symbol, "action": result.action, "price": result.price,
                "stop": result.stop_price, "target": result.target_price,
                "verdict": verdict["verdict"], "confidence": verdict["confidence"], "reason": verdict["reason"],

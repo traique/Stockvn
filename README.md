@@ -366,7 +366,7 @@ Khi tự sửa code và muốn đánh số bản mới: tăng `VERSION`, thêm d
 
 ## 12. Bộ kiểm thử (chạy trước khi cập nhật bot)
 
-Thư mục `tests/` có hơn 350 kiểm tra **chạy offline**. Chúng không cần mạng, không gửi Telegram/Zoom và không đọc `.env` hay dữ liệu thật của bot. Mỗi lần sửa code hoặc nhận bản mới, chạy trên máy tính (Python 3.11+) trước khi upload:
+Thư mục `tests/` có hơn 370 kiểm tra **chạy offline**. Chúng không cần mạng, không gửi Telegram/Zoom và không đọc `.env` hay dữ liệu thật của bot. Mỗi lần sửa code hoặc nhận bản mới, chạy trên máy tính (Python 3.11+) trước khi upload:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -376,7 +376,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `17/17 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `18/18 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -386,6 +386,7 @@ Kết quả `17/17 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `fixes_round1`, `fixes_round2`, `catchup` | Các lỗi đã sửa: sổ thật khi có cổ tức/thưởng, NAV theo giá thị trường, hiệu chỉnh tham số, nến trễ, cảnh báo VNINDEX, chạy bù phiên |
 | `stv`, `stv_catchup`, `stv_morning` | Siêu tín hiệu: lấy tín hiệu lịch sự, sổ ảo so sánh, bản tin sáng, tài khoản thật riêng, gửi Zoom rồi Telegram |
 | `version` | Số phiên bản trên web và Telegram/Zoom, mã bản dựng, báo khi cập nhật |
+| `review_2026_10_23` | Các lỗi sửa ngày 23/10/2026 (xem `BAO_CAO_RA_SOAT_2026-10-23.md`): Output Guard, khối ngoại khớp lệnh, cache giá ngày nghỉ, chấm điểm bộ nhớ, hạn mức AI, Zoom |
 | `web`, `security_web`, `security_zoom`, `security_telegram` | Mật khẩu web, chặn POST chéo trang, giới hạn kích thước request, chữ ký Zoom, ghép đôi Zoom, chỉ người được phép mới ra lệnh Telegram, token không lộ trong log |
 
 Một số kiểm tra so với **số đã ghi lại** (ví dụ kết quả chiến lược Phòng thủ trên dữ liệu giả lập). Sửa chiến lược **có chủ đích** thì kiểm tra đó báo đổi: xem lại số mới rồi cập nhật trong file bộ kiểm thử. Bot không bao giờ chạy bộ kiểm thử; script tạo gói Botkeep bỏ thư mục `tests/` ra (có upload kèm cũng không sao).

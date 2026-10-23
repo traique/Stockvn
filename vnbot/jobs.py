@@ -238,12 +238,19 @@ class JobQueue:
 
     def _prune_reports(self) -> None:
         """Keep the newest ``keep_reports`` report folders (2 GB of disk is shared)."""
-        root = self.settings.data_dir / "results" / "reports"
-        if not root.exists():
-            return
-        folders = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
-        for old in folders[self.settings.keep_reports:]:
-            shutil.rmtree(old, ignore_errors=True)
+        results = self.settings.data_dir / "results"
+        root = results / "reports"
+        if root.exists():
+            folders = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
+            for old in folders[self.settings.keep_reports:]:
+                shutil.rmtree(old, ignore_errors=True)
+        # The graph also writes one full-state JSON per run under results/<TICKER>/...:
+        # tens to hundreds of KB each, never pruned before. Keep the newest ones only.
+        logs = sorted(results.glob("*/TradingAgentsStrategy_logs/full_states_log_*.json"),
+                      key=lambda p: p.stat().st_mtime, reverse=True) if results.exists() else []
+        for old in logs[self.settings.keep_reports:]:
+            with contextlib.suppress(OSError):
+                old.unlink()
 
 
 def write_text_atomic(path: Path, text: str) -> None:

@@ -21,6 +21,7 @@ from typing import Annotated
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -469,7 +470,9 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     post_guard = [Depends(guard), Depends(same_origin)]
 
     @app.get("/health")
-    def health() -> JSONResponse:
+    async def health() -> JSONResponse:
+        # Async: it must answer even when every threadpool worker is busy (a burst of sync
+        # requests), or Botkeep sees "not responding" and restarts the bot.
         from vnbot import version as ver
 
         return JSONResponse({"ok": True, "time": time.time(), "version": ver.VERSION})
@@ -533,26 +536,32 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
             return JSONResponse({"error": "bad json"}, status_code=400)
         event = data.get("event")
         ok, why = zoom.verify_detail(raw, request.headers)
+        # Everything below reads/writes zoom_state.json (fsync) and may send a Telegram
+        # alert (a blocking HTTP call with retries): off the event loop, or every other
+        # route (/health included) would freeze while it runs.
         if event == "endpoint.url_validation":
             plain = str((data.get("payload") or {}).get("plainToken", ""))
             if not ok or not plain or not zoom.config.secret_token:
-                zoom.record(event, False, why if not ok else "thiếu plainToken hoặc ZOOM_SECRET_TOKEN")
+                zoom.record_refused(event, why if not ok else "thiếu plainToken hoặc ZOOM_SECRET_TOKEN")
                 return JSONResponse({"error": "invalid"}, status_code=401 if not ok else 400)
-            zoom.record(event, True, "đã trả lời Validate")
+            await run_in_threadpool(zoom.record, event, True, "đã trả lời Validate")
             return JSONResponse(zoom.url_validation(plain))
-        zoom.record(event, ok, why, data)
         if not ok:
+            # An unsigned request writes nothing to disk: anyone can POST here, and 20 junk
+            # rows would push the real requests off the /zoom page (and cost an fsync each).
+            zoom.record_refused(event, why)
             logger.warning("Zoom webhook from %s refused: %s", _client(request), why)
             return JSONResponse({"error": "invalid signature"}, status_code=401)
+        await run_in_threadpool(zoom.record, event, ok, why, data)
         if event in ("app_deauthorized", "bot_installed"):
-            zoom.lifecycle(event, data.get("payload") or {})
+            await run_in_threadpool(zoom.lifecycle, event, data.get("payload") or {})
             return JSONResponse({"ok": True})
         if not zoom.commands_on:
             return JSONResponse({"error": "zoom commands are off"}, status_code=404)
         if not switches.on("zoom_commands"):
-            zoom.record(event, True, "bỏ qua: nhận lệnh Zoom đang tắt trên trang web", data)
+            await run_in_threadpool(zoom.record, event, True, "bỏ qua: nhận lệnh Zoom đang tắt trên trang web", data)
             return JSONResponse({"ok": True, "ignored": "zoom commands switched off"})
-        zoom.handle(data)
+        await run_in_threadpool(zoom.handle, data)
         return JSONResponse({"ok": True})
 
     app.add_api_route("/webhook/zoom", zoom_webhook, methods=["POST"])

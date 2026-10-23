@@ -239,6 +239,18 @@ def _spend(name: str) -> None:
         _save_usage()
 
 
+def _refund(name: str) -> None:
+    """Give back a request counted by ``_spend`` that never reached the provider (a connection
+    error or timeout): an outage must not eat the day's budget without one answer."""
+    with _lock:
+        usage = _usage_today()
+        if usage["total"] > 0:
+            usage["total"] -= 1
+        if usage["by"].get(name, 0) > 0:
+            usage["by"][name] -= 1
+        _save_usage()
+
+
 def usage_today() -> dict:
     """The day's request counts and caps (for a status page)."""
     with _lock:
@@ -323,6 +335,14 @@ def _classify(exc: Exception) -> tuple[bool, float, str]:
     return False, 0, ""
 
 
+def _transport_error(exc: Exception) -> bool:
+    """The request never got an answer (nothing was served, so nothing is charged)."""
+    import httpx
+    import openai
+
+    return isinstance(exc, (openai.APIConnectionError, openai.APITimeoutError, httpx.HTTPError, TimeoutError))
+
+
 def _router9_rest() -> float:
     return _env_float("ROUTER9_RETRY_SEC", 900)
 
@@ -360,6 +380,8 @@ def run_chain(chain: Sequence[tuple[str, Any]], call) -> Any:
             is_provider_failure, rest, reason = _classify(exc)
             if not is_provider_failure:
                 raise
+            if _transport_error(exc):
+                _refund(name)
             if name == "router9":
                 rest = max(rest, _router9_rest())
             if rest:

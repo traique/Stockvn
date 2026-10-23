@@ -24,12 +24,18 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v13"
-RELEASED = "2026-10-22"
-RELEASE_BUILD = "dca8ec3"          # written by `python -m vnbot.version --stamp`
+VERSION = "v14"
+RELEASED = "2026-10-23"
+RELEASE_BUILD = "5427087"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v14", "2026-10-23", (
+        "Rà soát toàn bộ mã nguồn: sửa 14 lỗi, thêm 20 kiểm tra (xem BAO_CAO_RA_SOAT_2026-10-23.md)",
+        "Sổ ảo: vị thế 1 lô chạm T1 nay bán toàn bộ (trước không bán mà vẫn dời stop về hoà vốn)",
+        "Khối ngoại tính theo khớp lệnh, không gồm thoả thuận; Output Guard hết bỏ sót dòng AI giả nhãn hệ thống",
+        "Cache giá dùng được ngày nghỉ khi nguồn lỗi; Zoom webhook không chặn web; hoàn hạn mức AI khi lỗi mạng",
+    )),
     ("v13", "2026-10-22", (
         "Bot quét 300 mã thanh khoản cao: nhắn danh sách đổi chiều lúc 14:46, /stvthitruong",
         "Đối chiếu với Siêu tín hiệu sau 15:15, cộng dồn độ chính xác qua các phiên",

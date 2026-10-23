@@ -44,7 +44,7 @@ CAFEF_PAGE = 30
 PAUSE_SECONDS = 0.3      # between paged calls: the hosts reset bursts
 
 STOCK_FLOW_COLUMNS = ["Date", "ForeignBuy", "ForeignSell", "ForeignNet", "MatchValue",
-                      "Close", "TotalShares", "ForeignRoomPct"]
+                      "Close", "TotalShares", "ForeignRoomPct", "ForeignNetMatched"]
 PROP_COLUMNS = ["Date", "PropBuy", "PropSell", "PropNet"]
 MARKET_FLOW_COLUMNS = ["Date", "ForeignNet", "PropNet"]
 BREADTH_COLUMNS = ["Date", "Advances", "Declines", "Unchanged", "Ceilings", "Floors", "Total"]
@@ -97,6 +97,17 @@ def _frame(rows: list[dict], columns: list[str]) -> pd.DataFrame:
     return frame.drop_duplicates("Date", keep="last").sort_values("Date").reset_index(drop=True)
 
 
+def _matched_net(item: dict) -> float:
+    """Foreign net value on the order book (NaN when the vendor row lacks it)."""
+    net = item.get("foreignNetValueMatched")
+    if net is None:
+        buy, sell = item.get("foreignBuyValueMatched"), item.get("foreignSellValueMatched")
+        if buy is None or sell is None:
+            return float("nan")
+        return _num(buy) - _num(sell)
+    return _num(net)
+
+
 def fetch_stock_flows(symbol: str, start: str, end: str) -> pd.DataFrame:
     """Daily foreign trading of one stock or ETF between two dates (inclusive)."""
     rows = []
@@ -107,6 +118,9 @@ def fetch_stock_flows(symbol: str, start: str, end: str) -> pd.DataFrame:
             "ForeignBuy": buy,
             "ForeignSell": sell,
             "ForeignNet": buy - sell,
+            # Order-book (matched) net only: ``MatchValue`` excludes negotiated deals, so the
+            # ratio and the streak read the same book (flow_features._foreign_net_matched).
+            "ForeignNetMatched": _matched_net(item),
             "MatchValue": _num(item.get("totalMatchValue")),
             "Close": _num(item.get("closePrice")),
             "TotalShares": _num(item.get("totalShares")),

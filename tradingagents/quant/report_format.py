@@ -398,7 +398,7 @@ _ADVICE_PATTERNS: dict[str, tuple[str, ...]] = {
 # là mô tả thị trường, không phải khuyến nghị.
 _THIRD_PARTY_BEFORE = re.compile(
     r"(?:khối ngoại|nước ngoài|tự doanh|quỹ|tổ chức|cá mập|lực|bên|phe|áp lực|"
-    r"tín hiệu|điểm|lệnh|chiều|mới được|được phép)\s*$",
+    r"mới được|được phép)\s*$",
     re.IGNORECASE,
 )
 _THIRD_PARTY_AFTER = re.compile(r"^\s*(?:ròng|chủ động|mạnh tay)", re.IGNORECASE)

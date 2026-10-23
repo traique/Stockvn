@@ -32,6 +32,7 @@ log) lives in ``zoom_state.json`` under the data directory.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import hashlib
 import hmac
@@ -202,6 +203,8 @@ class ZoomChannel:
         self.queue: queue.Queue = queue.Queue(maxsize=500)
         self.handler = None                          # (target, text) -> None, set by the Telegram bot
         self.alert_owner = None                      # (text) -> None: tell the owner (Telegram)
+        self._refused = collections.deque(maxlen=5)  # unsigned requests: memory only (record_refused)
+        self._refused_lock = threading.Lock()
         self.public_url = ""                         # for the links in the owner's alerts
         if start and (self.webhook_on or self.chatbot_on):
             threading.Thread(target=self._worker, name="zoom", daemon=True).start()
@@ -431,8 +434,19 @@ class ZoomChannel:
         with contextlib.suppress(OSError):     # a full disk must not refuse the request itself
             self.state.set("requests", ([row] + (self.state.get("requests") or []))[:REQUESTS_KEPT])
 
+    def record_refused(self, event: str | None, reason: str) -> None:
+        """A request whose signature failed: kept in memory only (no disk write, no payload),
+        shown on the /zoom page beside the signed ones."""
+        row = {"ts": time.time(), "event": event or "?", "ok": False, "reason": reason, "user": "", "cmd": ""}
+        with self._refused_lock:
+            self._refused.appendleft(row)
+
     def requests_log(self) -> list[dict]:
-        return self.state.get("requests") or []
+        with self._refused_lock:
+            refused = list(self._refused)
+        rows = (self.state.get("requests") or []) + refused
+        rows.sort(key=lambda r: float(r.get("ts") or 0), reverse=True)
+        return rows[:REQUESTS_KEPT]
 
     def lifecycle(self, event: str, payload: dict) -> None:
         """App events: uninstalling deletes the pairing (as /privacy promises)."""

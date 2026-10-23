@@ -104,6 +104,14 @@ def _final_through(written: datetime) -> pd.Timestamp:
     return day if written.time() >= FINAL_AFTER else day - pd.Timedelta(days=1)
 
 
+def _session_on_or_before(day: pd.Timestamp) -> pd.Timestamp:
+    """The last day on or before ``day`` the exchange calendar expects a session on
+    (a weekend or holiday has no bar of its own to wait for)."""
+    while not vn_rules.is_session_day(day.strftime("%Y-%m-%d")):
+        day -= pd.Timedelta(days=1)
+    return day
+
+
 _breaker_lock = threading.Lock()
 _down_until: dict[tuple[str, Callable], float] = {}
 
@@ -167,11 +175,18 @@ def _read_source(canonical: str, source: str, as_of: pd.Timestamp) -> pd.DataFra
                 return cached
         try:
             frame = _download(canonical, source)
-        except VendorUnavailableError:
-            if exists and _final_through(_written_vn(path)) >= as_of:
+        except (VendorUnavailableError, NoMarketDataError) as exc:
+            # The earlier file is complete when it was written after the last final bar
+            # the run can use: ``as_of``, or the last final day as of now when the run is
+            # dated a weekend/holiday or today before 15:05 (no newer bar exists yet). A
+            # vendor answering "no data" for a listed stock (an HTTP 400/404, an empty
+            # series) is treated like an outage: ``assert_not_stale`` still rejects a
+            # symbol that really stopped trading.
+            needed = _session_on_or_before(min(as_of, _final_through(vn_rules.now_vn())))
+            if exists and _final_through(_written_vn(path)) >= needed:
                 cached = _read_cache(path)
                 if cached is not None:
-                    logger.info("Price source %s unavailable; %s served from its earlier file", source, canonical)
+                    logger.info("Price source %s failed (%s); %s served from its earlier file", source, exc, canonical)
                     return cached
             raise
         replace_file(path, lambda temp: frame.to_csv(temp, index=False, encoding="utf-8"))
