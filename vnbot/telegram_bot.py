@@ -30,6 +30,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 
 import requests
 
@@ -114,15 +115,13 @@ HELP = (
     "/thuong FPT 150 - báo số cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về tài khoản thật\n"
     "\nSiêu tín hiệu (sieutinhieu.vn, bật bằng SIEUTINHIEU=1; danh mục và watchlist riêng):\n"
     "/stv - tổng quan, so với các sổ của bot · /stv FPT - tín hiệu một mã\n"
-    "/stvdanhmuc - danh mục: tài khoản thật riêng và sổ ảo so sánh\n"
+    "/stvdanhmuc - sổ ảo so sánh Siêu tín hiệu (danh mục tiền thật: /ts)\n"
     "/stvtheodoi - watchlist riêng (60 mã): bo NVL · them HAG · dat MÃ1,MÃ2,... · macdinh · hoantac\n"
-    "/stvkhop mua GEX 800 23900 · /stvkhop ban ... - báo đã mua/bán, lô lẻ cũng được (anh tự mua; bot báo khi trang BÁN)\n"
-    "/stvcosan GEX 100 31347 - thêm cổ phiếu có sẵn (bán được ngay) · /stvcosan GEX,FPT - đánh dấu đã về\n"
-    "/stvvon 200000000 - tiền mặt · /stvthuong GEX 80 - cổ phiếu thưởng · /stvquet - quét danh mục + watchlist ngay\n"
+    "/stvquet - quét danh mục Tài sản + watchlist ngay\n"
     "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã đang theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
-    "/stvxoa danhmuc - xoá ngay toàn bộ danh mục Siêu tín hiệu (mã, tiền mặt, lệnh đã ghi), không hoàn tác\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
+    "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
     "Hành động và mọi mức giá do hệ thống định lượng chốt; các agent AI chỉ diễn giải."
 )
@@ -130,6 +129,18 @@ HELP = (
 
 # The sender of a command typed in Zoom (vnbot.zoom checked it against ZOOM_ALLOWED_USERS).
 ZOOM_USER = "zoom"
+
+# The owner's real-money portfolio (vnbot.taisan). The old commands of the separate
+# Siêu tín hiệu account point to it.
+TAISAN_COMMANDS = ("/ts", "/taisan", "/tsmua", "/tsban", "/tsthuong", "/tscotuc", "/tsnap", "/tsrut", "/tstien",
+                   "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong")
+STV_MOVED = {
+    "/stvkhop": "Danh mục tiền thật đã chuyển sang Tài sản: mua /tsmua MÃ KL GIÁ, bán /tsban MÃ KL GIÁ (xem /ts).",
+    "/stvcosan": "Danh mục tiền thật đã chuyển sang Tài sản: cổ phiếu mua từ trước ghi bằng /tsmua MÃ KL GIÁ NGÀY_MUA (xem /ts).",
+    "/stvvon": "Danh mục tiền thật đã chuyển sang Tài sản: nạp /tsnap SỐ_TIỀN, đặt theo số dư thật /tstien SỐ_TIỀN (xem /ts).",
+    "/stvthuong": "Danh mục tiền thật đã chuyển sang Tài sản: cổ phiếu thưởng ghi bằng /tsthuong MÃ SỐ_CP (xem /ts).",
+    "/stvxoa": "Danh mục tiền thật đã chuyển sang Tài sản: huỷ từng dòng bằng /tshuy, hoặc Reset trên trang web /taisan.",
+}
 
 
 def _amount(text: str) -> float:
@@ -176,6 +187,7 @@ class TelegramBot:
         self._critic_llm = None   # the provider chain, built on the first /phanbien
         self.zoom = None          # vnbot.zoom.ZoomChannel: broadcasts go there too, its commands come here
         self.switches = None      # vnbot.channels.Switches: the on/off of each channel (all on when None)
+        self.taisan = None        # vnbot.taisan.TaiSan: the owner's real-money portfolio (/ts...)
         # Commands of one chat run in order on one lane; a burst waits instead of
         # spawning a thread per message (the host has 2 GB).
         self._lanes = [ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"telegram-cmd-{i}")
@@ -193,7 +205,10 @@ class TelegramBot:
 
         from vnbot.version import VERSION
 
-        return HELP.format(trade_time=max(self.settings.trade_time, MIN_TRADE_TIME), version=VERSION)
+        from vnbot.taisan import TaiSan
+
+        return HELP.format(trade_time=max(self.settings.trade_time, MIN_TRADE_TIME), version=VERSION,
+                           taisan=TaiSan.HELP)
 
     @property
     def enabled(self) -> bool:
@@ -258,15 +273,18 @@ class TelegramBot:
     def _switch(self, name: str) -> bool:
         return self.switches is None or self.switches.on(name)
 
+    MIME = {".html": "text/html", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".csv": "text/csv"}
+
     def send_file(self, chat_id: int, path, caption: str = "") -> None:
         if isinstance(chat_id, str):
             link = f": {self.settings.public_url}" if self.settings.public_url else ""
-            self.send(chat_id, f"{caption} - file HTML chỉ gửi qua Telegram, xem trên trang web{link}")
+            self.send(chat_id, f"{caption} - file chỉ gửi qua Telegram, xem trên trang web{link}")
             return
         try:
             with open(path, "rb") as handle:
                 self._call("sendDocument", http_timeout=60, chat_id=chat_id, caption=caption[:1000],
-                           files={"document": (path.name, handle, "text/html")})
+                           files={"document": (path.name, handle, self.MIME.get(path.suffix.lower(), "application/octet-stream"))})
         except Exception:  # noqa: BLE001
             logger.exception("Telegram sendDocument to %s failed", chat_id)
 
@@ -310,7 +328,10 @@ class TelegramBot:
                 logger.info("Telegram: update %s ignored (%s)", update_id,
                             ",".join(k for k in update if k != "update_id"))
                 continue
-            if isinstance(message, dict) and message.get("text") and message.get("chat"):
+            if isinstance(message, dict) and message.get("chat") and (
+                    message.get("text") or isinstance(message.get("document"), dict)):
+                if not message.get("text"):                  # a file: its caption is the command
+                    message = {**message, "text": (message.get("caption") or "/tsnhap").strip() or "/tsnhap"}
                 messages.append(message)
         if offset is not None:
             self._save_seen()
@@ -482,9 +503,12 @@ class TelegramBot:
                 self.send(chat_id, version.text())
             elif command in ("/stv", "/sieutinhieu"):
                 self._stv(chat_id, args)
-            elif command in ("/stvvon", "/stvkhop", "/stvthuong", "/stvsang", "/stvdanhmuc", "/stvquet", "/stvcosan",
-                             "/stvdoichieu", "/stvxoa", "/stvthitruong", "/stvtoanthitruong"):
+            elif command in ("/stvvon", "/stvkhop", "/stvthuong", "/stvcosan", "/stvxoa"):
+                raise ValueError(STV_MOVED.get(command, "Lệnh này đã chuyển sang danh mục Tài sản: xem /ts."))
+            elif command in ("/stvsang", "/stvdanhmuc", "/stvquet", "/stvdoichieu", "/stvthitruong", "/stvtoanthitruong"):
                 self._stv_account(chat_id, command, args)
+            elif command in TAISAN_COMMANDS:
+                self._taisan(chat_id, command, args, message, from_zoom=user_id == ZOOM_USER)
             elif command == "/stvtheodoi":
                 self._stv_watch(chat_id, args)
             elif command in ("/danhmuc", "/lenh", "/hieuchinh", "/khop", "/von", "/chay", "/thuong"):
@@ -662,62 +686,88 @@ class TelegramBot:
                   + "\n".join(external.rows(listed)) + tail)
 
     def _stv_account(self, chat_id, command: str, args: str) -> None:
-        """The separate real account that follows sieutinhieu.vn: /stvvon, /stvkhop, /stvthuong,
-        and /stvsang (the morning brief, now, in this chat)."""
+        """Siêu tín hiệu on demand: the morning brief, the comparison book, the scans. The
+        owner's real-money portfolio is /ts (vnbot.taisan)."""
         from vnbot import external
 
         if not external.enabled():
             raise ValueError("Siêu tín hiệu đang tắt: đặt SIEUTINHIEU=1 trong .env rồi khởi động lại.")
         if self.trader is None:
             raise ValueError("Bot giao dịch đang tắt (TRADE_MODE=off).")
-        if command == "/stvvon":
-            self.send(chat_id, self.trader.set_capital(_amount(args), book="stv"))
-        elif command == "/stvdanhmuc":
+        if command == "/stvdanhmuc":
             self.send(chat_id, self.trader.stv_portfolio_text())
         elif command == "/stvquet":
-            self.send(chat_id, "⏳ Đang quét danh mục và watchlist (mã trùng hỏi 1 lần, khoảng 2 phút)...")
+            self.send(chat_id, "⏳ Đang quét danh mục Tài sản và watchlist (mã trùng hỏi 1 lần, khoảng 2 phút)...")
             self.send(chat_id, self.trader.stv_scan(report=True))
-        elif command == "/stvxoa":
-            if args.strip().lower() not in ("danhmuc", "danh muc", "danh mục"):
-                raise ValueError("Dùng: /stvxoa danhmuc - xoá NGAY toàn bộ danh mục Siêu tín hiệu của anh (mã đang giữ, "
-                                 "tiền mặt, lệnh đã ghi), không hoàn tác được.")
-            self.send(chat_id, self.trader.stv_reset())
         elif command in ("/stvthitruong", "/stvtoanthitruong"):
             self.send(chat_id, "⏳ Đang quét toàn thị trường (300 mã thanh khoản cao)...")
             self.send(chat_id, self.trader.stv_market_text())
         elif command == "/stvdoichieu":
             self.send(chat_id, "⏳ Đang tính mức đổi chiều cho danh mục và watchlist (tới 2 phút lần đầu trong ngày)...")
             self.send(chat_id, self.trader.stv_trend_text())
-        elif command == "/stvcosan":
-            words = args.split()
-            if len(words) == 3 and all(re.fullmatch(r"[\d.,]+", w) for w in words[1:]):      # MÃ KL GIÁ_VỐN
-                code, _ = check_request(words[0])
-                self.send(chat_id, self.trader.stv_existing(code, _amount(words[1]), _amount(words[2])))
-            else:                                                                        # MÃ1,MÃ2: đã về
-                codes = [check_request(c)[0] for c in re.split(r"[,;\s]+", args.strip()) if c]
-                self.send(chat_id, self.trader.stv_settled(codes))
         elif command == "/stvsang":
             self.send(chat_id, "⏳ Đang soạn bản tin Siêu tín hiệu (tới 4 phút nếu phải lấy lại tín hiệu)...")
             self.send(chat_id, self.trader.stv_morning())
-        elif command == "/stvthuong":
-            parts = args.split()
-            if len(parts) not in (2, 3):
-                raise ValueError("Dùng: /stvthuong FPT 150 [YYYY-MM-DD] - số cổ phiếu thưởng đã về tài khoản thật Siêu tín hiệu.")
-            code, _ = check_request(parts[0])
-            day = check_request(parts[0], parts[2])[1] if len(parts) == 3 else None
-            self.send(chat_id, self.trader.record_free_shares(code, int(_amount(parts[1])), day, book="stv"))
+
+    MAX_IMPORT_BYTES = 2_000_000
+
+    def _taisan(self, chat_id, command: str, args: str, message: dict, *, from_zoom: bool) -> None:
+        """/ts...: the owner's real-money portfolio. A .xlsx document (any caption, or /tsnhap)
+        is read for an import preview; nothing is written before /tsnhap xacnhan."""
+        account = self.taisan or getattr(self.trader, "taisan", None)
+        if account is None:
+            raise ValueError("Danh mục Tài sản chưa sẵn sàng, thử lại sau ít phút.")
+        doc = message.get("document") if isinstance(message.get("document"), dict) else None
+        if doc is not None:
+            from vnbot import taisan_excel
+
+            name = str(doc.get("file_name") or "")
+            if not name.lower().endswith(".xlsx"):
+                raise ValueError("Chỉ nhận file Excel .xlsx (xuất từ app cũ hoặc /tsxuat).")
+            if int(doc.get("file_size") or 0) > self.MAX_IMPORT_BYTES:
+                raise ValueError("File quá lớn (tối đa 2 MB).")
+            data = self._download(str(doc.get("file_id") or ""))
+            self.send(chat_id, taisan_excel.preview(account, data, filename=name))
+            return
+        reply = account.handle(command, args, source="zoom" if from_zoom else "telegram",
+                               public_url=self.settings.public_url)
+        if isinstance(reply, dict):
+            self.send_file(chat_id, Path(reply["file"]), reply.get("caption", ""))
         else:
-            parts = args.split()
-            if len(parts) not in (4, 5):
-                raise ValueError("Dùng: /stvkhop mua GEX 800 23900 [YYYY-MM-DD] (hoặc /stvkhop ban ...)")
-            side = {"mua": "BUY", "buy": "BUY", "ban": "SELL", "bán": "SELL", "sell": "SELL"}.get(parts[0].lower())
-            if side is None:
-                raise ValueError("Chiều lệnh là mua hoặc ban.")
-            code, day = check_request(parts[1], parts[4] if len(parts) == 5 else None)
-            qty, price = int(_amount(parts[2])), _amount(parts[3])
-            if price < 100:
-                raise ValueError(f"Giá {parts[3]} không hợp lệ. Nhập giá theo đồng, ví dụ 23900 hoặc 23.900.")
-            self.send(chat_id, self.trader.record_fill(side, code, qty, price, day, book="stv"))
+            self.send(chat_id, reply)
+        if command == "/tsnhap" and isinstance(reply, str) and reply.startswith("✅ Đã nhập"):
+            threading.Thread(target=self._rebuild_taisan, args=(account, chat_id), name="taisan-rebuild",
+                             daemon=True).start()
+
+    def _rebuild_taisan(self, account, chat_id) -> None:
+        try:
+            added = account.rebuild()
+            account.refresh_events()
+            self.send(chat_id, f"📈 Đã dựng lại biểu đồ tài sản ({added} giá đóng cửa). Xem trang /taisan.")
+        except Exception as exc:  # noqa: BLE001 - the daily job tries again
+            logger.exception("Tài sản rebuild failed")
+            self.send(chat_id, f"⚠️ Chưa dựng lại được biểu đồ ({redact(exc)}); bot thử lại ở báo cáo 15:30.")
+
+    def _download(self, file_id: str) -> bytes:
+        """A file the owner sent (Bot API getFile), at most MAX_IMPORT_BYTES."""
+        if not file_id:
+            raise ValueError("Không đọc được file.")
+        info = self._call("getFile", file_id=file_id)
+        path = (info or {}).get("file_path")
+        if not path or int((info or {}).get("file_size") or 0) > self.MAX_IMPORT_BYTES:
+            raise ValueError("Không tải được file (hoặc file quá lớn).")
+        url = f"https://api.telegram.org/file/bot{self.settings.telegram_token}/{path}"
+        try:
+            response = self._session.get(url, timeout=60, stream=True)
+            response.raise_for_status()
+            data = b""
+            for part in response.iter_content(65536):
+                data += part
+                if len(data) > self.MAX_IMPORT_BYTES:
+                    raise ValueError("File quá lớn (tối đa 2 MB).")
+        except requests.RequestException as exc:
+            raise TelegramNetworkError(f"Telegram file: {redact(exc)}") from None
+        return data
 
     def zoom_first(self, text: str) -> None:
         """Zoom when it can deliver (configured, a target, its switch on); else - also when

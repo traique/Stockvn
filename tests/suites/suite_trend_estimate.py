@@ -189,9 +189,9 @@ class WL:
 
 bot = T.TradingBot(SETTINGS, WL())
 bot.stv_watchlist = lambda: ["MSR", "FPT", "GEX", "HDB", "VNM"]
-bot.set_capital(100_000_000, book="stv")
+bot.taisan.handle("/tsnap", "100000000 2026-10-15")
 at(10, 0, day=15)
-bot.record_fill("mua", "HDB", 1000, 21_500, "2026-10-15", book="stv")
+bot.taisan.handle("/tsmua", "HDB 1000 21500 2026-10-15")
 fpt_lv = te.levels(fpt_closes)
 t.ok("FPT test series: the rule agrees with the site (SELL)", fpt_lv["rule"] == "SELL", fpt_lv)
 
@@ -201,8 +201,8 @@ at(9, 54)
 scan1 = bot.stv_scan()
 print(scan1)
 t.ok("scan: a held stock past its level -> the holdings block, as the bot's estimate",
-     scan1 and scan1.startswith("📡 SIÊU TÍN HIỆU · 09:54 22/10\n\n🔻 DANH MỤC CỦA ANH · tín hiệu BÁN")
-     and "• HDB 1.000 cp · bot ước tính đổi sang BÁN lúc 09:54 (giá 21.950 < mức 22.018)" in scan1
+     scan1 and scan1.startswith("📡 SIÊU TÍN HIỆU · 09:54 22/10\n\n🔻 TÀI SẢN CỦA ANH · tín hiệu BÁN")
+     and "🟠 Sớm · HDB 1.000 cp · bot ước tính đổi sang BÁN lúc 09:54 (giá 21.950 < mức 22.018)" in scan1
      and "(ước tính của bot, chưa phải tín hiệu của trang; có thể đổi khi đóng cửa)" in scan1
      and "→ BÁN 1.000 cp" in scan1, scan1)
 t.ok("scan: nothing else past its level, no estimate block", "🧮" not in scan1 and "MSR" not in scan1, scan1)
@@ -322,7 +322,7 @@ at(15, 20)
 scan3 = bot.stv_scan()
 print(scan3)
 t.ok("after the close: the held stock's SELL again, now the site's final signal",
-     scan3 and "• HDB 1.000 cp · trang BÁN 22/10 @ 21.950 · mạnh 40%" in scan3, scan3)
+     scan3 and "🔴 Mạnh · HDB 1.000 cp · trang BÁN 22/10 @ 21.950 · mạnh 40%" in scan3, scan3)
 t.ok("after the close: the in-session changes the close did not keep, each named once",
      scan3 and "↩️ Đóng cửa không giữ đổi chiều trong phiên (trang vẫn như cũ): " in scan3
      and "MSR (BÁN)" in scan3 and "FPT (MUA)" in scan3 and "HDB (BÁN)" not in scan3, scan3)

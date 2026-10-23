@@ -105,6 +105,9 @@ def read_alerts(path: Path, day: str) -> list[dict]:
     return list(data.get("alerts", [])) if data.get("day") == day else []
 
 
+TAISAN_LABEL = "💼 Tài sản"
+
+
 class IntradayMonitor:
     def __init__(self, settings, trader, notify: Callable[[str], None], *,
                  price=live_price, index_change=vnindex_change, exchange_of=exchange, switches=None,
@@ -150,18 +153,12 @@ class IntradayMonitor:
                 out.append(("💼 Thật", real))
             except Exception as exc:  # noqa: BLE001 - a damaged real book is reported by /danhmuc
                 logger.warning("Intraday: real book unavailable: %s", exc)
-        from vnbot import external
-
-        if external.enabled():
-            try:
-                stv = self.trader.real("stv")    # the separate account that follows sieutinhieu.vn
-                if stv.positions:
-                    if stv.meta.get("close_marks") != 1:
-                        for pos in stv.positions.values():
-                            pos.last_date = ""
-                    out.append(("💼 Thật (Siêu tín hiệu)", stv))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Intraday: Siêu tín hiệu real book unavailable: %s", exc)
+        try:
+            mine = self.trader.real("stv")       # the owner's Tài sản portfolio (vnbot.taisan), read only
+            if mine.positions:
+                out.append((TAISAN_LABEL, mine))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Intraday: Tài sản portfolio unavailable: %s", exc)
         out.append(("🤖 Ảo (Quant Engine)", self.trader.paper()))
         return out
 
@@ -287,6 +284,7 @@ class IntradayMonitor:
                 if change <= -level:
                     alerts.append((f"vni:{level:g}", f"📉 VNINDEX {change:+.2f}% so với phiên trước (ngưỡng −{level:g}%)"))
         new = [(k, text) for k, text in alerts if k not in sent]
+        self._keep_taisan_alerts(new, prices, day)
         if new:
             at = vn_rules.now_vn().strftime("%H:%M")
             self._remember(day, sent | {k for k, _ in new}, [text for _, text in new], at)
@@ -294,6 +292,20 @@ class IntradayMonitor:
                         + "\n".join(text for _, text in new)
                         + "\nBot không tự đặt lệnh; các tài khoản ảo vẫn khớp theo nến ngày sau 15:05.")
         return [text for _, text in new]
+
+    def _keep_taisan_alerts(self, new, prices, day) -> None:
+        """The Tài sản cut-loss and target alerts go to its shadow results (judged later)."""
+        account = getattr(self.trader, "taisan", None)
+        if account is None:
+            return
+        for key, _ in new:
+            kind, _, rest = key.partition(":")
+            label, _, symbol = rest.rpartition(":")
+            if label == TAISAN_LABEL and kind in ("stop", "t1", "t2"):
+                try:
+                    account.record_alert("stop" if kind == "stop" else "target", symbol, prices.get(symbol), day)
+                except Exception as exc:  # noqa: BLE001 - the alert is sent anyway
+                    logger.warning("Tài sản: alert of %s not kept: %s", symbol, exc)
 
     def tick(self) -> None:
         from tradingagents.market import vn_rules

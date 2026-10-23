@@ -1,4 +1,7 @@
-"""Morning brief + separate real account following sieutinhieu.vn (offline)."""
+"""Morning brief + the owner's Tài sản portfolio watched with sieutinhieu.vn's signals (offline).
+
+The separate real account of the site (/stvkhop ...) was replaced by the Tài sản journal
+(vnbot.taisan, /ts...): prices as the owner enters them, no fee or tax taken off."""
 import os
 import sys
 import tempfile
@@ -203,17 +206,17 @@ check("watchlist: separate from the bot's /theodoi (other file, untouched)",
       bot_wl.get() == ["VCB"] and "MWG" in stw.get() and stw.path.parent.name == "external", (bot_wl.get(), stw.get()))
 stw.remove(["MWG"])
 vci_module.fetch_listing = _listing
-check("separate file", bot._book_path("stv").name == "real_stv.json" and bot._book_path("real").name == "real.json")
-print("  ", bot.set_capital(500_000_000, book="stv"))
-msg = bot.record_fill("mua", "HPG", 2000, 20_800, "2026-10-13", book="stv")
+check("real('stv') is the Tài sản view", bot.real("stv").meta.get("taisan") and bot._book_path("real").name == "real.json")
+print("  ", bot.taisan.handle("/tsnap", "500000000 2026-10-13"))
+msg = bot.taisan.handle("/tsmua", "HPG 2000 20800 2026-10-13")
 check("buy takes the site's cut-loss and target", "19.500" in msg and "22.600" in msg, msg)
 pos = bot.real("stv").positions["HPG"]
 check("levels from the site's plan", pos.stop == 19_500 and pos.target1 == 22_600, (pos.stop, pos.target1))
-bot.record_fill("mua", "FPT", 1000, 101_000, "2026-10-13", book="stv")
-bot.record_fill("mua", "SSB", 1000, 20_000, "2026-10-15", book="stv")
+bot.taisan.handle("/tsmua", "FPT 1000 101000 2026-10-13")
+bot.taisan.handle("/tsmua", "SSB 1000 20000 2026-10-15")
 check("main real account untouched", not bot.real("real").positions and not bot.real_path.exists())
-msg = bot.record_free_shares("FPT", 150, "2026-10-16", book="stv")
-check("bonus shares on the separate account", bot.real("stv").positions["FPT"].qty == 1150, msg)
+msg = bot.taisan.handle("/tsthuong", "FPT 150 2026-10-16")
+check("bonus shares on the Tài sản portfolio", bot.real("stv").positions["FPT"].qty == 1150, msg)
 
 SERIES = {
     "VNINDEX": [("2026-10-20", 1700, 1700, 1700, 1700), ("2026-10-21", 1700, 1740, 1695, 1738)],
@@ -261,17 +264,15 @@ lines = bot._stv_real_lines("2026-10-21", store, FakeMarket("2026-10-21"))
 text = "\n".join(lines)
 print(text)
 hpg = bot.real("stv").positions["HPG"]
-m_hpg, p_hpg = T._net_pnl(hpg, 21_000)
-check("real P&L: sold now at the close, sell fee and tax off",
-      abs(m_hpg - (2000 * 21_000 * (1 - 0.0025) - hpg.avg_price * 2000)) < 1 and p_hpg < (21_000 / hpg.avg_price - 1) * 100,
-      (m_hpg, p_hpg))
-check("holdings: one per bullet with the real P&L, levels, then the advice",
-      f"• HPG 2.000 cp · vốn 20.831 → 21.000 · {T._money(m_hpg)} ({external.pct(p_hpg)})\n   cắt lỗ 19.500 · mục tiêu 22.600\n"
-      "   🔻 Trang BÁN 21/10 @ 21.000 → BÁN 2.000 cp phiên tới" in text, text)
+check("P&L at the price as entered (no fee, no tax taken off)", hpg.avg_price == 20_800, hpg.avg_price)
+check("holdings: one per bullet with the P&L, levels, then the advice",
+      f"• HPG 2.000 cp · vốn 20.800 → 21.000 · +400.000 ({external.pct(21_000 / 20_800 * 100 - 100)})\n"
+      "   cắt lỗ 19.500 · mục tiêu 22.600\n   🔴 Trang BÁN 21/10 @ 21.000 → BÁN 2.000 cp phiên tới" in text, text)
 check("close under the site's cut-loss -> stop line", "   ⛔ Đóng cửa 93.500 ≤ cắt lỗ 94.000 → BÁN 1.150 cp" in text, text)
 check("target reached -> 🎯", "   🎯 Chạm mục tiêu 21.800 (cao nhất 22.000) → cân nhắc chốt lời" in text, (SSB_stop, text))
-check("total real P&L at the top", text.splitlines()[1].startswith("Lãi/lỗ thực tế (nếu bán hết theo giá đóng cửa 21/10): ")
-      and "(đã trừ phí bán và thuế 0,1%)" in text, text)
+check("total assets and P&L at the top", text.splitlines()[0] == "💼 TÀI SẢN CỦA ANH"
+      and text.splitlines()[1].startswith("Tổng tài sản ") and "theo giá đóng cửa 21/10" in text.splitlines()[1]
+      and "phí bán" not in text, text)
 check("no buy suggested: the owner buys", "🟢" not in text and "cp · giá ≤" not in text and "phần vốn" not in text, text)
 check("short lines (phone): none over 90 characters", max(len(line) for line in text.splitlines()) <= 90,
       max(text.splitlines(), key=len))
@@ -291,13 +292,13 @@ D2 = Path(tempfile.mkdtemp(prefix="stv2d-"))
 shutil.copy(DATA / "external" / "sieutinhieu.json", D2 / "external" / "sieutinhieu.json")
 bot2 = T.TradingBot(dataclasses.replace(SETTINGS, data_dir=D2), WL())
 bot2.universe = lambda: ["GEX", "HPG", "FPT", "VNM", "SSB"]
-bot2.set_capital(100_000_000, book="stv")
-msg2 = bot2.record_fill("mua", "MSN", 200, 73_900, "2026-10-21", book="stv")
+bot2.taisan.handle("/tsnap", "100000000 2026-10-21")
+msg2 = bot2.taisan.handle("/tsmua", "MSN 200 73900 2026-10-21")
 p2 = bot2.real("stv").positions["MSN"]
 check("teaser stock: the site's cut-loss/target from the market list", p2.stop == 69_300 and p2.target1 == 80_300, (msg2, p2.stop, p2.target1))
-msg_odd = bot2.record_fill("mua", "MSN", 50, 73_800, "2026-10-21", book="stv")
+msg_odd = bot2.taisan.handle("/tsmua", "MSN 50 73800 2026-10-21")
 check("an odd lot (50 cp) is recorded, added to the holding", bot2.real("stv").positions["MSN"].qty == 250
-      and "Đã ghi MUA MSN 50" in msg_odd, msg_odd)
+      and "MUA MSN 50 cp" in msg_odd, msg_odd)
 bot2.set_capital(10_000_000)
 bot2.record_fill("mua", "VCB", 30, 56_000, "2026-10-21")
 check("the main real account takes odd lots too (/khop)", bot2.real("real").positions["VCB"].qty == 30)
@@ -306,20 +307,26 @@ try:
     check("0 shares still refused", False)
 except ValueError as exc:
     check("0 shares still refused", "số nguyên dương" in str(exc), str(exc))
+big = bot2.taisan.handle("/tsmua", "MSN 100000 73900 2026-10-21")
+check("a buy over the cash is recorded with a warning (the owner may have deposited)",
+      "⚠️ Tiền mặt âm" in big and "/tsnap" in big, big)
+undo = bot2.taisan.handle("/tshuy", "")
+check("/tshuy undoes it", "Đã huỷ" in undo and bot2.real("stv").positions["MSN"].qty == 250, undo)
 try:
-    bot2.record_fill("mua", "MSN", 100_000, 73_900, "2026-10-21", book="stv")
-    check("too big a buy refused", False)
+    bot2.taisan.handle("/tsmua", "MSN 100")
+    check("usage names /tsmua", False)
 except ValueError as exc:
-    check("cash error names /stvvon, not /von", "/stvvon" in str(exc) and " /von" not in str(exc), str(exc))
+    check("usage names /tsmua", "Dùng: /tsmua" in str(exc), str(exc))
 try:
-    bot2.record_fill("xx", "MSN", 100, 73_900, "2026-10-21", book="stv")
+    bot2.record_fill("mua", "MSN", 100, 73_900, "2026-10-21", book="stv")
+    check("the old account is gone: /khop on it refused", False)
 except ValueError as exc:
-    check("usage names /stvkhop", "/stvkhop mua|ban" in str(exc), str(exc))
+    check("the old account is gone: /khop on it refused, pointing to /ts", "/tsmua" in str(exc), str(exc))
 check("main account's messages unchanged", "/von" in T._real_adjustment_lines(
     [{"kind": "basis", "symbol": "X", "ratio": 1.2, "qty": 100, "free_estimate": 20}])[0])
 
 # the evening run marks first: its corporate-action note is kept for the morning brief
-bot2.record_fill("mua", "SSB", 1000, 21_000, "2026-10-21", book="stv")
+bot2.taisan.handle("/tsmua", "SSB 1000 21000 2026-10-21")
 bot2._stv_real_lines("2026-10-21", bot2_store := external.SignalStore(D2), FakeMarket("2026-10-21"))
 SERIES_ADJ = {k: list(v) for k, v in SERIES.items()}
 SERIES_ADJ["SSB"] = [("2026-10-20", 17083, 18250, 17000, 17917), ("2026-10-21", 17917, 18333, 17833, 18167),
@@ -340,8 +347,9 @@ kept = bot2.real("stv").meta.get("notes") or {}
 check("evening mark: note kept in the book", evening_notes and kept.get("day") == "2026-10-22"
       and kept["notes"][0]["symbol"] == "SSB", (evening_notes, kept))
 morning = "\n".join(bot2._stv_real_lines("2026-10-22", bot2_store, FakeMarketAdj("2026-10-22")))
-check("morning brief shows it once, with the /stv* commands", morning.count("⚖️ SSB") == 1 and "/stvthuong SSB" in morning
-      and "/stvvon" in morning and " /von" not in morning, morning)
+check("morning brief shows it once, with the /ts* commands", morning.count("⚖️ SSB") == 1 and "/tsthuong SSB" in morning
+      and "/tscotuc" in morning and " /von" not in morning, morning)
+check("the evening mark rebased the Tài sản levels", bot2.real("stv").positions["SSB"].last_date == "2026-10-22")
 
 # ───────────── 3. the morning brief + Zoom first ─────────────
 bot.session_day = lambda: "2026-10-21"
@@ -356,8 +364,8 @@ check("brief: market lists with locked counts and the site's plan under each BUY
 check("brief: its own watchlist, new signals and states", "👀 WATCHLIST SIÊU TÍN HIỆU · 5 mã" in brief
       and "Tín hiệu mới phiên 21/10 (" in brief and "Đang ở trạng thái MUA (4/5 mã):\nFPT, SSB, GEX, VNM" in brief, brief)
 check("brief: the owner's portfolio, no buy order, 'anh tự quyết định mua'",
-      "💼 DANH MỤC CỦA ANH (Siêu tín hiệu)" in brief and "cp · giá ≤" not in brief
-      and "Anh tự quyết định mua; mua xong báo /stvkhop mua MÃ KL GIÁ" in brief, brief)
+      "💼 TÀI SẢN CỦA ANH" in brief and "cp · giá ≤" not in brief
+      and "Anh tự quyết định mua; mua xong báo /tsmua MÃ KL GIÁ" in brief, brief)
 check("brief: sections separated by blank lines", brief.count("\n\n") >= 4)
 check("brief: short lines (phone)", max(len(line) for line in brief.splitlines()) <= 100, max(brief.splitlines(), key=len))
 before_own = stw.get()
@@ -370,41 +378,38 @@ wsec = brief[brief.index("👀 WATCHLIST"):]
 check("brief: new signals, BUYs strongest first (with the plan) then SELLs",
       wsec.index("🟢 GEX 23.850 · mạnh 90%\n   vào 23.600") < wsec.index("🟢 VNM 60.000") < wsec.index("🔴 HPG 21.000"), wsec)
 
-# its own portfolio (/stvdanhmuc), the overview (/stv), and only a pointer in the bot's /danhmuc
+# /stvdanhmuc: the comparison book; /ts: the owner's portfolio; /stv: the overview; /danhmuc: a pointer
 pf = bot.stv_portfolio_text()
 print(pf)
-check("/stvdanhmuc before the open: the real P&L at the last close", pf.startswith("💼 DANH MỤC SIÊU TÍN HIỆU")
-      and f"• HPG 2.000 cp · vốn 20.831 → 21.000\n   Lãi/lỗ: {T._money(m_hpg)} ({external.pct(p_hpg)})\n"
-      "   cắt lỗ 19.500 · mục tiêu 22.600" in pf
-      and "(theo giá đóng cửa 21/10, đã trừ phí bán và thuế 0,1%)" in pf and "phần vốn" not in pf, pf)
-real_now = bot.real("stv")
-want_total = sum(T._net_pnl(q, q.last_price)[0] for q in real_now.positions.values())
-check("/stvdanhmuc: total = sum of the holdings, money and %", f"Lãi/lỗ thực tế: {T._money(want_total)} (" in pf, pf)
+check("/stvdanhmuc: the comparison book, and where the owner's money is", pf.startswith("📒 SỔ ẢO SO SÁNH SIÊU TÍN HIỆU")
+      and "/ts" in pf and "HPG 2.000" not in pf, pf)
 import vnbot.intraday as intraday_module  # noqa: E402
 
 _live = intraday_module.live_price
+_vn_now0 = vn_rules.now_vn
 intraday_module.live_price = lambda code, day: {"HPG": 21_500, "FPT": None}.get(code)
 T._now_vn = lambda: datetime(2026, 10, 22, 10, 45, tzinfo=vn_rules.VN_TZ)
-pf_live = bot.stv_portfolio_text()
-m_live, p_live = T._net_pnl(hpg, 21_500)
-check("/stvdanhmuc in the session: the last matched price, and the close where there is none",
-      "(theo giá khớp 10:45, đã trừ phí bán và thuế 0,1%)" in pf_live
-      and f"• HPG 2.000 cp · vốn 20.831 → 21.500\n   Lãi/lỗ: {T._money(m_live)} ({external.pct(p_live)})" in pf_live
-      and "• FPT 1.150 cp · vốn 87.958 → 93.500 (đóng cửa 21/10)" in pf_live, pf_live)
+vn_rules.now_vn = lambda: datetime(2026, 10, 22, 10, 45, tzinfo=vn_rules.VN_TZ)
+bot.taisan._forget_live()
+ts_live = bot.taisan.overview_text()
+print(ts_live)
+check("/ts in the session: the last matched price, the close where there is none",
+      ts_live.startswith("💼 TÀI SẢN · khớp 10:45") and "• HPG 2.000 cp · vốn 20.800 → 21.500 · +1.400.000" in ts_live
+      and "• FPT 1.150 cp · vốn 87.826 → 93.500" in ts_live, ts_live)
 ov_live = bot.stv_text()
-check("/stv in the session: the real P&L at the matched prices", "💼 Danh mục của anh: 3 mã · lãi/lỗ thực tế " in ov_live
+check("/stv in the session: the Tài sản line at the matched prices", "💼 Tài sản của anh: 3 mã · tổng " in ov_live
       and "giá khớp 10:45" in ov_live, ov_live)
 intraday_module.live_price = _live
+vn_rules.now_vn = _vn_now0
 T._now_vn = lambda: datetime(2026, 10, 22, 8, 30, tzinfo=vn_rules.VN_TZ)
-check("/stvdanhmuc: the comparison book too, said to be for the comparison only", "📒 Sổ ảo so sánh (bot tự khớp theo tín hiệu, chỉ để so với bot)" in pf, pf)
 ov = bot.stv_text()
 print(ov)
 check("/stv: overview with every book's return, one per line", ov.startswith("📡 SIÊU TÍN HIỆU · tổng quan")
       and "\n• Siêu tín hiệu " in ov and "\n• Phòng thủ " in ov and "\n• Quant Engine " in ov and "\n• Động lượng " in ov
       and "👀 Watchlist: 5 mã (đã chỉnh) · quét danh mục 15 phút/lần" in ov, ov)
 bot_pf = bot.portfolio_text()
-check("bot's /danhmuc: no Siêu tín hiệu holdings, a pointer instead",
-      "📡 Siêu tín hiệu có danh mục riêng: /stvdanhmuc" in bot_pf and "HPG 2.000" not in bot_pf
+check("bot's /danhmuc: no Tài sản holdings, a pointer instead",
+      "💼 Danh mục tiền thật của anh: /ts" in bot_pf and "HPG 2.000" not in bot_pf
       and "Thật (Siêu tín hiệu)" not in bot_pf, bot_pf)
 
 from vnbot import telegram_bot as tb  # noqa: E402
@@ -574,15 +579,17 @@ def msg(text):
     return {"chat": {"id": 111}, "from": {"id": 111}, "text": text}
 
 
+n_sent = len(sent)
 for t in ("/stvvon 200.000.000", "/stvkhop mua GEX 800 23.900", "/stvkhop ban HPG 1150 21000", "/stvthuong FPT 150",
-          "/stvsang", "/stvdanhmuc"):
+          "/stvcosan GEX 100 31.347", "/stvxoa danhmuc", "/stvsang", "/stvdanhmuc"):
     tg._handle(msg(t))
-check("commands route to the separate account", calls_t == [
-    ("von", 200_000_000.0, "stv"), ("khop", "BUY", "GEX", 800, 23_900.0, "stv"),
-    ("khop", "SELL", "HPG", 1150, 21_000.0, "stv"), ("thuong", "FPT", 150, "stv"), ("sang",), ("danhmuc",)], calls_t)
-tg._handle({"chat": {"id": 222}, "from": {"id": 222}, "text": "/stvvon 1000000000"})
+moved = [text for _, text in sent[n_sent:] if text.startswith("⚠️ Danh mục tiền thật đã chuyển sang Tài sản")]
+check("the old account's commands point to /ts, nothing recorded", len(moved) == 6
+      and calls_t == [("sang",), ("danhmuc",)] and "/tsmua" in moved[1] and "/tsthuong" in moved[3], (calls_t, moved))
+tg._handle({"chat": {"id": 222}, "from": {"id": 222}, "text": "/stvsang"})
 tg._handle({"chat": {"id": 222}, "from": {"id": 222}, "text": "/stvtheodoi dat GEX"})
-check("strangers cannot use them", len(calls_t) == 6 and stw.get() == ["GEX", "HPG", "FPT", "VNM", "SSB"])
+tg._handle({"chat": {"id": 222}, "from": {"id": 222}, "text": "/tsnap 1000000000"})
+check("strangers cannot use them", len(calls_t) == 2 and stw.get() == ["GEX", "HPG", "FPT", "VNM", "SSB"])
 
 # /stvtheodoi: its own watchlist
 five = stw.get()
@@ -654,11 +661,8 @@ check("bot BUY vs site SELL: flagged when fetched this session", "⚠️ Bot MUA
 check("candidates = its own watchlist, not the bot's (VNM, FPT, SSB of the bot's list left out)",
       set(seen_syms) == {"GEX", "HPG"}, seen_syms)
 
-for t in ("/stvquet", "/stvcosan GEX 100 31.347", "/stvcosan cii 200 19,579", "/stvcosan GEX,FPT CII"):
-    tg._handle(msg(t))
-check("/stvquet and /stvcosan route and parse", calls_t[-4:] == [
-    ("quet", True), ("cosan", "GEX", 100.0, 31_347.0), ("cosan", "CII", 200.0, 19_579.0), ("dave", ["GEX", "FPT", "CII"])],
-      calls_t[-4:])
+tg._handle(msg("/stvquet"))
+check("/stvquet routes", calls_t[-1] == ("quet", True), calls_t[-1:])
 
 # ───────────── 5c. the scan: holdings + watchlist (a stock in both asked once) + the live view ─────────────
 _orig_refresh = external.SignalStore.refresh
@@ -686,18 +690,19 @@ T._now_vn = lambda: datetime(2026, 10, 22, 10, 0, tzinfo=vn_rules.VN_TZ)
 intraday_module.live_price = lambda code, day: {"HPG": 20_900}.get(code)
 scan1 = bot.stv_scan()
 print(scan1)
-m_sell, p_sell = T._net_pnl(hpg, 20_900)
 check("scan in the session: the holdings only (the watchlist's own signals come after the close)",
-      asked[-1] == ["HPG", "FPT", "SSB"], asked[-1:])
-check("scan: the held stock the site says SELL, with the price, the real P&L and what to do",
-      scan1 and scan1.startswith("📡 SIÊU TÍN HIỆU · 10:00 22/10\n\n🔻 DANH MỤC CỦA ANH · tín hiệu BÁN")
-      and "• HPG 2.000 cp · trang BÁN 21/10 @ 21.000 · mạnh 15%" in scan1
-      and f"Giá 20.900 (khớp 10:00) · lãi/lỗ nếu bán: {T._money(m_sell)} ({external.pct(p_sell)})" in scan1
+      asked[-1] == ["FPT", "HPG", "SSB"], asked[-1:])
+check("scan: the held stock the site says SELL (🔴 Mạnh), with the price, the P&L and what to do",
+      scan1 and scan1.startswith("📡 SIÊU TÍN HIỆU · 10:00 22/10\n\n🔻 TÀI SẢN CỦA ANH · tín hiệu BÁN")
+      and "🔴 Mạnh · HPG 2.000 cp · trang BÁN 21/10 @ 21.000 · mạnh 15%" in scan1
+      and f"Giá 20.900 (khớp 10:00) · lãi/lỗ theo giá vốn: +200.000 ({external.pct(20_900 / 20_800 * 100 - 100)})" in scan1
       and "→ BÁN 2.000 cp" in scan1 and "FPT" not in scan1 and "SSB" not in scan1, scan1)
+check("scan: the alert kept for its shadow result",
+      any(r["symbol"] == "HPG" and r["level"] == "sell" for r in bot.taisan.state()["shadow"]))
 check("scan: the live view asked in the session", live_calls[-2:] == ["BUY", "SELL"], live_calls)
 check("scan: announced once", bot.stv_scan() is None)
 rep_q = bot.stv_scan(report=True)
-check("/stvquet: holdings + watchlist, each stock asked once", asked[-1] == ["HPG", "FPT", "SSB", "GEX", "VNM"], asked[-1])
+check("/stvquet: holdings + watchlist, each stock asked once", asked[-1] == ["FPT", "HPG", "SSB", "GEX", "VNM"], asked[-1])
 check("/stvquet: a status when nothing is new",
       rep_q.startswith("✅ Đã quét 5 mã lúc 10:00 (danh mục + watchlist, mã trùng hỏi 1 lần): không có tín hiệu mới chưa báo.")
       and "• HPG: BÁN từ 21/10 (đã báo)" in rep_q and "• FPT: MUA từ 09/10" in rep_q
@@ -716,7 +721,7 @@ T._now_vn = lambda: datetime(2026, 10, 22, 10, 30, tzinfo=vn_rules.VN_TZ)
 scan2 = bot.stv_scan()
 print(scan2)
 check("live view: a held stock's SELL goes to the holdings block, not final",
-      scan2 and "• FPT 1.150 cp · trang BÁN trong phiên lúc 10:25" in scan2
+      scan2 and "🟠 Sớm · FPT 1.150 cp · trang BÁN trong phiên lúc 10:25" in scan2
       and "(tín hiệu trong phiên, có thể đổi khi đóng cửa)" in scan2, scan2)
 check("live view: the watchlist's changes, not the unfollowed stock",
       "👀 Đổi chiều trong phiên (chưa chốt, có thể đổi khi đóng cửa)" in scan2
@@ -732,9 +737,9 @@ n_live = len(live_calls)
 T._now_vn = lambda: datetime(2026, 10, 22, 15, 20, tzinfo=vn_rules.VN_TZ)
 scan3 = bot.stv_scan()
 print(scan3)
-check("after the close: holdings + watchlist, each stock asked once", asked[-1] == ["HPG", "FPT", "SSB", "GEX", "VNM"], asked[-1])
+check("after the close: holdings + watchlist, each stock asked once", asked[-1] == ["FPT", "HPG", "SSB", "GEX", "VNM"], asked[-1])
 check("after the close: no live view asked", len(live_calls) == n_live)
-check("after the close: the held stock's SELL again, now final", "• FPT 1.150 cp · trang BÁN 22/10 @ 92.000 · mạnh 40%" in scan3
+check("after the close: the held stock's SELL again, now final (🔴)", "🔴 Mạnh · FPT 1.150 cp · trang BÁN 22/10 @ 92.000 · mạnh 40%" in scan3
       and scan3.count("FPT") == 1, scan3)
 check("after the close: the watchlist's new signals with the site's plan, BUY first",
       "👀 WATCHLIST · tín hiệu mới phiên 22/10 (đã chốt sau giờ đóng cửa)" in scan3
@@ -744,12 +749,12 @@ T._now_vn = lambda: datetime(2026, 10, 22, 15, 35, tzinfo=vn_rules.VN_TZ)
 check("after the close: announced once", bot.stv_scan() is None)
 T._now_vn = lambda: datetime(2026, 10, 22, 16, 15, tzinfo=vn_rules.VN_TZ)
 bot.stv_scan()
-check("from 16:00: the holdings only again", asked[-1] == ["HPG", "FPT", "SSB"], asked[-1])
+check("from 16:00: the holdings only again", asked[-1] == ["FPT", "HPG", "SSB"], asked[-1])
 os.environ["STV_WATCH_INTRADAY"] = "1"
 T._now_vn = lambda: datetime(2026, 10, 23, 10, 0, tzinfo=vn_rules.VN_TZ)
 LIVE["BUY"], LIVE["SELL"] = [], []
 bot.stv_scan()
-check("STV_WATCH_INTRADAY=1: the whole watchlist in the session too", asked[-1] == ["HPG", "FPT", "SSB", "GEX", "VNM"], asked[-1])
+check("STV_WATCH_INTRADAY=1: the whole watchlist in the session too", asked[-1] == ["FPT", "HPG", "SSB", "GEX", "VNM"], asked[-1])
 del os.environ["STV_WATCH_INTRADAY"]
 alerts = external.SellAlerts(DATA)
 alerts.remember([], ["FPT", "SSB"])                          # HPG sold
@@ -800,36 +805,20 @@ check("STV_SCAN_MINUTES: 5 to 120", external.scan_minutes() == 5)
 del os.environ["STV_SCAN_MINUTES"]
 vn_rules.now_vn = svc_vn_now
 
-# shares already in the account (bought before): sellable now, the cash untouched
+# shares bought before: recorded with their buy date, so they are sellable at once
 T._now_vn = lambda: datetime(2026, 10, 22, 10, 0, tzinfo=vn_rules.VN_TZ)
-cash2 = bot2.real("stv").cash
 check("a fresh buy is not sellable before T+2", T._pending_lots(bot2.real("stv").positions["MSN"], "2026-10-22"))
-print("  ", bot2.stv_settled(["MSN"]))
-check("/stvcosan MSN: counted as settled", not T._pending_lots(bot2.real("stv").positions["MSN"], "2026-10-22")
-      and bot2.real("stv").positions["MSN"].settled_qty == 250)
-msg_e = bot2.stv_existing("VNM", 300, 61_000)
+msg_e = bot2.taisan.handle("/tsmua", "VNM 300 61000 2026-10-01")
 pv = bot2.real("stv").positions["VNM"]
-check("/stvcosan VNM 300 61000: added settled, cash untouched, the site's cut-loss/target",
-      pv.qty == 300 and pv.avg_price == 61_000 and pv.settled_qty == 300 and bot2.real("stv").cash == cash2
-      and pv.stop == 56_400 and pv.target1 == 65_400, (msg_e, pv))
-try:
-    bot2.stv_existing("VNM", 100, 59_000)
-    check("/stvcosan on a stock already held refused (no silent doubling)", False)
-except ValueError as exc:
-    check("/stvcosan on a stock already held refused (no silent doubling)", "đã có trong danh mục" in str(exc)
-          and bot2.real("stv").positions["VNM"].qty == 300, str(exc))
-try:
-    bot2.stv_existing("KBC", 100, 31)
-    check("/stvcosan cost in thousands refused", False)
-except ValueError as exc:
-    check("/stvcosan cost in thousands refused", "theo đồng" in str(exc), str(exc))
-print("  ", bot2.record_fill("ban", "VNM", 300, 62_000, "2026-10-22", book="stv"))
+check("/tsmua with an old date: sellable now", pv.qty == 300 and pv.avg_price == 61_000 and not T._pending_lots(pv, "2026-10-22"),
+      (msg_e, pv))
+print("  ", bot2.taisan.handle("/tsban", "VNM 300 62000 2026-10-22"))
 check("...and it can be sold at once", "VNM" not in bot2.real("stv").positions)
 try:
-    bot2.stv_settled(["ZZZ"])
-    check("/stvcosan on a stock not held refused", False)
+    bot2.taisan.handle("/tsban", "MSN 250 74000 2026-10-22")
+    check("a sale before T+2 refused", False)
 except ValueError as exc:
-    check("/stvcosan on a stock not held refused", "không có: ZZZ" in str(exc), str(exc))
+    check("a sale before T+2 refused", "T+2" in str(exc), str(exc))
 
 # T+2 by the time of day; one announcement per SELL even when the site rewrites its history
 from tradingagents.trading.ledger import Position  # noqa: E402
@@ -866,7 +855,7 @@ from vnbot.intraday import IntradayMonitor  # noqa: E402
 mon = IntradayMonitor(SETTINGS, bot, lambda t: None, price=lambda c, d: None, index_change=lambda d: None,
                       exchange_of=lambda c: "HOSE", closes=lambda c, on, d: None)
 labels = [label for label, _ in mon._books("2026-10-22")]
-check("intraday includes the separate account", "💼 Thật (Siêu tín hiệu)" in labels, labels)
+check("intraday includes the Tài sản portfolio", "💼 Tài sản" in labels, labels)
 
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)

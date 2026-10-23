@@ -139,6 +139,11 @@ class DailyScheduler:
     # The owner's holdings checked for a SELL of the site every external.scan_minutes()
     # on session days, from the open to after the close (the session's signals come ~15:08).
     STV_SCAN_FROM, STV_SCAN_UNTIL = "09:00", "17:00"
+    # The Tài sản report (vnbot.taisan): after the site's signals of the day (~15:08) and the
+    # day's bar; a closure the calendar does not know is waited for until TAISAN_GIVE_UP.
+    TAISAN_TIME, TAISAN_GIVE_UP = "15:30", "18:00"
+    TAISAN_RETRY_SECONDS = 600
+    TAISAN_MAX_TRIES = 6
 
     def __init__(self, settings: Settings, jobs: JobQueue, watchlist: Watchlist, bot=None, notify=None,
                  critic_llm=None, zoom_notify=None):
@@ -156,6 +161,10 @@ class DailyScheduler:
         self._stv_market_tries = 0
         self._stv_market_day = ""
         self._stv_scan_next = 0.0
+        self._taisan_stamp = settings.data_dir / "last_taisan_report.txt"
+        self._taisan_next = 0.0
+        self._taisan_tries = 0
+        self._taisan_day = ""
         self.critic_log = CriticLog(settings.data_dir)
         self._critic_llm = critic_llm
         self._screened: dict = {}
@@ -175,6 +184,59 @@ class DailyScheduler:
         # The SELL scan has its own thread: the trading run and the watchlist report (both
         # ~15:30, minutes with the AI) must not hold back a SELL of the site.
         threading.Thread(target=self._scan_loop, name="stv-scan", daemon=True).start()
+        # The owner's portfolio report runs on its own: minutes of downloads on a first rebuild.
+        threading.Thread(target=self._taisan_loop, name="taisan", daemon=True).start()
+
+    def _taisan_loop(self) -> None:
+        while True:
+            try:
+                day = self._taisan_due()
+                if day:
+                    self._taisan_report(day)
+            except Exception:  # noqa: BLE001 - the loop must keep running
+                logger.exception("Tài sản loop failed")
+            time.sleep(30)
+
+    def _taisan_due(self) -> str | None:
+        from tradingagents.market import vn_rules
+
+        if self.bot is None or getattr(self.bot, "taisan", None) is None or time.time() < self._taisan_next:
+            return None
+        now = vn_rules.now_vn()
+        day = now.strftime("%Y-%m-%d")
+        if not vn_rules.is_session_day(day) or now.strftime("%H:%M") < self.TAISAN_TIME:
+            return None
+        if self._read(self._taisan_stamp) == day:
+            return None
+        return day
+
+    def _taisan_report(self, day: str) -> None:
+        """The evening Tài sản report of ``day`` to Telegram and Zoom; retried on a failure,
+        waited for while the day's bar is not out (until TAISAN_GIVE_UP)."""
+        from tradingagents.market import vn_rules
+
+        if self._taisan_day != day:
+            self._taisan_day, self._taisan_tries = day, 0
+        try:
+            text = self.bot.taisan_day(day)
+        except Exception as exc:  # noqa: BLE001 - tried again later
+            logger.exception("Tài sản report %s failed", day)
+            self._taisan_tries += 1
+            self._taisan_next = time.time() + self.TAISAN_RETRY_SECONDS * self._taisan_tries
+            if self._taisan_tries >= self.TAISAN_MAX_TRIES:
+                write_text_atomic(self._taisan_stamp, day)
+                self.notify(f"⚠️ Báo cáo Tài sản phiên {day} không tạo được sau {self._taisan_tries} lần: {exc}. "
+                            "Gửi /tsbaocao để thử lại.")
+            return
+        if text is None:                      # the day's bar is not out yet
+            if vn_rules.now_vn().strftime("%H:%M") >= self.TAISAN_GIVE_UP:
+                write_text_atomic(self._taisan_stamp, day)       # a closure the calendar did not know
+            else:
+                self._taisan_next = time.time() + 900
+            return
+        write_text_atomic(self._taisan_stamp, day)
+        if text:
+            self.notify(text)
 
     def _scan_loop(self) -> None:
         while True:
@@ -446,7 +508,8 @@ class DailyScheduler:
         from tradingagents.market import vn_rules
         from vnbot import external
 
-        if self.bot is None or self.settings.trade_mode == "off" or not external.enabled():
+        # Not tied to TRADE_MODE: the scan watches the owner's real money (Tài sản) too.
+        if self.bot is None or not external.enabled():
             return False
         if time.time() < self._stv_scan_next:
             return False

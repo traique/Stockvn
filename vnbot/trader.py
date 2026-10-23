@@ -271,10 +271,10 @@ def _estimated_view(real, exchange_of):
     return view
 
 
-def _stv_words(text: str) -> str:
-    """A message about the separate Siêu tín hiệu account: the main account's commands
-    it names (/khop, /von, /thuong) become that account's (/stvkhop, /stvvon, /stvthuong)."""
-    return re.sub(r"(?<![\w/])/(khop|von|thuong)\b", r"/stv\1", text)
+def _ts_words(text: str) -> str:
+    """A note about the Tài sản portfolio: the main account's commands it names become its own."""
+    return (re.sub(r"(?<![\w/])/thuong\b", "/tsthuong", text)
+            .replace("cập nhật /von khi tiền về", "khi tiền về báo /tscotuc MÃ SỐ_ĐỒNG_MỖI_CP"))
 
 
 def _real_adjustment_lines(notes: list[dict], cmd: str = "/thuong") -> list[str]:
@@ -296,7 +296,7 @@ def _real_adjustment_lines(notes: list[dict], cmd: str = "/thuong") -> list[str]
                      f"số cổ phiếu giữ nguyên {_fmt(n.get('qty'))} cp. Nếu là cổ phiếu thưởng/cổ tức bằng cổ phiếu "
                      f"(khoảng {_fmt(free)} cp), khi về tài khoản hãy báo {cmd} {sym} <số cp nhận được>; "
                      "nếu là cổ tức tiền mặt, cập nhật /von khi tiền về.")
-    return [_stv_words(line) for line in lines] if cmd == "/stvthuong" else lines
+    return lines
 
 
 def _adjustment_lines(book, day: str) -> list[str]:
@@ -439,6 +439,11 @@ class TradingBot:
         self._stv_scan_lock = threading.Lock()    # one SELL scan at a time (the scheduler and /stvquet)
         self._market_levels: dict = {}            # vnbot.market_scan: the levels of the 300 for one basis
         from vnbot import external
+        from vnbot.taisan import TaiSan
+
+        # The owner's real-money portfolio (/ts, the /taisan tab): it replaced the separate
+        # Siêu tín hiệu account; ``real("stv")`` is its read-only Ledger view.
+        self.taisan = TaiSan(settings.data_dir)
 
         if external.enabled():          # the paper book that follows sieutinhieu.vn (for comparison)
             self.BOOK_FILES = {**type(self).BOOK_FILES, "stv": external.BOOK_FILE}
@@ -557,6 +562,8 @@ class TradingBot:
         on the next load and being overwritten by the next /von or /khop."""
         from tradingagents.trading.ledger import Ledger, LedgerLoadError
 
+        if book == "stv":
+            return self.taisan.ledger_view()
         path = self._book_path(book)
         if not path.exists():
             aside = sorted(path.parent.glob(f"{path.name}.corrupt-*"))
@@ -948,18 +955,14 @@ class TradingBot:
         book.save(self.stv_path)
 
     def _stv_real_lines(self, day, store, market) -> list[str]:
-        """The owner's separate real account that follows the site: marked to the closes of
-        ``day``, the real P&L of each holding (sold now: fee and tax off) and its exits (the
-        site turned SELL, the close under the site's cut-loss, the target reached). No buy is
-        suggested: the owner chooses the buys and reports them (/stvkhop)."""
-        from tradingagents.trading.ledger import LedgerLoadError
+        """The owner's Tài sản portfolio in the morning brief: marked to the closes of ``day``
+        (an ex-date moves its levels), each holding at the price as entered (no fee or tax
+        taken off), and its exits: the site turned SELL, the close under the cut-loss, the
+        target reached. No buy is suggested: the owner records the buys (/tsmua)."""
         from vnbot import external as x
 
-        title = "💼 DANH MỤC CỦA ANH (Siêu tín hiệu)"
-        try:
-            real = self.real("stv")
-        except LedgerLoadError as exc:
-            return [title, f"⚠️ {exc}"]
+        title = "💼 TÀI SẢN CỦA ANH"
+        real = self.real("stv")
         notes = []
         if real.positions:
             real, notes = self._mark_real(real, day, market, book="stv")
@@ -967,32 +970,33 @@ class TradingBot:
         if kept.get("day") == day:          # marked by the evening run of ``day``
             seen = {(n.get("kind"), n.get("symbol")) for n in notes}
             notes = [n for n in kept.get("notes") or [] if (n.get("kind"), n.get("symbol")) not in seen] + notes
-        real.settle_to(day)
         view = _estimated_view(real, market.exchange)
         if not view.positions:
-            return [title, "Chưa giữ mã nào. Mua xong báo /stvkhop mua MÃ KL GIÁ; cổ phiếu có sẵn: /stvcosan MÃ KL GIÁ_VỐN."]
-        total = sum(_net_pnl(p, p.last_price)[0] for p in view.positions.values())
-        cost = sum(p.avg_price * p.qty for p in view.positions.values())
-        lines = [title, f"Lãi/lỗ thực tế (nếu bán hết theo giá đóng cửa {x._ddmm(day)}): {_money(total)}"
-                 + (f" ({x.pct(total / cost * 100)})" if cost else ""), "(đã trừ phí bán và thuế 0,1%)"]
-        lines += _real_adjustment_lines(notes, cmd="/stvthuong")
+            return [title, "Chưa giữ mã nào. Mua xong báo /tsmua MÃ KL GIÁ (giá đã gồm phí)."]
+        summary = self.taisan.summary({s: p.last_price for s, p in view.positions.items() if p.last_price})
+        lines = [title, f"Tổng tài sản {_fmt(summary['total'])} · lãi/lỗ {_money(summary['pnl'])}"
+                 + (f" ({x.pct(summary['pnl_pct'])})" if summary["pnl_pct"] is not None else "")
+                 + f" · theo giá đóng cửa {x._ddmm(day)}"]
+        lines += [_ts_words(line) for line in _real_adjustment_lines(notes, cmd="/tsthuong")]
         cutoff = x.next_open_cutoff(day)
         for symbol, pos in view.positions.items():
             signal = store.state(symbol, day, cutoff)
             bar = market.bar(symbol, day)
-            money, pct = _net_pnl(pos, pos.last_price)
-            lines.append(f"• {symbol} {_fmt(pos.qty)} cp · vốn {_fmt(pos.avg_price)} → {_fmt(pos.last_price)}"
-                         f" · {_money(money)} ({x.pct(pct)})")
+            price = pos.last_price or pos.avg_price
+            money = (price - pos.avg_price) * pos.qty
+            change = (price / pos.avg_price - 1) * 100 if pos.avg_price else 0.0
+            lines.append(f"• {symbol} {_fmt(pos.qty)} cp · vốn {_fmt(pos.avg_price)} → {_fmt(price)}"
+                         f" · {_money(money)} ({x.pct(change)})")
             levels = " · ".join(([f"cắt lỗ {_fmt(pos.stop)}"] if pos.stop else [])
                                 + ([f"mục tiêu {_fmt(pos.target1)}"] if pos.target1 else []))
             if levels:
                 lines.append(x.INDENT + levels)
             if signal and signal["side"] == "SELL":
-                lines.append(f"{x.INDENT}🔻 Trang BÁN {x._ddmm(signal['day'])} @ {_fmt(signal['price'])} → "
+                lines.append(f"{x.INDENT}🔴 Trang BÁN {x._ddmm(signal['day'])} @ {_fmt(signal['price'])} → "
                              + _advice(pos, day, when=" phiên tới"))
             elif bar is not None and bar.tradable and pos.stop and bar.close <= pos.stop:
                 lines.append(f"{x.INDENT}⛔ Đóng cửa {_fmt(bar.close)} ≤ cắt lỗ {_fmt(pos.stop)} → " + _advice(pos, day))
-            elif bar is not None and bar.tradable and pos.target1 and not pos.t1_done and bar.high >= pos.target1:
+            elif bar is not None and bar.tradable and pos.target1 and bar.high >= pos.target1:
                 lines.append(f"{x.INDENT}🎯 Chạm mục tiêu {_fmt(pos.target1)} (cao nhất {_fmt(bar.high)}) → cân nhắc chốt lời")
         return lines
 
@@ -1044,7 +1048,7 @@ class TradingBot:
         lines.append(f"Tín hiệu mới phiên {dd} ({len(new)}):" if new else f"Không có tín hiệu mới phiên {dd}.")
         lines += [x.signal_line(sym, sig, plan=True) for sym, sig in new]
         if any(sig["side"] == "BUY" for _, sig in new):
-            lines.append("Anh tự quyết định mua; mua xong báo /stvkhop mua MÃ KL GIÁ (bot lấy cắt lỗ, mục tiêu của trang).")
+            lines.append("Anh tự quyết định mua; mua xong báo /tsmua MÃ KL GIÁ (bot lấy cắt lỗ, mục tiêu của trang).")
         in_watch = [sym for sym in known if sym in watch]
         buying = [sym for sym in in_watch if (sig := store.state(sym, session)) and sig["side"] == "BUY"]
         if buying:
@@ -1084,7 +1088,7 @@ class TradingBot:
     def _current_prices(self, positions) -> tuple[dict[str, tuple[float | None, str]], str]:
         """{symbol: (price, label)} and the label most prices share: today's last match when
         there is one, else the last close the book marked, else the last close of the price
-        source (a holding not marked yet, e.g. added by /stvcosan), else (None, "chưa có giá")."""
+        source (a holding not marked yet), else (None, "chưa có giá")."""
         from vnbot.intraday import history_close
 
         live, label = self._live_prices([p.symbol for p in positions])
@@ -1156,21 +1160,15 @@ class TradingBot:
             return f"{x.NAME} đang tắt: đặt SIEUTINHIEU=1 trong .env rồi khởi động lại."
         lines = ["📡 SIÊU TÍN HIỆU · tổng quan"]
         try:
-            real = self.real("stv")
-            real.settle_to(today_vn())
-            if real.positions:
-                prices, common = self._current_prices(list(real.positions.values()))
-                priced = [(p, prices[p.symbol][0]) for p in real.positions.values() if prices[p.symbol][0]]
-                total = sum(_net_pnl(p, price)[0] for p, price in priced)
-                cost = sum(p.avg_price * p.qty for p, _ in priced)
-                lines.append(f"💼 Danh mục của anh: {len(real.positions)} mã · lãi/lỗ thực tế {_money(total)}"
-                             + (f" ({x.pct(total / cost * 100)})" if cost else ""))
-                lines.append(f"{x.INDENT}tiền {_fmt(real.cash)} · " + (f"giá {common}" if common != "chưa có giá"
-                                                                         else "chưa có giá hiện tại"))
+            s = self.taisan.summary()
+            if s["positions"]:
+                lines.append(f"💼 Tài sản của anh: {len(s['positions'])} mã · tổng {_fmt(s['total'])} · lãi/lỗ "
+                             f"{_money(s['pnl'])}" + (f" ({x.pct(s['pnl_pct'])})" if s["pnl_pct"] is not None else ""))
+                lines.append(f"{x.INDENT}tiền {_fmt(s['cash'])} · giá {s['label']} · chi tiết /ts")
             else:
-                lines.append("💼 Danh mục của anh: chưa giữ mã nào (/stvkhop, /stvcosan)")
+                lines.append("💼 Tài sản của anh: chưa giữ mã nào (/ts)")
         except Exception as exc:  # noqa: BLE001
-            lines.append(f"💼 Danh mục của anh: ⚠️ {exc}")
+            lines.append(f"💼 Tài sản của anh: ⚠️ {exc}")
         book = self.stv_book()
         st = book.stats()
         win = f"{st['win_rate_pct']}%" if st["win_rate_pct"] is not None else "-"
@@ -1189,27 +1187,16 @@ class TradingBot:
         return "\n".join(lines)
 
     def stv_portfolio_text(self) -> str:
-        """``/stvdanhmuc``: the owner's portfolio with the real P&L, and the comparison book."""
+        """``/stvdanhmuc``: the comparison book (the owner's real money is the Tài sản portfolio, /ts)."""
         from vnbot import external as x
 
         if not x.enabled():
             return f"{x.NAME} đang tắt: đặt SIEUTINHIEU=1 trong .env rồi khởi động lại."
-        lines = ["💼 DANH MỤC SIÊU TÍN HIỆU", "", "Của anh (anh tự mua; bot báo khi trang BÁN)"]
-        try:
-            real = self.real("stv")
-            today = today_vn()
-            if real.positions:                # no settle_to(today): _t2_now judges by the time of day
-                lines += self._stv_holdings_lines(real, today)
-            else:
-                lines += [f"Tiền {_fmt(real.cash)} · chưa giữ mã nào.",
-                          "Mua xong báo /stvkhop mua MÃ KL GIÁ; cổ phiếu có sẵn: /stvcosan MÃ KL GIÁ_VỐN"]
-        except Exception as exc:  # noqa: BLE001
-            lines.append(f"⚠️ {exc}")
         book = self.stv_book()
         st = book.stats()
-        lines += ["", "📒 Sổ ảo so sánh (bot tự khớp theo tín hiệu, chỉ để so với bot)",
-                  f"NAV {_fmt(st['nav'])} ({st['return_pct']:+.2f}%"
-                  + (f" từ {x._ddmm(book.start_date)}" if book.start_date else "") + f") · tiền {_fmt(book.cash)}"]
+        lines = ["📒 SỔ ẢO SO SÁNH SIÊU TÍN HIỆU", "Bot tự khớp theo tín hiệu của trang, chỉ để so với các sổ của bot.",
+                 f"NAV {_fmt(st['nav'])} ({st['return_pct']:+.2f}%"
+                 + (f" từ {x._ddmm(book.start_date)}" if book.start_date else "") + f") · tiền {_fmt(book.cash)}"]
         for p in book.positions.values():
             pnl = (p.last_price / p.avg_price - 1) * 100 if p.avg_price and p.last_price else 0.0
             lines.append(f"• {p.symbol} {_fmt(p.qty)} cp · {_fmt(p.avg_price)} → {_fmt(p.last_price)} ({x.pct(pnl)})")
@@ -1218,7 +1205,7 @@ class TradingBot:
         if book.orders:
             lines.append("Sổ ảo sẽ khớp phiên tới:")
             lines += [f"{x.icon(o.side)} {x.word(o.side)} {o.symbol} {_fmt(o.qty)} cp · {o.reason}" for o in book.orders]
-        lines += ["", "Tổng quan: /stv · quét tín hiệu bán ngay: /stvquet"]
+        lines += ["", "Danh mục tiền thật của anh: /ts (trang web /taisan) · tổng quan: /stv · quét bán ngay: /stvquet"]
         return "\n".join(lines)
 
     def stv_scan(self, *, report: bool = False) -> str | None:
@@ -1335,8 +1322,8 @@ class TradingBot:
             return None
         lines = [f"📡 SIÊU TÍN HIỆU · {now.strftime('%H:%M %d/%m')}"]
         if new_sells:
-            lines += ["", "🔻 DANH MỤC CỦA ANH · tín hiệu BÁN"] + self._stv_sell_lines(real, new_sells, today)
-            lines.append("Anh tự đặt lệnh; bán xong báo /stvkhop ban MÃ KL GIÁ.")
+            lines += ["", "🔻 TÀI SẢN CỦA ANH · tín hiệu BÁN"] + self._stv_sell_lines(real, new_sells, today)
+            lines.append("Anh tự đặt lệnh; bán xong báo /tsban MÃ KL GIÁ.")
         finals = [(sym, sig) for sym, key, sig in new_watch if "at" not in sig and not key.endswith(":reverted")]
         moves = [(sym, c) for sym, key, c in new_watch if "at" in c and c.get("stage") != "estimate"]   # the site's view
         guesses = [(sym, c) for sym, key, c in new_watch if c.get("stage") == "estimate"]            # the bot's estimate
@@ -1347,7 +1334,7 @@ class TradingBot:
             lines += [x.signal_line(sym, sig, plan=True) + (" · đang giữ" if sym in held else "")
                       + ("" if x.SellAlerts.final(sig) else " · trong phiên, chưa chốt") for sym, sig in finals]
             if any(sig["side"] == "BUY" for _, sig in finals):
-                lines.append("Anh tự quyết định mua; mua xong báo /stvkhop mua MÃ KL GIÁ.")
+                lines.append("Anh tự quyết định mua; mua xong báo /tsmua MÃ KL GIÁ.")
         if moves:
             lines += ["", "👀 Đổi chiều trong phiên (chưa chốt, có thể đổi khi đóng cửa)"]
             lines += [f"{x.icon(c['side'])} {sym} {x.word(c['from']) + ' → ' if c['from'] in ('BUY', 'SELL') else ''}"
@@ -1558,7 +1545,9 @@ class TradingBot:
         return out
 
     def _stv_sell_lines(self, real, new_sells, today) -> list[str]:
-        """The SELL of each holding: the price, the P&L if sold, what can be sold now (T+2)."""
+        """The SELL of each Tài sản holding: 🔴 the site's SELL after the close, 🟠 a change in
+        the session (the site's, or the bot's estimate), the price, the P&L at the price as
+        entered, what can be sold now (T+2). Each alert is kept for its shadow result."""
         from tradingagents.market import vn_rules
         from vnbot import external as x
 
@@ -1567,17 +1556,21 @@ class TradingBot:
         for sym, sig in new_sells:
             pos = real.positions[sym]
             price, label = prices[sym]
-            head = (f"• {sym} {_fmt(pos.qty)} cp · bot ước tính đổi sang BÁN lúc {sig['created'][11:16]} "
+            early = bool(sig.get("estimate") or sig.get("intraday") or not x.SellAlerts.final(sig))
+            mark = "🟠 Sớm" if early else "🔴 Mạnh"
+            head = (f"{mark} · {sym} {_fmt(pos.qty)} cp · bot ước tính đổi sang BÁN lúc {sig['created'][11:16]} "
                     f"(giá {_fmt(sig['price'])} < mức {_fmt(sig.get('level'))})" if sig.get("estimate")
-                    else f"• {sym} {_fmt(pos.qty)} cp · trang BÁN trong phiên lúc {sig['created'][11:16]}" if sig.get("intraday")
-                    else f"• {sym} {_fmt(pos.qty)} cp · trang BÁN {x._ddmm(sig['day'])} @ {_fmt(sig['price'])}"
+                    else f"{mark} · {sym} {_fmt(pos.qty)} cp · trang BÁN trong phiên lúc {sig['created'][11:16]}" if sig.get("intraday")
+                    else f"{mark} · {sym} {_fmt(pos.qty)} cp · trang BÁN {x._ddmm(sig['day'])} @ {_fmt(sig['price'])}"
                     + (f" · mạnh {sig['strength_pct']}%" if sig.get("strength_pct") is not None else ""))
             lines += ["", head]
             if price:
-                money, pct = _net_pnl(pos, price)
-                lines.append(f"{x.INDENT}Giá {_fmt(price)} ({label}) · lãi/lỗ nếu bán: {_money(money)} ({x.pct(pct)})")
+                money = (price - pos.avg_price) * pos.qty
+                change = (price / pos.avg_price - 1) * 100 if pos.avg_price else 0.0
+                lines.append(f"{x.INDENT}Giá {_fmt(price)} ({label}) · lãi/lỗ theo giá vốn: {_money(money)} ({x.pct(change)})")
             free, note = _t2_now(pos)
             lines.append(f"{x.INDENT}→ " + (f"BÁN {_fmt(free)} cp" if free else "chưa bán được")
+                         + (" (cân nhắc giảm một phần trước ATC)" if early and free else "")
                          + (f"; {note}" if note else ""))
             if sig.get("estimate"):
                 lines.append(f"{x.INDENT}(ước tính của bot, chưa phải tín hiệu của trang; có thể đổi khi đóng cửa)")
@@ -1587,6 +1580,10 @@ class TradingBot:
                 lines.append(f"{x.INDENT}(lịch sử trang tạo lại, từ {x._ddmm(sig['day'])})")
             elif sig["day"] < vn_rules.prev_session(today):
                 lines.append(f"{x.INDENT}(không phải tín hiệu mới: trang đã ở trạng thái BÁN từ {x._ddmm(sig['day'])})")
+            try:
+                self.taisan.record_alert("early" if early else "sell", sym, price, today)
+            except Exception as exc:  # noqa: BLE001 - the alert goes out anyway
+                logger.warning("Tài sản: alert of %s not kept: %s", sym, exc)
         lines.append("")
         return lines
 
@@ -1767,105 +1764,6 @@ class TradingBot:
                   "Trang chốt tín hiệu sau giờ đóng cửa (~15:08)."]
         return "\n".join(lines)
 
-    def stv_existing(self, symbol: str, qty, avg_price, book: str = "stv") -> str:
-        """``/stvcosan MÃ KL GIÁ_VỐN``: shares already in the account (bought before): added as
-        settled (sellable now), at that average cost; the cash is not touched (/stvvon)."""
-        from tradingagents.market import vn_rules
-        from tradingagents.trading.ledger import Position
-
-        symbol = str(symbol).strip().upper()
-        if isinstance(qty, bool) or not _finite(qty) or float(qty) != int(float(qty)) or int(float(qty)) <= 0:
-            raise ValueError("Khối lượng phải là số nguyên dương.")
-        if not _finite(avg_price) or float(avg_price) <= 0:
-            raise ValueError("Giá vốn không hợp lệ.")
-        qty, avg_price = int(float(qty)), float(avg_price)
-        if avg_price < 100:
-            raise ValueError("Giá vốn nhập theo đồng, ví dụ 31347 hoặc 31.347.")
-        today = today_vn()
-        day = today if vn_rules.is_session_day(today) else vn_rules.prev_session(today)
-        if symbol in self._real_for_update(book).positions:
-            raise ValueError(f"{symbol} đã có trong danh mục. Nếu đó là cổ phiếu mua từ trước (đã ghi bằng /stvkhop): "
-                             f"/stvcosan {symbol} để tính là đã về. Mua thêm: /stvkhop mua {symbol} KL GIÁ.")
-        probe = Position(symbol, qty, avg_price, day, unsettled=[])
-        current = self._current_prices([probe])[0][symbol][0] or avg_price
-        if book == "stv":
-            self._stv_prefetch(symbol)
-        with self._real_lock:
-            real = self._real_for_update(book)
-            if symbol in real.positions:
-                raise ValueError(f"{symbol} đã có trong danh mục.")
-            # The site's cut-loss/target against today's price: a stock bought cheaply long ago keeps them.
-            stop, target = self._stv_levels(symbol, day, current) if book == "stv" else (None, None)
-            real.positions[symbol] = Position(symbol, qty, avg_price, day, stop=stop or 0.0, target1=target,
-                                              last_price=avg_price, unsettled=[])
-            notes = real.meta.setdefault("existing", [])
-            notes.append({"date": day, "symbol": symbol, "qty": qty, "avg_price": avg_price})
-            del notes[:-50]
-            real.save(self._book_path(book))
-            pos = real.positions[symbol]
-        return _stv_words(f"✅ Đã ghi {symbol} {_fmt(qty)} cp có sẵn, giá vốn {_fmt(avg_price)}: bán được ngay, "
-                          "không trừ tiền mặt (tiền mặt: /stvvon theo số dư thật)"
-                          + (f"; cắt lỗ theo trang {_fmt(pos.stop)}" if pos.stop else "")
-                          + (f", mục tiêu {_fmt(pos.target1)}" if pos.target1 else "") + ".")
-
-    def stv_settled(self, symbols, book: str = "stv") -> str:
-        """``/stvcosan GEX,FPT``: holdings already recorded that were in fact bought earlier:
-        every lot counted as settled (sellable now)."""
-        wanted = [str(s).strip().upper() for s in symbols if str(s).strip()]
-        if not wanted:
-            raise ValueError("Dùng: /stvcosan GEX,FPT (đánh dấu đã về) hoặc /stvcosan GEX 100 31347 (thêm cổ phiếu có sẵn)")
-        with self._real_lock:
-            real = self._real_for_update(book)
-            missing = [s for s in wanted if s not in real.positions]
-            if missing:
-                raise ValueError(f"Danh mục không có: {', '.join(missing)}.")
-            for s in wanted:
-                real.positions[s].unsettled = []
-            real.save(self._book_path(book))
-        return (f"✅ {', '.join(wanted)}: đã tính là cổ phiếu có sẵn, bán được ngay. Nếu các mã này mua từ trước, tiền "
-                "mặt đã bị trừ lúc ghi /stvkhop: cập nhật /stvvon theo số dư thật.")
-
-    def stv_reset(self, book: str = "stv") -> str:
-        """``/stvxoa danhmuc``: the owner's Siêu tín hiệu account from scratch - every holding
-        (unsettled lots included), the cash, the recorded fills and NAV history, and the SELL
-        alerts already sent. At once and for good (the owner chose no confirmation and no
-        undo). The comparison paper book and the watchlist are not touched. A damaged book
-        moved aside earlier stays where it is; the account starts again beside it."""
-        from tradingagents.trading.ledger import Ledger, LedgerLoadError
-        from vnbot import external as x
-
-        with self._real_lock:
-            path = self._book_path(book)
-            try:
-                old = self.real(book)
-                damaged = ""
-            except LedgerLoadError as exc:
-                old, damaged = None, str(exc)
-            if old is not None and not path.exists():
-                return "Danh mục Siêu tín hiệu đang trống (chưa có mã, tiền mặt, lệnh nào): không có gì để xoá."
-            if old is not None and not old.positions and not old.fills and not old.cash and not old.history:
-                return "Danh mục Siêu tín hiệu đang trống (chưa có mã, tiền mặt, lệnh nào): không có gì để xoá."
-            Ledger(cash=0.0, start_cash=0.0).save(path)
-            try:
-                x.SellAlerts(self.settings.data_dir).path.unlink()
-            except FileNotFoundError:
-                pass
-        lines = ["🗑️ Đã xoá toàn bộ danh mục Siêu tín hiệu của anh:"]
-        if old is None:
-            aside = sorted(path.parent.glob(f"{path.name}.corrupt-*"))
-            lines.append("• sổ cũ bị hỏng" + (f" (bản hỏng {aside[-1].name} để nguyên, không xoá)" if aside else "")
-                         + f": {damaged[:80]}" * (not aside))
-        else:
-            held = sorted(old.positions.values(), key=lambda p: p.symbol)
-            lines.append(f"• {len(held)} mã: " + ", ".join(f"{p.symbol} {_fmt(p.qty)} cp" for p in held) if held
-                         else "• không có mã nào đang giữ")
-            lines.append(f"• tiền mặt {_fmt(old.cash)} đ")
-            lines.append(f"• {len(old.fills)} lệnh đã ghi và lịch sử giá trị tài khoản")
-        lines += ["• các tin báo bán đã gửi (mã mua lại sẽ được báo bán lại)",
-                  "Không hoàn tác được. Sổ ảo so sánh và watchlist giữ nguyên.",
-                  "Bắt đầu lại: /stvvon 200000000 (tiền mặt), rồi /stvcosan MÃ KL GIÁ (cổ phiếu có sẵn) hoặc /stvkhop mua ..."]
-        return "\n".join(lines)
-
     def _strategy_switch_notice(self, last: dict, real) -> str:
         """A one-time note when the real signals follow another strategy than in the last
         report (a changed SIGNAL_STRATEGY, or the default that moved from momentum to
@@ -1949,7 +1847,10 @@ class TradingBot:
                 new = [n for n in notes if isinstance(n, dict)]
                 fresh = {(n.get("kind"), n.get("symbol")) for n in new}
                 real.meta["notes"] = {"day": day, "notes": [n for n in old if (n.get("kind"), n.get("symbol")) not in fresh] + new}
-            real.save(self._book_path(book))
+            if book == "stv":
+                self.taisan.save_view(real)       # the Tài sản portfolio keeps its marks and levels itself
+            else:
+                real.save(self._book_path(book))
         return real, notes
 
     def _engine_session(self, day, sessions, paper, real, market, universe, params, *, final) -> dict:
@@ -2443,14 +2344,12 @@ class TradingBot:
 
     def record_fill(self, side: str, symbol: str, qty: int, price: float, day: str | None = None,
                     book: str = "real") -> str:
-        """Book a fill the owner made at the broker (/khop; /stvkhop for ``book="stv"``). Raises
-        ValueError with a Vietnamese message, leaving the book untouched, when it cannot have happened."""
-        if book != "stv":
-            return self._record_fill(side, symbol, qty, price, day, book)
-        try:
-            return _stv_words(self._record_fill(side, symbol, qty, price, day, book))
-        except ValueError as exc:
-            raise ValueError(_stv_words(str(exc))) from exc
+        """Book a fill the owner made at the broker (/khop). Raises ValueError with a Vietnamese
+        message, leaving the book untouched, when it cannot have happened. (The owner's own
+        portfolio is the Tài sản journal: /tsmua, /tsban.)"""
+        if book != "real":
+            raise ValueError("Danh mục tiền thật của anh ghi bằng /tsmua, /tsban (xem /ts).")
+        return self._record_fill(side, symbol, qty, price, day, book)
 
     def _record_fill(self, side, symbol, qty, price, day, book) -> str:
         from tradingagents.market import vn_rules
@@ -2465,15 +2364,11 @@ class TradingBot:
         if not _finite(price) or float(price) <= 0:
             raise ValueError("Giá khớp không hợp lệ.")
         price = float(price)
-        if side == "BUY" and book == "stv":
-            self._stv_prefetch(symbol)            # before the lock: /khop must not wait on the site
         with self._real_lock:
             real = self._real_for_update(book)
             day = self._fill_day(day, str(real.meta.get("last_day") or ""))
             stop = target1 = target2 = None
-            if side == "BUY" and book == "stv":
-                stop, target1 = self._stv_levels(symbol, day, price)
-            elif side == "BUY":
+            if side == "BUY":
                 if self.settings.signal_strategy == "factor":
                     pass                        # held until it leaves the basket: no stop, no target
                 elif self.settings.signal_strategy == "momentum":
@@ -2505,10 +2400,7 @@ class TradingBot:
             real.save(self._book_path(book))
         if side == "BUY":
             pos = real.positions[symbol]
-            if book == "stv":
-                note = (f"cắt lỗ theo trang {_fmt(pos.stop)}, mục tiêu {_fmt(pos.target1)}" if pos.stop
-                        else "chưa có mức cắt lỗ (không có tín hiệu MUA gần nhất của trang); thoát khi trang chuyển BÁN")
-            elif self.settings.signal_strategy == "factor":
+            if self.settings.signal_strategy == "factor":
                 note = "giữ tới khi rời rổ phòng thủ (hoặc VNINDEX dưới MA)"
             elif self.settings.signal_strategy == "momentum":
                 note = f"stop {_fmt(pos.stop)}" if pos.stop else "giữ tới khi rời rổ động lượng"
@@ -2540,14 +2432,11 @@ class TradingBot:
             pos.last_price, pos.last_date = float(bar.close), bar.date
 
     def record_free_shares(self, symbol: str, qty: int, day: str | None = None, book: str = "real") -> str:
-        """Book bonus shares or a stock dividend credited to the real account (/thuong;
-        /stvthuong): more shares at the same total cost. Raises ValueError (Vietnamese message)."""
-        if book != "stv":
-            return self._record_free_shares(symbol, qty, day, book)
-        try:
-            return _stv_words(self._record_free_shares(symbol, qty, day, book))
-        except ValueError as exc:
-            raise ValueError(_stv_words(str(exc))) from exc
+        """Book bonus shares or a stock dividend credited to the real account (/thuong): more
+        shares at the same total cost. Raises ValueError (Vietnamese message)."""
+        if book != "real":
+            raise ValueError("Cổ phiếu thưởng của danh mục tiền thật ghi bằng /tsthuong (xem /ts).")
+        return self._record_free_shares(symbol, qty, day, book)
 
     def _record_free_shares(self, symbol, qty, day, book) -> str:
         from tradingagents.market import vn_rules
@@ -2564,35 +2453,43 @@ class TradingBot:
         return (f"✅ Đã ghi {_fmt(qty)} cp {symbol} được nhận (thưởng/cổ tức bằng cổ phiếu) ngày {day}: "
                 f"đang giữ {_fmt(pos.qty)} cp, giá vốn {_fmt(pos.avg_price)}/cp.")
 
-    def _stv_prefetch(self, symbol: str) -> None:
-        """The site's history of ``symbol`` (one request, skipped when fetched in the last hours),
-        so a stock not followed yet still gets the site's cut-loss and target. Never raises."""
-        from vnbot import external
+    # ── the owner's Tài sản portfolio, every session ──
+    def taisan_day(self, day: str) -> str | None:
+        """The evening upkeep and report of the Tài sản portfolio for session ``day``: the
+        closes (and any gap since the last run filled), the ex-date marks of the levels, the
+        rights waiting to arrive, the shadow results, the risk figures, then the report.
+        None while the day's bar is not out; "" when the portfolio is empty."""
+        from tradingagents.market import vn_rules
+        from tradingagents.trading.ledger import LedgerLoadError
+        from vnbot.taisan import effective
 
-        try:
-            external.SignalStore(self.settings.data_dir).refresh([symbol])
-        except Exception as exc:  # noqa: BLE001 - then no levels, as before
-            logger.info("Siêu tín hiệu: %s not fetched for its levels: %s", symbol, exc)
-
-    def _stv_levels(self, symbol: str, day: str, price: float) -> tuple[float | None, float | None]:
-        """(cut-loss, target) of the site's plan for the latest BUY of ``symbol`` on or before the
-        fill day, when they make sense for the fill (cut-loss under it, target above)."""
-        from vnbot import external
-
-        store = external.SignalStore(self.settings.data_dir)
-        signal = store.state(symbol, day)
-        listed = store.listed_state(symbol, day)      # a stock of the free market list, maybe not followed
-        if listed is not None and (signal is None or str(listed.get("day")) > signal["day"]):
-            signal = listed
-        if not signal or signal["side"] != "BUY":
-            return None, None
-        stop, target = signal.get("sl"), signal.get("tp1")
-        if not (_finite(stop) and 0 < stop < price):
-            return None, None
-        return float(stop), (float(target) if _finite(target) and target > price else None)
+        account = self.taisan
+        if not effective(account.entries()):
+            return ""
+        vni = account.market.daily_closes(vn_rules.BENCHMARK, day)
+        if day not in vni:
+            return None
+        prev = vn_rules.prev_session(day)
+        if str(account.state().get("rebuilt_until") or "") < prev:
+            account.rebuild(through=prev)
+        account.record_day(day)
+        view = account.ledger_view()
+        if view.positions:
+            try:
+                self._mark_real(view, day, _Market(day), book="stv")
+            except (LedgerLoadError, Exception) as exc:  # noqa: BLE001 - the levels stay as they were
+                logger.warning("Tài sản: not marked on %s: %s", day, exc)
+        for step in (account.refresh_events, account.settle_shadow, account.refresh_analytics):
+            try:
+                step(day)
+            except Exception as exc:  # noqa: BLE001 - the report goes out without that part
+                logger.warning("Tài sản: %s on %s failed: %s", step.__name__, day, exc)
+        return account.report_text(day)
 
     def set_capital(self, cash: float, book: str = "real") -> str:
-        """Set the real book's cash (/von; /stvvon for ``book="stv"``), as the broker shows it."""
+        """Set the real book's cash (/von), as the broker shows it."""
+        if book != "real":
+            raise ValueError("Tiền mặt của danh mục tiền thật: /tsnap, /tsrut, /tstien (xem /ts).")
         if isinstance(cash, bool) or not _finite(cash) or float(cash) <= 0:
             raise ValueError("Vốn phải là một số lớn hơn 0.")
         if float(cash) > 1e13:
@@ -2631,7 +2528,8 @@ class TradingBot:
         from vnbot import external
 
         if external.enabled():
-            lines.append("📡 Siêu tín hiệu có danh mục riêng: /stvdanhmuc")
+            lines.append("📡 Sổ ảo so sánh Siêu tín hiệu: /stvdanhmuc")
+        lines.append("💼 Danh mục tiền thật của anh: /ts (trang web /taisan)")
         if self.settings.trade_mode == "signal":
             try:
                 real = self.real()

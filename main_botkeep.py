@@ -105,6 +105,7 @@ def _start():
                  "on (/webhook/zoom)" if zoom.commands_on else "off")
     trader = TradingBot(SETTINGS, watchlist, notify=bot.broadcast)
     bot.trader = trader
+    bot.taisan = trader.taisan          # the owner's real-money portfolio (/ts, the /taisan tab)
     jobs.start()
     bot.start()
     _announce_version(bot.broadcast)
