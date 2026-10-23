@@ -11,3 +11,5 @@ Test = 1/3 cuối. Điểm = lãi % − 0,5 × sụt giảm tối đa % (đúng 
 - `diagnostics.py`: phân bố action, cổng chặn, lệnh đặt/khớp, tỷ trọng đầu tư, đợt 2 → `engine_diagnostics.txt`.
 
 Kết luận và bảng tóm tắt: `BAO_CAO_RA_SOAT_2026-10-23.md`, mục E.
+
+Quy tắc bán cho danh mục Tài sản (v1.1.0), trên lịch sử tín hiệu công khai của sieutinhieu.vn: `thoat_tai_san.md` (chạy lại: `exit_rules.py`, `exit_rules_indep.py`; kết quả `exit_rules.txt`, `exit_rules_indep.txt`).

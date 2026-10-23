@@ -1569,8 +1569,11 @@ class TradingBot:
                 change = (price / pos.avg_price - 1) * 100 if pos.avg_price else 0.0
                 lines.append(f"{x.INDENT}Giá {_fmt(price)} ({label}) · lãi/lỗ theo giá vốn: {_money(money)} ({x.pct(change)})")
             free, note = _t2_now(pos)
-            lines.append(f"{x.INDENT}→ " + (f"BÁN {_fmt(free)} cp" if free else "chưa bán được")
-                         + (" (cân nhắc giảm một phần trước ATC)" if early and free else "")
+            # Backtest 2026-10-23 (docs/backtest_2026-10-23/thoat_tai_san.md): selling at the close on an
+            # early change was better than waiting for the site's SELL in 48% of 547 cases, on
+            # average no better - so the early alert says to wait for the site unless near the cut-loss.
+            lines.append(f"{x.INDENT}→ " + ("theo dõi, chờ trang chốt sau 15:10; chỉ bán sớm khi sát mức cắt lỗ"
+                                            if early else f"BÁN {_fmt(free)} cp" if free else "chưa bán được")
                          + (f"; {note}" if note else ""))
             if sig.get("estimate"):
                 lines.append(f"{x.INDENT}(ước tính của bot, chưa phải tín hiệu của trang; có thể đổi khi đóng cửa)")

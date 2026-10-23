@@ -24,13 +24,20 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 RELEASED = "2026-10-23"
-RELEASE_BUILD = "d6fd284"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "1a77c57"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.1.0", "2026-10-23", (
+        "Tài sản: danh mục tiền thật riêng (lệnh /ts, tab web /taisan), thay sổ /stvkhop",
+        "Nhập Excel của app cũ (xem trước, đối chiếu từng số), xuất Excel 4 sheet và CSV",
+        "Biểu đồ tài sản 7N đến Tất cả, so với VNINDEX theo đơn vị quỹ; quyền chờ về tính vào tài sản",
+        "Báo cáo Tài sản 15:30 qua Telegram và Zoom; cảnh báo bán ⛔ 🔴 🟠 🎯 kèm giá sau 5 và 10 phiên",
+        "Backtest quy tắc bán: giữ ⛔ hoặc 🔴; 🟠 chỉ để theo dõi (docs/backtest_2026-10-23/thoat_tai_san.md)",
+    )),
     ("v1.0.0", "2026-10-23", (
         "Bản phát hành đầu tiên: web, Telegram, Zoom, ba sổ ảo (Phòng thủ, Quant Engine, Động lượng), tín hiệu thật",
         "Rà soát toàn bộ mã nguồn: 22 lỗi đã sửa, 64 kiểm tra hồi quy mới (BAO_CAO_RA_SOAT_2026-10-23.md)",

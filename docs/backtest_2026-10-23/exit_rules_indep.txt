@@ -1,0 +1,18 @@
+owner R1 n=195 avg=0.52 median=-2.28 win=36.41 avg_loss=-5.76 under10=20 worst=-18.55 sessions=17.75
+owner R2 n=195 avg=0.34 median=-1.71 win=35.90 avg_loss=-4.70 under10=9 worst=-19.96 sessions=12.98
+owner R3 n=195 avg=-2.03 median=-6.61 win=15.38 avg_loss=-6.97 under10=10 worst=-16.41 sessions=70.34
+owner R4 n=195 avg=0.62 median=-3.03 win=33.33 avg_loss=-5.03 under10=3 worst=-16.41 sessions=14.88
+owner R5 n=195 avg=-0.70 median=-4.55 win=22.56 avg_loss=-5.34 under10=4 worst=-16.41 sessions=42.61
+  live R1 n=21 avg=-1.08 median=-1.04 win=42.86 avg_loss=-4.39 under10=0 worst=-8.87 sessions=9.90
+  live R2 n=21 avg=-0.82 median=-1.04 win=42.86 avg_loss=-4.00 under10=0 worst=-8.87 sessions=8.52
+  live R3 n=21 avg=-1.94 median=-1.58 win=38.10 avg_loss=-5.39 under10=0 worst=-7.24 sessions=9.48
+  live R4 n=21 avg=-1.12 median=-1.04 win=42.86 avg_loss=-4.45 under10=0 worst=-7.24 sessions=7.57
+all R1 n=582 avg=1.24 median=-1.73 win=35.91 avg_loss=-4.60 under10=31 worst=-21.15 sessions=17.33
+all R2 n=582 avg=1.08 median=-1.61 win=36.08 avg_loss=-4.14 under10=21 worst=-19.96 sessions=13.25
+all R3 n=582 avg=12.35 median=-6.51 win=22.51 avg_loss=-6.97 under10=29 worst=-16.41 sessions=88.05
+all R4 n=582 avg=1.14 median=-2.24 win=33.51 avg_loss=-4.26 under10=5 worst=-16.41 sessions=15.71
+all R5 n=582 avg=6.75 median=-4.39 win=27.32 avg_loss=-5.09 under10=7 worst=-16.41 sessions=51.88
+  live R1 n=51 avg=-0.36 median=-0.86 win=43.14 avg_loss=-3.52 under10=0 worst=-8.87 sessions=12
+  live R2 n=51 avg=-0.66 median=-0.90 win=41.18 avg_loss=-3.21 under10=0 worst=-8.87 sessions=9.47
+  live R3 n=51 avg=-0.86 median=-0.86 win=45.10 avg_loss=-5.25 under10=0 worst=-7.64 sessions=16.84
+  live R4 n=51 avg=-0.33 median=-0.86 win=43.14 avg_loss=-3.46 under10=0 worst=-7.24 sessions=10.92

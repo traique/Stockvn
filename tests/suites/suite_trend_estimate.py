@@ -204,7 +204,7 @@ t.ok("scan: a held stock past its level -> the holdings block, as the bot's esti
      scan1 and scan1.startswith("📡 SIÊU TÍN HIỆU · 09:54 22/10\n\n🔻 TÀI SẢN CỦA ANH · tín hiệu BÁN")
      and "🟠 Sớm · HDB 1.000 cp · bot ước tính đổi sang BÁN lúc 09:54 (giá 21.950 < mức 22.018)" in scan1
      and "(ước tính của bot, chưa phải tín hiệu của trang; có thể đổi khi đóng cửa)" in scan1
-     and "→ BÁN 1.000 cp" in scan1, scan1)
+     and "→ theo dõi, chờ trang chốt sau 15:10; chỉ bán sớm khi sát mức cắt lỗ" in scan1, scan1)
 t.ok("scan: nothing else past its level, no estimate block", "🧮" not in scan1 and "MSR" not in scan1, scan1)
 t.ok("scan: a watched stock without the site's signal fetched once (VNM), not the fresh ones",
      any(c[0] == ["VNM"] and c[1] == "2026-10-21T15:10" for c in refresh_calls), refresh_calls)

@@ -103,16 +103,52 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/khop mua FPT 100 56300 [YYYY-MM-DD]` | Báo đã khớp lệnh thật (ngày mặc định hôm nay); bán: `/khop ban FPT 100 58000` (chế độ `signal`; bán được cả lô lẻ, ví dụ 1150 cp). Bot từ chối lệnh không thể xảy ra: không đủ tiền, bán cổ phiếu chưa về (mua phiên T bán được từ chiều T+2, đếm theo lịch giao dịch có ngày lễ), ngày tương lai/cuối tuần/ngày lễ, hoặc ngày trước lệnh đã ghi gần nhất |
 | `/thuong FPT 150 [YYYY-MM-DD]` | Báo số cổ phiếu thưởng/cổ tức bằng cổ phiếu **đã về** tài khoản thật (số được nhận, không phải tổng đang giữ): cộng vào vị thế, giữ nguyên tổng giá vốn (chế độ `signal`) |
 | `/stv` · `/stv FPT` | Siêu tín hiệu: tổng quan so với các sổ của bot · tín hiệu và lịch sử tính lại của một mã (cần `SIEUTINHIEU=1`) |
-| `/stvdanhmuc` | Danh mục riêng của Siêu tín hiệu: tài khoản thật riêng và sổ ảo so sánh |
+| `/stvdanhmuc` | Sổ ảo so sánh của Siêu tín hiệu (danh mục tiền thật của anh nằm ở `/ts`) |
 | `/stvtheodoi` | Watchlist riêng của Siêu tín hiệu (tối đa 60 mã, mặc định đủ 60): xem · `bo NVL` · `them HAG` (khi còn chỗ) · `dat MÃ1,MÃ2,...` (đặt cả danh sách) · `macdinh` · `hoantac` (hoàn tác thay đổi vừa rồi) |
-| `/stvkhop` · `/stvcosan` · `/stvvon` · `/stvthuong` | Danh mục của anh theo sieutinhieu: báo đã mua/bán · thêm cổ phiếu có sẵn (`/stvcosan GEX 100 31347`, bán được ngay) hoặc đánh dấu đã về (`/stvcosan GEX,FPT`) · tiền mặt · cổ phiếu thưởng |
-| `/stvquet` · `/stvsang` | Quét ngay danh mục + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
+| `/stvquet` · `/stvsang` | Quét ngay danh mục Tài sản + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
 | `/stvthitruong` | Bot quét 300 mã thanh khoản cao nhất thị trường: mã đã qua mức đổi chiều (trong phiên: theo giá khớp; ngoài giờ: theo giá đóng cửa), so với phần trang cho xem miễn phí, và kết quả đối chiếu các phiên trước |
-| `/stvxoa danhmuc` | Xoá **ngay** toàn bộ danh mục Siêu tín hiệu của anh: mã đang giữ (cả lô chưa về), tiền mặt, lệnh đã ghi, lịch sử giá trị tài khoản, các tin báo bán đã gửi. **Không hoàn tác được.** Sổ ảo so sánh và watchlist giữ nguyên. Sau đó nhập lại bằng `/stvvon`, `/stvcosan`, `/stvkhop` |
 | `/stvdoichieu` | Đổi chiều trong phiên do bot ước tính cho danh mục + watchlist: mã đã qua mức đổi chiều, rồi mã sát mức (cách ≤ 2%). Ngoài giờ: mức giá đóng cửa sẽ làm từng mã đổi chiều ở phiên tới |
+| `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
 | `/id` | Telegram id của bạn |
 
 Mã nhận được các dạng `FPT`, `fpt`, `FPT.VN`, `HOSE:FPT`. Chỉ số (`VNINDEX`, `VN30`...) không có quyết định giao dịch nên bị từ chối.
+
+### Tài sản (danh mục tiền thật của anh)
+
+Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản ảo của bot hay sổ ảo so sánh Siêu tín hiệu**. Bot không bao giờ đặt lệnh hay đề xuất mua cho sổ này: anh tự mua bán trên app công ty chứng khoán rồi ghi lại. Dữ liệu nằm trong `data/taisan/`:
+
+- `journal.jsonl`: nhật ký chỉ ghi thêm (mua, bán, cổ phiếu thưởng, nạp, rút, cổ tức tiền, điều chỉnh tiền). Ghi sai thì huỷ: bot ghi thêm một dòng huỷ, không sửa dòng cũ. Danh mục luôn được tính lại từ nhật ký (giá vốn bình quân, T+2 theo lịch giao dịch có ngày lễ: mua phiên T bán được từ chiều T+2; cổ phiếu thưởng bán được ngay). Bot từ chối dòng không thể xảy ra (bán quá số đang có hoặc cổ phiếu chưa về, ngày tương lai, mua/bán ngày nghỉ). Tiền mặt âm chỉ cảnh báo, không chặn.
+- `state.json`: cắt lỗ/mục tiêu, ngưỡng tỷ trọng, các cảnh báo đã gửi và kết quả của chúng. `prices.json`: giá đóng cửa gốc (chưa điều chỉnh quyền) cho biểu đồ. `pending.json`: quyền chờ về.
+- **Giá theo đúng giá anh nhập:** phí mua anh tự cộng vào giá mua; giá bán ghi đúng giá khớp; bot không tự trừ phí hay thuế ở đâu cả. Phí, thuế, lãi ký quỹ chưa ghi thì khớp một lần bằng `/tstien SỐ_DƯ_THẬT` (một dòng điều chỉnh, tính vào lãi/lỗ, không vào vốn gốc).
+
+| Lệnh (Telegram và Zoom) | Việc |
+|---|---|
+| `/ts` | Tổng quan: tổng tài sản, tiền mặt, giá trị cổ phiếu, quyền chờ về, lãi/lỗ, từng mã |
+| `/tsmua FPT 20 73891 [YYYY-MM-DD] [ghi chú]` | Đã mua (giá đã gồm phí). Bot báo ngày bán được (T+2) và lấy cắt lỗ/mục tiêu của Siêu tín hiệu nếu anh chưa đặt |
+| `/tsban FPT 20 75000 [YYYY-MM-DD]` | Đã bán: lãi/lỗ theo giá vốn bình quân |
+| `/tsthuong FPT 15` · `/tscotuc FPT 2000 [số cp]` | Cổ phiếu thưởng đã về · cổ tức tiền đã về (đồng/cp; số cp mặc định lấy từ quyền chờ về hoặc số đang giữ) |
+| `/tsnap 50000000` · `/tsrut 10000000` | Nạp, rút tiền (thay đổi vốn gốc) |
+| `/tstien 1268895` | Đặt tiền mặt bằng số dư thật trên app CTCK (một dòng điều chỉnh) |
+| `/tscatlo FPT 52000 [60000]` · `/tscatlo FPT xoa` | Mức cắt lỗ [và mục tiêu] của anh · xoá |
+| `/tsnhatky [n]` · `/tshuy [số]` | Nhật ký (20 dòng) · huỷ dòng cuối hoặc dòng số đó |
+| `/tsbaocao` | Báo cáo ngay (như bản 15:30) |
+| `/tsnguong 25 40` | Ngưỡng tỷ trọng một mã: theo dõi, nguy hiểm (%) |
+| `/tsxuat` | File Excel (Telegram); Zoom trả về đường link tải trên web (cần mật khẩu web) |
+| `/tsnhap` | Gửi file `.xlsx` vào bot Telegram kèm chú thích `/tsnhap`: bot cho xem trước và đối chiếu; ghi bằng `/tsnhap xacnhan` (sổ trống) hoặc `/tsnhap thaythe` (thay toàn bộ, sổ cũ lưu bản sao); bỏ: `/tsnhap huy` |
+
+**Trang web `/taisan`** (tab Tài sản, cần mật khẩu web), bố cục như trang Danh mục của app cũ: tổng tài sản và lãi/lỗ phiên gần nhất (không tính nạp/rút), các ô tiền mặt, giá trị cổ phiếu, lãi/lỗ đã chốt và đang mở, cổ tức, quyền chờ về, biến động năm, điểm đa dạng hoá; **việc cần làm phiên tới**; tỷ trọng theo mã và theo ngành với cảnh báo (đổi ngưỡng ngay trên trang); bảng danh mục (giá vốn, thị giá, lãi/lỗ, tỷ trọng, cắt lỗ/mục tiêu, tín hiệu Siêu tín hiệu, cổ phiếu chờ T+2); **biểu đồ hiệu suất** 7N/1T/3T/6T/1N/Tất cả, xem theo đồng (tổng tài sản và vốn gốc) hoặc theo % so với VNINDEX, di chuột/chạm để xem từng ngày; rủi ro và tối ưu (biến động, cặp mã tương quan cao, tỷ trọng cân bằng rủi ro); quyền chờ về (nút ghi nhận khi về) và sắp tới; kết quả cảnh báo bán; form ghi giao dịch, tiền, cắt lỗ; nhật ký có nút huỷ; nhập Excel (xem trước rồi xác nhận, tối đa 1 MB), xuất Excel/CSV, xoá sổ (gõ `XOA`, sổ cũ lưu bản sao).
+
+**Biểu đồ:** một điểm mỗi phiên từ dòng đầu tiên của nhật ký, theo giá đóng cửa gốc (chưa điều chỉnh quyền, đúng với số cổ phiếu thật đang giữ). Phần trăm tính theo **đơn vị quỹ** nên nạp/rút tiền không bị tính là lãi/lỗ. Sau khi nhập Excel, bot dựng lại toàn bộ lịch sử (vài phút); sau đó mỗi phiên thêm một điểm lúc 15:30.
+
+**Quyền chờ về:** bot đọc lịch sự kiện (VCI) của các mã đã giữ trong 120 ngày. Cổ tức tiền và cổ phiếu thưởng đã qua ngày GDKHQ mà anh chưa ghi được tính vào tổng tài sản thành dòng riêng (cổ tức ước tính sau thuế 5%); ghi `/tsthuong` hoặc `/tscotuc` khi về thì dòng chờ tự chuyển thành tài sản thật. Quyền mua phát hành thêm không tính.
+
+**Báo cáo 15:30** (Telegram và Zoom, các ngày giao dịch; nguồn giá chưa có phiên thì chờ tới 18:00): tổng tài sản, hôm nay và từ đầu so với VNINDEX; **việc cần làm phiên tới** (⛔ đóng cửa dưới cắt lỗ, 🔴 Siêu tín hiệu BÁN, 🎯 chạm mục tiêu, ⚠️ tỷ trọng quá ngưỡng, kèm số cổ phiếu bán được từ sáng/chiều); từng mã; phân bổ; quyền chờ về và sắp tới (14 ngày); thứ Sáu thêm kết quả cảnh báo. Trước khi gửi bot hỏi lại tín hiệu ngày của các mã đang giữ.
+
+**Cảnh báo bán trong phiên** (lượt quét Siêu tín hiệu và cảnh báo trong phiên, ghi rõ "Tài sản"): ⛔ Khẩn giá thủng cắt lỗ · 🔴 Mạnh trang đã chốt BÁN · 🟠 Sớm đổi chiều trong phiên (chưa chốt) · 🎯 Chốt lời chạm mục tiêu. Mỗi cảnh báo được ghi lại và chấm **giá sau 5 và 10 phiên** (trang web và báo cáo thứ Sáu): giá thấp hơn nghĩa là bán theo cảnh báo là đúng.
+
+**Backtest các quy tắc bán** (23/10/2026, `docs/backtest_2026-10-23/thoat_tai_san.md`; 39 mã: 13 mã anh từng giao dịch và VN30, 582 lần MUA của trang): bán khi ⛔ **hoặc** 🔴 (cách bot đang báo) cho lãi trung bình như chỉ chờ trang BÁN (+1,1% so với +1,2% mỗi lệnh) nhưng số lệnh lỗ quá 10% giảm từ 31 xuống 5; trên 13 mã của anh đây là quy tắc tốt nhất (+0,6%/lệnh). Bán sớm theo 🟠 không tốt hơn chờ trang chốt (đúng 48% số lần), nên cảnh báo 🟠 khuyên theo dõi, chỉ bán sớm khi sát mức cắt lỗ. Giữ tới khi thủng cắt lỗ bắt được vài xu hướng rất lớn (VIC, VHM) nhưng thắng 23%, lỗ trung bình −7%, và thua trên 13 mã của anh.
+
+**Excel:** xuất 4 sheet như app cũ (*Vị thế hiện tại*, *Lịch sử giao dịch*, *Tổng quan*) thêm sheet *Tiền mặt* (nạp, rút, cổ tức, điều chỉnh), nên file xuất ra nhập lại được đầy đủ. Nhập file của app cũ: dòng "Bán … giá 0" (cổ phiếu thưởng app cũ ghi nhầm) được sửa thành cổ phiếu thưởng; số lượng bị tách lẻ (CTS 3.947 + 1.053) được gộp lại theo lịch sử; "Vốn gốc" thành một lần nạp ngày đầu tiên; phần chênh tiền mặt thành một dòng "Lỗ trước khi theo dõi". Bản xem trước đối chiếu lãi/lỗ đã chốt, từng lệnh bán, số cổ phiếu, lãi/lỗ tổng và tiền mặt với file.
 
 ### Trang web
 
@@ -120,12 +156,13 @@ Mã nhận được các dạng `FPT`, `fpt`, `FPT.VN`, `HOSE:FPT`. Chỉ số (
 - **Chỉ quyết định hệ thống**: như `/nhanh`.
 - **Theo dõi hằng ngày**: sửa danh sách watchlist.
 - Bảng **Nhà cung cấp AI**: thứ tự dự phòng và ai đang nghỉ vì lỗi/quota.
+- Trang **Tài sản** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên dưới.
 - Trang **Bot giao dịch** (`/bot`): biểu đồ NAV, hai danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
 - Nút mặt trời/mặt trăng trên thanh đầu trang đổi giao diện sáng/tối.
 
 ### Báo cáo tự động
 
-Hai lịch chạy độc lập (giờ Việt Nam):
+Ba lịch chạy độc lập (giờ Việt Nam):
 
 1. **Bot giao dịch** (nếu `TRADE_MODE` khác `off`), mỗi ngày lúc `TRADE_TIME` (mặc định = `DAILY_REPORT_TIME` nếu sau 15:05, ngược lại 15:30; **không bao giờ trước 15:05**, khi nến ngày mới chốt): khớp các phiên chưa xử lý, ra quyết định, đặt lệnh cho phiên tới cho cả ba chiến lược, gửi báo cáo 🛡️ Phòng thủ, 🤖 Quant Engine, 🚀 Động lượng và 📊 so sánh qua Telegram. Sau đó **tự hiệu chỉnh** (nếu `AUTO_CALIBRATE=1`) trên phiên vừa xử lý, gửi kết quả ⚙️.
 2. **Sàng lọc watchlist rồi mới gọi AI**, thứ Hai - thứ Sáu lúc `DAILY_REPORT_TIME` (có thể đặt buổi sáng; trước giờ đóng cửa phân tích dùng phiên đã đóng gần nhất). Quant Engine xét mọi mã của `SCAN_UNIVERSE` (mặc định `vn100`: rổ VN100 cộng watchlist; `vn30` hoặc `watchlist` để thu hẹp) mà không tốn lượt AI, rồi gửi một tin tóm tắt: số mã theo từng hành động, các mã được gửi AI, các mã đạt nhưng chưa gửi, và từng mã trong watchlist. Lượt quét VN100 mất vài phút vì phải tải giá, dòng tiền và tin tức của 100 mã. Ba tài khoản ảo không đổi rổ (`UNIVERSE_VN30`); chỉ `DAILY_AI_MAX` (mặc định 5) mã có hành động trong `DAILY_AI_ACTIONS` (mặc định `BUY,SELL`), xếp theo độ tin cậy của engine, mới được gửi AI, và chỉ khi hạn mức AI trong ngày còn đủ. Cách gửi theo `DAILY_AI_MODE`:
@@ -136,6 +173,7 @@ Hai lịch chạy độc lập (giờ Việt Nam):
    **Kết quả bóng:** mỗi lần phản biện được lưu (`data/critic_log.json`) và chấm trên các phiên sau đó. Lệnh MUA: vào giá đóng cửa ngày quyết định, chạm stop trước (−1R), chạm mục tiêu (+R:R), hoặc hết 20 phiên. Lệnh BÁN: giá sau 10 phiên. Tin hằng ngày và `/phanbien` cho biết các lệnh AI phản đối kết thúc ra sao, tức AI chặn đúng bao nhiêu phần trăm. 5 kết quả gần nhất được đưa vào lời nhắc của lần phản biện sau, không tốn thêm lượt gọi.
 
    Mã khác muốn AI xem thì gửi `/phanbien MÃ` (1 lượt) hoặc `/phantich MÃ` (đầy đủ).
+3. **Báo cáo Tài sản** (danh mục tiền thật), các ngày giao dịch lúc **15:30**, gửi Telegram và Zoom; chạy riêng, không phụ thuộc `TRADE_MODE` hay `SIEUTINHIEU`. Xem mục **Tài sản**.
 
 - **Ngày lễ:** bot giao dịch chỉ xử lý những phiên VNINDEX thực sự có nến, nên ngày lễ tự bỏ qua; phân tích watchlist cũng bỏ qua ngày lễ khi chạy sau 15:05.
 - **Chạy bù:** mỗi lần chạy (kể cả lúc server khởi động), bot xử lý lần lượt mọi phiên bị lỡ từ phiên cuối đã xử lý, mỗi phiên chỉ dùng dữ liệu tới phiên đó. Bù tối đa 20 phiên; phiên cũ hơn bị bỏ qua và lệnh chờ của chúng bị huỷ (báo cáo có ghi).
@@ -170,7 +208,7 @@ Hai lịch chạy độc lập (giờ Việt Nam):
 - **`/nhanh MÃ`** thêm một dòng 📡: tín hiệu gần nhất của trang và việc nó cùng hay khác chiều với hệ thống.
 - **Sổ ảo Siêu tín hiệu:** mua theo tín hiệu MUA mới (phát đúng ngày, không tính lịch sử trang tạo lại) ở **giá mở cửa phiên sau**, bán ở giá mở cửa phiên sau tín hiệu BÁN, chia đều 10 phần, có phí, thuế, T+2 - cùng luật với các sổ của bot. Báo cáo tối có mục 📡 (NAV, lệnh, tín hiệu mới trong watchlist kèm quyết định của bot, mã bot MUA mà trang đang BÁN).
 - **Bản tin sáng (Zoom)**, các ngày giao dịch lúc `STV_MORNING_TIME` (mặc định 08:30): danh sách tín hiệu toàn thị trường của phiên trước - phần xem miễn phí (trang khoá phần còn lại cho gói Premium, bot ghi rõ bao nhiêu mã bị khoá và không tìm cách mở khoá), tín hiệu mới và trạng thái của watchlist riêng (tín hiệu MUA kèm vùng vào, mục tiêu, cắt lỗ của trang), và danh mục của anh với lãi/lỗ thực tế. Gửi vào Zoom; chưa cài Zoom hoặc Zoom gửi lỗi thì gửi Telegram. Gửi ngay: `/stvsang`. Danh sách toàn thị trường được lấy lúc chạy tối (sau 15:10, khi trang đã chốt phiên); thiếu thì bot hỏi lại 15 phút một lần tới 21:00 (tối đa 8 lần). `STV_MORNING_TIME` phải trước 11:30; cần `TRADE_MODE` khác `off`. Nếu nguồn giá chưa có phiên gần nhất, bản tin ghi cảnh báo.
-- **Danh mục của anh theo sieutinhieu:** **anh tự quyết định mua** (bot không đề xuất mua hay khối lượng), rồi báo `/stvkhop mua GEX 800 23900` (lô lẻ dưới 100 cp cũng được, ví dụ `/stvkhop mua GEX 50 23900`); bot lấy cắt lỗ và mục tiêu của trang (cả với mã chỉ có trong danh sách miễn phí). Cổ phiếu đã có từ trước: `/stvcosan GEX 100 31347` (giá vốn, bán được ngay, không trừ tiền); mã đã ghi mà thật ra mua từ trước: `/stvcosan GEX,FPT`. `/stvvon` tiền mặt, `/stvthuong` cổ phiếu thưởng.
+- **Danh mục tiền thật của anh** nằm ở mục **Tài sản** (`/ts`, trang `/taisan`); các lệnh cũ `/stvkhop`, `/stvcosan`, `/stvvon`, `/stvthuong`, `/stvxoa` đã bỏ, gõ vào bot sẽ chỉ sang lệnh `/ts` tương ứng. Mua mới ghi bằng `/tsmua`: bot lấy cắt lỗ và mục tiêu của trang nếu anh chưa tự đặt.
 - **Quét tín hiệu (danh mục + watchlist):** trong ngày giao dịch, từ 09:00 tới 17:00, cứ `STV_SCAN_MINUTES` phút (mặc định 15) bot quét; một mã có ở cả danh mục và watchlist chỉ hỏi trang một lần.
   - **Danh mục của anh:** quét cả ngày (vài mã, rất nhẹ).
   - **60 mã watchlist:** tín hiệu từng mã của trang là tín hiệu ngày, chỉ có sau giờ đóng cửa (~15:08), trong phiên không đổi (đã kiểm tra trực tiếp ngày 22/10). Vì vậy watchlist được quét từ 15:15 tới 16:00 (khoảng 3 lượt, mỗi lượt 60 mã mất chừng 2 phút) và bot nhắn ngay các tín hiệu MUA/BÁN mới của ngày, kèm vùng vào, mục tiêu, cắt lỗ; không phải chờ báo cáo tối hay bản tin sáng. Muốn quét cả trong phiên: `STV_WATCH_INTRADAY=1` (khoảng 2.000 lượt hỏi trang mỗi ngày thay vì vài trăm).
@@ -186,10 +224,10 @@ Hai lịch chạy độc lập (giờ Việt Nam):
     - **Sau 15:15**, khi trang đã chốt: nhắn bản đối chiếu. Bot (300 mã) và trang (toàn thị trường, tính cả mã đổi chiều trong phiên rồi quay lại) không cùng phạm vi, nên chỉ so được đúng-sai trên các mã anh theo dõi (trang có tín hiệu từng mã): bot đúng bao nhiêu tín hiệu của trang, báo thừa, báo sót, trạng thái khớp bao nhiêu mã. Kết quả cộng dồn qua các phiên (lưu `data/external/market_compare.json`).
     - Thử thật ngày 22/10: bot thấy 13 mã sang MUA, 2 mã sang BÁN trong 300 mã. Trên 60 mã watchlist, trang chốt 4 MUA và bot đúng cả 4, không báo thừa; trạng thái khớp 60/60.
     - Xem: `/stvthitruong`. Tắt: `STV_MARKET=0`. Đổi số mã: `STV_MARKET_SIZE` (50-500).
-- **Báo bán cho danh mục:** từng lượt quét ở trên. Khi trang có tín hiệu **BÁN** cho một mã trong danh mục, bot nhắn Zoom (Telegram dự phòng): giá hiện tại, lãi/lỗ nếu bán, khối lượng bán được (tính T+2); tín hiệu trong phiên được ghi rõ "có thể đổi khi đóng cửa". Mỗi tín hiệu chỉ báo một lần (tín hiệu trong phiên được báo lại một lần khi chốt lúc đóng cửa); không lấy được tín hiệu thì bot báo một lần trong ngày. Quét ngay: `/stvquet`. Cảnh báo cắt lỗ/mục tiêu trong phiên vẫn như trước.
-- **Lãi/lỗ thực tế** (`/stvdanhmuc`, `/stv`): trong giờ giao dịch theo giá khớp mới nhất, ngoài giờ theo giá đóng cửa; là số tiền thật nhận về nếu bán ngay - đã trừ phí bán và thuế 0,1% (phí mua đã nằm trong giá vốn). Từng mã và tổng, bằng tiền và phần trăm.
+- **Báo bán cho danh mục Tài sản:** từng lượt quét ở trên. Khi trang có tín hiệu **BÁN** cho một mã anh đang giữ, bot nhắn Zoom (Telegram dự phòng): 🔴 Mạnh khi trang đã chốt, 🟠 Sớm khi mới đổi chiều trong phiên (của trang hoặc bot ước tính), giá hiện tại, lãi/lỗ theo giá vốn, khối lượng bán được (tính T+2); tín hiệu trong phiên được ghi rõ "có thể đổi khi đóng cửa". Mỗi tín hiệu chỉ báo một lần (tín hiệu trong phiên được báo lại một lần khi chốt lúc đóng cửa); không lấy được tín hiệu thì bot báo một lần trong ngày. Quét ngay: `/stvquet`. Cảnh báo cắt lỗ/mục tiêu trong phiên vẫn như trước.
+- **Lãi/lỗ của danh mục Tài sản** (`/ts`, `/stv`, bản tin sáng): trong giờ giao dịch theo giá khớp mới nhất, ngoài giờ theo giá đóng cửa; tính theo đúng giá anh nhập (giá mua đã gồm phí do anh cộng vào, giá bán không trừ phí/thuế). Sổ ảo so sánh vẫn tính phí và thuế như các sổ của bot.
 - **Tin nhắn dễ đọc trên điện thoại:** chia mục có biểu tượng (📊 toàn thị trường, 👀 watchlist, 💼 tài khoản thật), mỗi mã một dòng, chi tiết (vùng vào, mục tiêu, cắt lỗ) ở dòng thụt vào bên dưới.
-- **`/stv`**: tổng quan - tài khoản thật riêng, sổ ảo, lợi nhuận của từng sổ so với các sổ của bot. **`/stvdanhmuc`**: từng mã đang giữ. **`/stv MÃ`**: tín hiệu của một mã và lịch sử của nó tính lại hai cách - theo giá tín hiệu (giá đóng cửa ngày phát, chưa phí) và làm được thật (mở cửa phiên sau, có phí). Lịch sử cũ của trang được tạo lại hàng loạt (backtest), nên chỉ sổ ảo chạy từ hôm bật mới là phép so sánh công bằng.
+- **`/stv`**: tổng quan - dòng Tài sản của anh, sổ ảo, lợi nhuận của từng sổ so với các sổ của bot. **`/stvdanhmuc`**: từng mã của sổ ảo so sánh. **`/stv MÃ`**: tín hiệu của một mã và lịch sử của nó tính lại hai cách - theo giá tín hiệu (giá đóng cửa ngày phát, chưa phí) và làm được thật (mở cửa phiên sau, có phí). Lịch sử cũ của trang được tạo lại hàng loạt (backtest), nên chỉ sổ ảo chạy từ hôm bật mới là phép so sánh công bằng.
 
 ### Cảnh báo trong phiên (không gọi AI)
 
@@ -357,9 +395,9 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 
 Bot ghi số phiên bản ở một chỗ (`vnbot/version.py`) và hiện ở:
 
-- **Web:** nút nhỏ `v1.0.0` cạnh logo ở mọi trang (chuyển đỏ `v1.0.0 ⚠` nếu code khác bản phát hành), dòng cuối trang, trang **`/phienban`** (bản đang chạy, mã bản dựng, thời gian chạy, lịch sử phiên bản, cách cập nhật), và `/health`.
+- **Web:** nút nhỏ `v1.1.0` cạnh logo ở mọi trang (chuyển đỏ `v1.1.0 ⚠` nếu code khác bản phát hành), dòng cuối trang, trang **`/phienban`** (bản đang chạy, mã bản dựng, thời gian chạy, lịch sử phiên bản, cách cập nhật), và `/health`.
 - **Telegram / Zoom:** lệnh **`/phienban`**, dòng đầu của `/trogiup` và `/trangthai`.
-- **Tự báo khi cập nhật:** lần khởi động đầu tiên sau khi upload bản mới, bot nhắn vào Telegram/Zoom “🆕 Bot đã cập nhật: v1.0.0 → v1.0.1” kèm những gì mới; khởi động lại bình thường thì không nhắn.
+- **Tự báo khi cập nhật:** lần khởi động đầu tiên sau khi upload bản mới, bot nhắn vào Telegram/Zoom “🆕 Bot đã cập nhật: v1.0.0 → v1.1.0” kèm những gì mới; khởi động lại bình thường thì không nhắn.
 
 **Mã bản dựng** (7 ký tự, ví dụ `1a2b3c4`) là dấu vân tay của toàn bộ code đang chạy. Cùng một bộ file cho cùng một mã trên mọi máy, nên bot biết server có chạy **đúng bản phát hành** không. Báo **khác bản phát hành** nghĩa là upload thiếu file, lẫn file của bản cũ, hoặc code đã bị sửa: hãy upload lại đủ gói.
 

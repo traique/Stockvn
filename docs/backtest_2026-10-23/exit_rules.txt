@@ -1,0 +1,18 @@
+symbols 39 signals 1170
+owner R1 {"trades": 195, "closed": 184, "win": 36.41, "avg": 0.52, "median": -2.28, "worst": -18.55, "best": 70.58, "sessions": 17.75, "why": {"site": 184, "early": 0, "stop": 0, "open": 11}, "sym_comp_mean": 0.23, "sym_comp_median": 2.49}
+   live {"trades": 21, "closed": 10, "win": 42.86, "avg": -1.08, "median": -1.04, "worst": -8.87, "best": 7.29, "sessions": 9.9, "why": {"site": 10, "early": 0, "stop": 0, "open": 11}}
+owner R2 {"trades": 195, "closed": 184, "win": 35.9, "avg": 0.34, "median": -1.71, "worst": -19.96, "best": 69.56, "sessions": 12.98, "why": {"site": 4, "early": 180, "stop": 0, "open": 11}, "sym_comp_mean": 2.11, "sym_comp_median": -4.55}
+   live {"trades": 21, "closed": 10, "win": 42.86, "avg": -0.82, "median": -1.04, "worst": -8.87, "best": 7.29, "sessions": 8.52, "why": {"site": 0, "early": 10, "stop": 0, "open": 11}}
+owner R3 {"trades": 61, "closed": 49, "win": 18.03, "avg": 0.1, "median": -6.62, "worst": -16.41, "best": 98.05, "sessions": 94.69, "why": {"site": 0, "early": 0, "stop": 49, "open": 12}, "sym_comp_mean": 1.11, "sym_comp_median": -9.22}
+   live {"trades": 8, "closed": 4, "win": 37.5, "avg": -2.27, "median": -3.5, "worst": -7.24, "best": 5.31, "sessions": 9, "why": {"site": 0, "early": 0, "stop": 4, "open": 4}}
+owner R4 {"trades": 195, "closed": 184, "win": 33.33, "avg": 0.62, "median": -3.03, "worst": -16.41, "best": 70.58, "sessions": 14.88, "why": {"site": 116, "early": 0, "stop": 68, "open": 11}, "sym_comp_mean": 3.2, "sym_comp_median": -3.76}
+   live {"trades": 21, "closed": 10, "win": 42.86, "avg": -1.12, "median": -1.04, "worst": -7.24, "best": 7.29, "sessions": 7.57, "why": {"site": 5, "early": 0, "stop": 5, "open": 11}}
+all R1 {"trades": 582, "closed": 559, "win": 35.91, "avg": 1.24, "median": -1.73, "worst": -21.15, "best": 78.8, "sessions": 17.33, "why": {"site": 559, "early": 0, "stop": 0, "open": 23}, "sym_comp_mean": 19.54, "sym_comp_median": 6.29}
+   live {"trades": 51, "closed": 28, "win": 43.14, "avg": -0.36, "median": -0.86, "worst": -8.87, "best": 18.19, "sessions": 12, "why": {"site": 28, "early": 0, "stop": 0, "open": 23}}
+all R2 {"trades": 582, "closed": 562, "win": 36.08, "avg": 1.08, "median": -1.61, "worst": -19.96, "best": 91.7, "sessions": 13.25, "why": {"site": 15, "early": 547, "stop": 0, "open": 20}, "sym_comp_mean": 17.68, "sym_comp_median": 2.17}
+   live {"trades": 51, "closed": 31, "win": 41.18, "avg": -0.66, "median": -0.9, "worst": -8.87, "best": 9.29, "sessions": 9.47, "why": {"site": 0, "early": 31, "stop": 0, "open": 20}}
+all R3 {"trades": 133, "closed": 96, "win": 27.07, "avg": 14.13, "median": -6.52, "worst": -16.41, "best": 1052.99, "sessions": 132.89, "why": {"site": 0, "early": 0, "stop": 96, "open": 37}, "sym_comp_mean": 43.83, "sym_comp_median": 6.09}
+   live {"trades": 9, "closed": 4, "win": 44.44, "avg": -1.87, "median": -1.04, "worst": -7.24, "best": 5.31, "sessions": 8.22, "why": {"site": 0, "early": 0, "stop": 4, "open": 5}}
+all R4 {"trades": 582, "closed": 559, "win": 33.51, "avg": 1.14, "median": -2.24, "worst": -16.41, "best": 78.8, "sessions": 15.71, "why": {"site": 434, "early": 0, "stop": 125, "open": 23}, "sym_comp_mean": 19.57, "sym_comp_median": 7.59}
+   live {"trades": 51, "closed": 28, "win": 43.14, "avg": -0.33, "median": -0.86, "worst": -7.24, "best": 18.19, "sessions": 10.92, "why": {"site": 21, "early": 0, "stop": 7, "open": 23}}
+early exits better than waiting for the site: 262 / 547

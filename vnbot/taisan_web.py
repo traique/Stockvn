@@ -44,6 +44,12 @@ def _p1(value) -> str:
     return "—" if value is None else f"{value:.1f}%".replace(".", ",")
 
 
+def _price_label(label: str) -> str:
+    """"giá đóng cửa gần nhất" / "khớp 10:30" -> "Giá đóng cửa gần nhất" / "Giá khớp 10:30"."""
+    label = (label or "gần nhất").strip()
+    return "Giá " + (label[4:] if label.lower().startswith("giá ") else label)
+
+
 def _p0(value) -> str:
     return "—" if value is None else f"{value:.0f}%"
 
@@ -231,7 +237,7 @@ def _holdings(account: ts.TaiSan, s: dict, book: ts.Book, site: dict) -> str:
                       ("Siêu tín hiệu", ""), ("Mua từ", "num")], rows,
                      "Chưa nắm giữ cổ phiếu nào.")
     return ui.card("Danh mục đang nắm giữ", table, flush=True,
-                   sub=f"Giá {e(s['label'] or 'gần nhất')} · giá vốn đã gồm phí mua · cắt lỗ/mục tiêu in đậm: anh đặt, "
+                   sub=f"{e(_price_label(s['label']))} · giá vốn đã gồm phí mua · cắt lỗ/mục tiêu in đậm: anh đặt, "
                        "thường: theo Siêu tín hiệu · “về dd/mm”: cổ phiếu chờ T+2, bán được từ chiều ngày đó")
 
 
