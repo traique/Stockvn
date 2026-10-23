@@ -323,9 +323,6 @@ def preview(account: ts.TaiSan, data: bytes, *, filename: str = "") -> str:
         kinds[e.kind] = kinds.get(e.kind, 0) + 1
     current = ts.effective(account.entries())
     digest = hashlib.sha256(data).hexdigest()[:12]
-    ts._write_json(account.import_path, {"created": ts.now_vn().isoformat(timespec="seconds"), "digest": digest,
-                                         "filename": filename, "entries": got["entries"],
-                                         "prices": got.get("prices") or {}})
     lines = [f"📥 XEM TRƯỚC NHẬP EXCEL{f' · {filename}' if filename else ''}",
              f"{len(entries)} dòng: " + ", ".join(f"{ts.KIND_VI[k]} {n}" for k, n in sorted(kinds.items())),
              f"Từ {ts.ddmmyyyy(book.first_day)} tới {ts.ddmmyyyy(book.last_day)}", ""]
@@ -344,7 +341,17 @@ def preview(account: ts.TaiSan, data: bytes, *, filename: str = "") -> str:
                      "(sổ cũ được lưu bản sao). Bỏ: /tsnhap huy")
     else:
         lines.append("Ghi vào danh mục: /tsnhap xacnhan · bỏ: /tsnhap huy")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    ts._write_json(account.import_path, {"created": ts.now_vn().isoformat(timespec="seconds"), "digest": digest,
+                                         "filename": filename, "entries": got["entries"],
+                                         "prices": got.get("prices") or {}, "text": text})
+    return text
+
+
+def pending(account: ts.TaiSan) -> dict | None:
+    """The file waiting for confirmation (its preview ``text``, ``filename``, ``created``), or None."""
+    data = ts._read_json(account.import_path, {})
+    return data if isinstance(data, dict) and data.get("entries") else None
 
 
 def confirm(account: ts.TaiSan, *, replace: bool) -> str:
@@ -461,6 +468,8 @@ def export_xlsx(account: ts.TaiSan, path: Path) -> Path:
             for c in col[1:]:
                 if isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
                     c.number_format = "#,##0" if float(c.value).is_integer() else "#,##0.00"
+                elif isinstance(c.value, str) and c.value.startswith("="):
+                    c.data_type = "s"            # a note typed as "=..." stays text, never a formula
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
@@ -478,8 +487,13 @@ def export_csv(account: ts.TaiSan) -> str:
         amount = (-e.amount if e.kind == "WITHDRAW" else e.amount) if e.kind in ts.CASH_KINDS else round(e.qty * e.price)
         writer.writerow([e.day, ts.KIND_VI[e.kind], e.symbol, e.qty or "", e.price or "", round(amount, 2),
                          round(r.avg_cost, 2) if r.avg_cost is not None else "",
-                         round(r.pnl, 2) if r.pnl is not None else "", e.note])
-    return "﻿" + out.getvalue()
+                         round(r.pnl, 2) if r.pnl is not None else "", _cell_text(e.note)])
+    return "\ufeff" + out.getvalue()
+
+
+def _cell_text(text: str) -> str:
+    """A note a spreadsheet would read as a formula (=, +, -, @) is kept as text."""
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
 
 
 def json_dump(value) -> str:

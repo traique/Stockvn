@@ -257,6 +257,27 @@ tr.changed td{background:var(--brand-soft)}
 .legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--ink-2);margin-bottom:10px}
 .legend .ln{display:inline-block;width:18px;height:0;border-top:2.5px solid;vertical-align:4px;margin-right:6px}
 .legend .ln.dash{border-top-style:dashed}
+/* Tài sản */
+select,textarea{width:100%;font:inherit;padding:12px 14px;border-radius:12px;border:1px solid var(--line-strong);
+  background:var(--surface-2);color:var(--ink);outline:none}
+select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 0 4px var(--brand-soft)}
+input[type=file]{padding:9px 10px}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+.seg button{font:600 12.5px/1 "Be Vietnam Pro",sans-serif;padding:8px 11px;border-radius:9px;border:0;background:none;
+  color:var(--muted);cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.chart-bar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;margin-bottom:12px}
+.bars{display:flex;flex-direction:column;gap:12px}
+.bars .h{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;margin-bottom:5px}
+.bars .track{height:8px;border-radius:999px;background:var(--surface-3);overflow:hidden}
+.bars .track>span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),var(--gold-2))}
+.bars .watch .track>span{background:var(--warn)}.bars .danger .track>span{background:var(--down)}
+.asum{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--ink-2);margin-top:10px}
+.inline{display:inline;margin:0}
+.linkbtn{border:0;background:none;padding:0;font:inherit;font-size:12.5px;color:var(--down);cursor:pointer}
+.linkbtn:hover{text-decoration:underline}
+tr.void td{opacity:.5;text-decoration:line-through}
+@media (max-width:620px){.stat .v{font-size:18px}}
 footer{max-width:1120px;margin:0 auto;padding:0 16px 36px;color:var(--muted);font-size:12px;display:flex;flex-wrap:wrap;
   justify-content:space-between;gap:8px}
 footer::before{content:"";flex-basis:100%;height:1px;background:var(--hair);margin-bottom:14px}
@@ -276,7 +297,8 @@ MOON = ('<svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColo
 e = html.escape
 
 
-NAV = (("home", "/", "Phân tích"), ("ai", "/ai", "AI & cảnh báo"), ("bot", "/bot", "Bot giao dịch"))
+NAV = (("home", "/", "Phân tích"), ("taisan", "/taisan", "Tài sản"), ("ai", "/ai", "AI & cảnh báo"),
+       ("bot", "/bot", "Bot giao dịch"))
 
 
 def page(title: str, body: str, *, active: str = "", refresh: int | None = None, show_bot: bool = True,
@@ -510,3 +532,100 @@ def nav_chart(dates: list[str], series: list[dict], *, run_time: str | None = No
             f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="NAV các tài khoản so với VNINDEX, chỉ số hoá 100">'
             f'{"".join(grid)}{base}{"".join(lines)}{"".join(labels)}{axis}{hair}{hit}</svg>'
             f'<div class="tip"></div></div>{_CHART_JS}')
+
+
+# ─── asset chart (Tài sản) ────────────────────────────────────────────────────
+
+_ASSET_JS = """<script>
+(function(){
+  document.querySelectorAll('.achart[data-points]').forEach(function(box){
+    var P=JSON.parse(box.getAttribute('data-points')),svg=box.querySelector('svg'),tip=box.querySelector('.tip'),
+        leg=box.querySelector('.legend'),sum=box.querySelector('.asum'),
+        W=680,H=280,L=70,R=14,T=14,B=30,st={range:box.getAttribute('data-range')||'0',mode:'vnd'},cur=null;
+    function money(v){if(v==null)return'—';var a=Math.abs(v),s=v<0?'-':'';
+      if(a>=1e9)return s+(a/1e9).toFixed(2).replace('.',',')+' tỷ';
+      if(a>=1e6)return s+(a/1e6).toFixed(1).replace('.',',')+' tr';return s+Math.round(a).toLocaleString('vi-VN');}
+    function full(v){return v==null?'—':Math.round(v).toLocaleString('vi-VN');}
+    function pc(v){return v==null?'—':(v>=0?'+':'')+v.toFixed(2).replace('.',',')+'%';}
+    function dmy(d){return d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4);}
+    function span(){var n=P.d.length,days=+st.range;if(!days)return[0,n];
+      var t=new Date(P.d[n-1]+'T00:00:00Z');t.setUTCDate(t.getUTCDate()-days);var from=t.toISOString().slice(0,10),i=0;
+      for(var j=0;j<n;j++){if(P.d[j]<=from)i=j;}return[i,n];}
+    function rebase(arr,a,b){var base=null;for(var j=a;j<b;j++){if(arr[j]!=null){base=arr[j];break;}}
+      var out=[];for(var k=a;k<b;k++)out.push(base&&arr[k]!=null?(arr[k]/base-1)*100:null);return out;}
+    function el(tag,attrs){var e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(var k in attrs)e.setAttribute(k,attrs[k]);return e;}
+    function draw(){
+      var r=span(),a=r[0],b=r[1],m=b-a;svg.innerHTML='';tip.style.opacity=0;
+      if(m<2){sum.textContent='Chưa đủ dữ liệu cho khoảng này.';leg.innerHTML='';cur=null;return;}
+      var S;
+      if(st.mode==='vnd'){S=[{n:'Tổng tài sản',c:'var(--gold)',v:P.t.slice(a,b),area:1},{n:'Vốn gốc',c:'var(--c-bench)',v:P.c.slice(a,b),dash:1}];}
+      else{S=[{n:'Danh mục',c:'var(--gold)',v:rebase(P.n,a,b)},{n:'VNINDEX',c:'var(--c-factor)',v:rebase(P.v,a,b),dash:1}];}
+      var vals=[];S.forEach(function(s){s.v.forEach(function(x){if(x!=null)vals.push(x);});});
+      if(st.mode==='pct')vals.push(0);
+      var lo=Math.min.apply(null,vals),hi=Math.max.apply(null,vals),pad=Math.max((hi-lo)*0.1,st.mode==='pct'?0.5:Math.abs(hi)*0.01+1);
+      lo-=pad;hi+=pad;
+      function x(i){return L+i/(m-1)*(W-L-R);}function y(v){return T+(hi-v)/(hi-lo)*(H-T-B);}
+      for(var k=0;k<4;k++){var v=lo+(hi-lo)*k/3;svg.appendChild(el('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),style:'stroke:var(--line);stroke-width:1'}));
+        var tx=el('text',{x:L-8,y:y(v)+4,'text-anchor':'end',style:'fill:var(--muted);font-size:12px'});
+        tx.textContent=st.mode==='pct'?(v>=0?'+':'')+v.toFixed(1).replace('.',',')+'%':money(v);svg.appendChild(tx);}
+      if(st.mode==='pct')svg.appendChild(el('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),style:'stroke:var(--line-strong);stroke-width:1'}));
+      S.forEach(function(s){var pts=[];s.v.forEach(function(v,i){if(v!=null)pts.push([x(i),y(v)]);});if(pts.length<2)return;
+        var d=pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ');
+        if(s.area){svg.appendChild(el('polygon',{points:pts[0][0].toFixed(1)+','+(H-B)+' '+d+' '+pts[pts.length-1][0].toFixed(1)+','+(H-B),
+          style:'fill:'+s.c+';opacity:.12'}));}
+        svg.appendChild(el('polyline',{points:d,fill:'none',style:'stroke:'+s.c+';stroke-width:2;stroke-linejoin:round;stroke-linecap:round;'+(s.dash?'stroke-dasharray:5 4':'')}));});
+      [[0,'start'],[m-1,'end']].forEach(function(q){var tx=el('text',{x:x(q[0]),y:H-8,'text-anchor':q[1],style:'fill:var(--muted);font-size:12px'});
+        tx.textContent=dmy(P.d[a+q[0]]);svg.appendChild(tx);});
+      var hair=el('line',{x1:0,x2:0,y1:T,y2:H-B,style:'stroke:var(--muted);stroke-width:1;opacity:0'});svg.appendChild(hair);
+      var hit=el('rect',{x:L,y:0,width:W-L-R,height:H,fill:'transparent'});svg.appendChild(hit);
+      leg.innerHTML=S.map(function(s){return '<span><span class="ln'+(s.dash?' dash':'')+'" style="border-color:'+s.c+'"></span>'+s.n+'</span>';}).join('');
+      var nav=rebase(P.n,a,b),vni=rebase(P.v,a,b),last=b-1;
+      sum.innerHTML='<span>Từ <b>'+dmy(P.d[a])+'</b>: tổng tài sản '+money(P.t[a])+' → <b>'+money(P.t[last])+'</b></span>'
+        +'<span>Danh mục <b class="'+(nav[m-1]>=0?'pos':'neg')+'">'+pc(nav[m-1])+'</b></span>'
+        +(vni[m-1]!=null?'<span>VNINDEX <b class="'+(vni[m-1]>=0?'pos':'neg')+'">'+pc(vni[m-1])+'</b></span>':'');
+      cur={a:a,m:m,x:x,hair:hair,nav:nav,vni:vni};
+      function move(ev){var rc=svg.getBoundingClientRect(),px=(ev.clientX-rc.left)/rc.width*W,
+          i=Math.round((px-L)/(W-L-R)*(m-1));i=Math.max(0,Math.min(m-1,i));var j=a+i,hx=x(i);
+        hair.setAttribute('x1',hx);hair.setAttribute('x2',hx);hair.style.opacity=1;
+        var pnl=P.t[j]-P.c[j];
+        tip.innerHTML='<b>'+dmy(P.d[j])+'</b><div>Tổng tài sản: '+full(P.t[j])+'</div><div>Tiền mặt: '+full(P.k[j])+'</div>'
+          +'<div>Lãi/lỗ: <span class="'+(pnl>=0?'pos':'neg')+'">'+full(pnl)+'</span></div><div>Vốn gốc: '+full(P.c[j])+'</div>'
+          +'<div>Danh mục: '+pc(nav[i])+'</div>'+(vni[i]!=null?'<div>VNINDEX: '+pc(vni[i])+'</div>':'');
+        tip.style.opacity=1;var left=hx/W*rc.width+12;if(left+190>rc.width)left=hx/W*rc.width-200;tip.style.left=Math.max(0,left)+'px';tip.style.top='8px';}
+      hit.addEventListener('pointermove',move);hit.addEventListener('pointerdown',move);
+      hit.addEventListener('pointerleave',function(){tip.style.opacity=0;hair.style.opacity=0;});
+    }
+    box.querySelectorAll('[data-r]').forEach(function(btn){btn.addEventListener('click',function(){st.range=btn.getAttribute('data-r');
+      box.querySelectorAll('[data-r]').forEach(function(o){o.classList.toggle('on',o===btn);});draw();});});
+    box.querySelectorAll('[data-m]').forEach(function(btn){btn.addEventListener('click',function(){st.mode=btn.getAttribute('data-m');
+      box.querySelectorAll('[data-m]').forEach(function(o){o.classList.toggle('on',o===btn);});draw();});});
+    draw();
+  });
+})();
+</script>"""
+
+ASSET_RANGES = (("7", "7N"), ("30", "1T"), ("90", "3T"), ("180", "6T"), ("365", "1N"), ("0", "Tất cả"))
+
+
+def asset_chart(points: list[dict], *, default_range: str = "0") -> str:
+    """The Tài sản history: total assets against capital (VND), or the portfolio as fund
+    units against VNINDEX (%), over 7 days .. all; drawn in the browser from ``points``
+    (``TaiSan.history``)."""
+    if len(points) < 2:
+        return ('<p class="muted small" style="margin:0">Biểu đồ hiện sau hai phiên có giá đóng cửa: bot ghi giá mỗi '
+                "ngày lúc 15:30 (sau khi nhập Excel, bot tự dựng lại lịch sử từ ngày đầu tiên trong sổ).</p>")
+    data = {"d": [p["day"] for p in points], "t": [p["total"] for p in points], "c": [p["capital"] for p in points],
+            "k": [p["cash"] for p in points], "n": [p["nav"] for p in points],
+            "v": [p.get("vni_index") for p in points]}
+    ranges = "".join(f'<button type="button" data-r="{k}" class="{"on" if k == default_range else ""}">{label}</button>'
+                     for k, label in ASSET_RANGES)
+    modes = ('<button type="button" data-m="vnd" class="on">Tài sản (đồng)</button>'
+             '<button type="button" data-m="pct">So với VNINDEX (%)</button>')
+    return (f'<div class="achart" data-range="{e(default_range)}" data-points="{e(json.dumps(data))}">'
+            f'<div class="chart-bar"><div class="seg" role="group" aria-label="Khoảng thời gian">{ranges}</div>'
+            f'<div class="seg" role="group" aria-label="Cách xem">{modes}</div></div>'
+            '<div class="legend"></div>'
+            f'<div class="chart"><svg viewBox="0 0 680 280" role="img" aria-label="Lịch sử tổng tài sản"></svg>'
+            '<div class="tip"></div></div><div class="asum"></div>'
+            '<noscript><p class="muted small">Bật JavaScript để xem biểu đồ.</p></noscript></div>'
+            f"{_ASSET_JS}")

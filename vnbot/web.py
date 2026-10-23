@@ -10,6 +10,7 @@ out for a few minutes.
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import logging
@@ -79,22 +80,36 @@ def _too_large(exc: BaseException, depth: int = 0) -> bool:
 
 class BodyLimit:
     """ASGI middleware: refuse a request body over ``limit`` bytes with 413, from the
-    Content-Length header when there is one, else while it streams in (chunked)."""
+    Content-Length header when there is one, else while it streams in (chunked).
 
-    def __init__(self, app, limit: int = MAX_BODY_BYTES):
-        self.app, self.limit = app, limit
+    ``wide``: {path: (limit, allowed)} - a POST to that path may carry up to its own limit
+    when ``allowed(scope)`` (the right password in the request), the Excel upload."""
+
+    def __init__(self, app, limit: int = MAX_BODY_BYTES, wide: dict | None = None):
+        self.app, self.limit, self.wide = app, limit, wide or {}
+
+    def _limit(self, scope) -> int:
+        rule = self.wide.get(scope.get("path", ""))
+        if rule and scope.get("method") == "POST":
+            try:
+                if rule[1](scope):
+                    return rule[0]
+            except Exception:  # noqa: BLE001 - a malformed header keeps the small limit
+                pass
+        return self.limit
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        limit = self._limit(scope)
         for name, value in scope.get("headers") or []:
             if name == b"content-length":
                 try:
                     declared = int(value)
                 except ValueError:
-                    declared = self.limit + 1
-                if declared > self.limit:
+                    declared = limit + 1
+                if declared > limit:
                     await self._refuse(send)
                     return
         received, started = 0, False
@@ -104,7 +119,7 @@ class BodyLimit:
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body") or b"")
-                if received > self.limit:
+                if received > limit:
                     raise _BodyTooLarge
             return message
 
@@ -426,7 +441,24 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
         response.headers.setdefault("Referrer-Policy", "same-origin")
         return response
 
-    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES)   # outermost: before any body is read
+    def password_in(scope) -> bool:
+        """The request carries WEB_PASSWORD (HTTP Basic); the guard still checks it, throttled."""
+        if not settings.web_password:
+            return False
+        for name, value in scope.get("headers") or []:
+            if name == b"authorization":
+                kind, _, token = value.decode("latin-1").partition(" ")
+                if kind.lower() != "basic":
+                    return False
+                password = base64.b64decode(token.strip(), validate=True).decode("utf-8").partition(":")[2]
+                return secrets.compare_digest(password.encode("utf-8"), settings.web_password.encode("utf-8"))
+        return False
+
+    from vnbot import taisan_web
+
+    # outermost: before any body is read; the Excel upload may be larger, with the password
+    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES,
+                       wide={taisan_web.IMPORT_PATH: (taisan_web.MAX_UPLOAD_BYTES + 64 * 1024, password_in)})
 
     throttle = LoginThrottle()
     app.state.login_throttle = throttle
@@ -571,6 +603,11 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
 
     pages.register(app, settings, zoom, guard=guard, post_guard=post_guard,
                    notify=getattr(zoom, "alert_owner", None))
+
+    from vnbot.taisan import TaiSan
+
+    taisan_web.register(app, getattr(trader, "taisan", None) or TaiSan(settings.data_dir), guard=guard,
+                        post_guard=post_guard, show_bot=lambda: trader is not None and settings.trade_mode != "off")
 
     critic_llm: list = []        # the provider chain, built on the first web /critic
 

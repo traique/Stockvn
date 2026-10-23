@@ -24,7 +24,6 @@ values it, charts it, reports it every session and warns when to sell.
 from __future__ import annotations
 
 import bisect
-import contextlib
 import json
 import logging
 import math
@@ -33,7 +32,7 @@ import re
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import date as _date, datetime, timedelta
+from datetime import date as _date, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -416,6 +415,7 @@ class TaiSan:
         self.site = site if site is not None else self.site_plan
         self._lock = threading.RLock()
         self._live: tuple[float, dict] = (0.0, {})
+        self.rebuilding = False
 
     # ── the journal ──
     def entries(self) -> list[Entry]:
@@ -837,6 +837,32 @@ class TaiSan:
         self._update_state(lambda s: s.__setitem__("rebuilt_until", end))
         return sum(len(v) for v in added.values())
 
+    def rebuild_in_background(self, on_done=None) -> bool:
+        """``rebuild`` and ``refresh_events`` in a thread (after an import); False when one is
+        already running. ``on_done(added, error)`` afterwards: closes added, or the exception."""
+        with self._lock:
+            if self.rebuilding:
+                return False
+            self.rebuilding = True
+
+        def run():
+            added, error = 0, None
+            try:
+                added = self.rebuild()
+                self.refresh_events()
+            except Exception as exc:  # noqa: BLE001 - the 15:30 run tries again
+                logger.exception("Tài sản: rebuild failed")
+                error = exc
+            finally:
+                self.rebuilding = False
+            if on_done is not None:
+                try:
+                    on_done(added, error)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Tài sản: rebuild callback failed")
+        threading.Thread(target=run, name="taisan-rebuild", daemon=True).start()
+        return True
+
     def record_day(self, day: str) -> dict:
         """The closes of session ``day`` for the holdings and VNINDEX (the price source's
         last bar is the close as traded on that day)."""
@@ -1181,7 +1207,6 @@ class TaiSan:
 
         book = self.book()
         closes_saved = self.closes()
-        closes = {s: v for s in book.holdings if (v := (closes_saved.get(s) or {}).get(day))}
         prices = {s: self.close_on(closes_saved.get(s) or {}, day) for s in book.holdings}
         missing = [s for s, v in prices.items() if not v]
         if missing:
@@ -1314,6 +1339,111 @@ class TaiSan:
         "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)"
     )
 
+    # ── recording (the commands and the web page share these) ──
+    def record_buy(self, symbol: str, qty, price, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        from tradingagents.market import vn_rules
+
+        entry, book = self.add("BUY", day, symbol=symbol, qty=qty, price=price, note=note, source=source)
+        symbol = entry.symbol
+        self._site_levels_for(symbol, entry.day, entry.price)
+        t2 = vn_rules.add_sessions(entry.day, SETTLEMENT_SESSIONS)
+        lv = self.levels().get(symbol) or {}
+        levels = (f" Cắt lỗ theo Siêu tín hiệu {vnd(lv['stop'])}" + (f", mục tiêu {vnd(lv['target'])}" if lv.get("target") else "")
+                  + "." if lv.get("stop") else f" Chưa có mức cắt lỗ: đặt bằng /tscatlo {symbol} GIÁ.")
+        h = book.holdings[symbol]
+        return (f"✅ #{entry.id} MUA {symbol} {vnd(entry.qty)} cp @ {vnd(entry.price)} ngày {ddmmyyyy(entry.day)}. "
+                f"Đang giữ {vnd(h.qty)} cp, giá vốn BQ {vnd(h.avg)}. Bán được từ chiều {ddmm(t2)}. "
+                f"Tiền mặt còn {vnd(book.cash)}.{levels}" + "".join(f"\n⚠️ {w}" for w in book.warnings))
+
+    def record_sell(self, symbol: str, qty, price, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        entry, book = self.add("SELL", day, symbol=symbol, qty=qty, price=price, note=note, source=source)
+        row = next(r for r in book.rows if r.entry.id == entry.id)
+        left = book.holdings.get(entry.symbol)
+        self._prune_state(book)
+        return (f"✅ #{entry.id} BÁN {entry.symbol} {vnd(entry.qty)} cp @ {vnd(entry.price)} ngày {ddmmyyyy(entry.day)}: "
+                f"lãi/lỗ {signed(row.pnl)} ({pct((entry.price / row.avg_cost - 1) * 100) if row.avg_cost else '-'}) "
+                f"theo giá vốn BQ {vnd(row.avg_cost)}. "
+                + (f"Còn {vnd(left.qty)} cp. " if left else "Đã bán hết. ")
+                + f"Tiền mặt {vnd(book.cash)}.")
+
+    def record_bonus(self, symbol: str, qty, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        entry, book = self.add("BONUS", day, symbol=symbol, qty=qty, note=note, source=source)
+        h = book.holdings[entry.symbol]
+        return (f"✅ #{entry.id} {entry.symbol} +{vnd(entry.qty)} cp thưởng: đang giữ {vnd(h.qty)} cp, giá vốn BQ "
+                f"{vnd(h.avg)} (tổng vốn giữ nguyên). Bán được ngay.")
+
+    def record_dividend(self, symbol: str, amount, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        """A cash dividend received: ``amount`` the money that arrived (after the tax withheld)."""
+        entry, book = self.add("DIVIDEND", day, symbol=symbol, amount=amount, note=note, source=source)
+        return (f"✅ #{entry.id} Cổ tức {entry.symbol} {vnd(entry.amount)} đ"
+                + (f" ({entry.note})" if entry.note else "") + f". Tiền mặt {vnd(book.cash)}. Sai thì huỷ rồi ghi lại.")
+
+    def record_cash(self, kind: str, amount, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        """Money in (DEPOSIT), out (WITHDRAW), or a correction (ADJUST, signed)."""
+        if kind not in ("DEPOSIT", "WITHDRAW", "ADJUST"):
+            raise LedgerError(f"Loại giao dịch tiền không hợp lệ: {kind}.")
+        entry, book = self.add(kind, day, amount=amount, note=note, source=source)
+        if kind == "ADJUST":
+            return (f"✅ #{entry.id} Điều chỉnh tiền mặt {signed(entry.amount)}: tiền mặt {vnd(book.cash)}. "
+                    "Khoản này tính vào lãi/lỗ, không vào vốn gốc.")
+        return (f"✅ #{entry.id} {KIND_VI[kind]} {vnd(entry.amount)} ngày {ddmmyyyy(entry.day)}. "
+                f"Tiền mặt {vnd(book.cash)} · vốn gốc {vnd(book.capital)}.")
+
+    def match_cash(self, actual, day: str | None = None, *, source: str = "") -> str:
+        """Set the cash to the broker's balance with one ADJUST (fees, taxes, interest not recorded)."""
+        if not _finite(actual):
+            raise LedgerError("Số dư không hợp lệ.")
+        gap = float(actual) - self.book().cash
+        if abs(gap) < 1:
+            return f"Tiền mặt đã đúng {vnd(actual)}, không cần điều chỉnh."
+        entry, book = self.add("ADJUST", day, amount=gap, note="khớp số dư CTCK", source=source)
+        return (f"✅ #{entry.id} Điều chỉnh tiền mặt {signed(gap)} (phí, thuế, lãi ký quỹ... chưa ghi): "
+                f"tiền mặt {vnd(book.cash)}. Khoản này tính vào lãi/lỗ, không vào vốn gốc.")
+
+    def clear_levels(self, symbol: str) -> str:
+        symbol = symbol.upper()
+        self._update_state(lambda s: s["levels"].pop(symbol, None))
+        return f"✅ Đã xoá mức cắt lỗ/mục tiêu của {symbol}."
+
+    def levels_text(self, symbol: str, stop, target) -> str:
+        self.set_levels(symbol, stop, target)
+        return (f"✅ {symbol.upper()}: cắt lỗ {vnd(stop)}" + (f", mục tiêu {vnd(target)}" if target else "")
+                + ". Bot báo ⛔ khi giá ≤ cắt lỗ" + (" và 🎯 khi chạm mục tiêu." if target else "."))
+
+    def undo(self, entry_id: int | None = None, *, source: str = "") -> str:
+        target = self.void(entry_id, source=source)
+        self._prune_state(self.book())
+        return f"↩️ Đã huỷ #{target.id}: {ddmmyyyy(target.day)} {self.entry_text(target)}."
+
+    def reset(self) -> str:
+        """Start the portfolio over: the journal is kept as a dated copy, the settings stay."""
+        with self._lock:
+            if not self.journal_path.exists():
+                return "Danh mục Tài sản đang trống, không có gì để xoá."
+            stamp = now_vn().strftime("%Y%m%d-%H%M%S")
+            backup = self.journal_path.with_name(f"journal.jsonl.bak-{stamp}")
+            self.journal_path.rename(backup)
+
+            def change(s):
+                for key in ("levels", "marks", "alerts", "events", "notes"):
+                    s[key] = {}
+                s["shadow"] = []
+                for key in ("rebuilt_until", "analytics", "imported"):
+                    s.pop(key, None)
+            self._update_state(change)
+            self.pending_path.unlink(missing_ok=True)
+        self._forget_live()
+        return f"🗑️ Đã xoá danh mục Tài sản; sổ cũ lưu tại {backup.name}."
+
+    def report_day(self) -> str:
+        """The session a report asked now is about: today after 15:05, else the last one."""
+        from tradingagents.market import vn_rules
+
+        day = today_vn()
+        if not vn_rules.is_session_day(day) or now_vn().strftime("%H:%M") < "15:05":
+            day = vn_rules.prev_session(day)
+        return day
+
     def handle(self, command: str, args: str, *, source: str = "telegram", public_url: str = ""):
         """One ``/ts...`` command: the reply text, or {"file", "caption"} for /tsxuat on
         Telegram. LedgerError/ValueError carry the message for the owner."""
@@ -1332,38 +1462,12 @@ class TaiSan:
         if command in ("/tsmua", "/tsban"):
             if len(rest) < 3:
                 raise LedgerError(f"Dùng: {command} FPT 20 73891 [YYYY-MM-DD] [ghi chú]")
-            symbol, qty, price = code(rest[0]), _amount(rest[1]), _amount(rest[2])
-            note = " ".join(rest[3:])
-            if command == "/tsmua":
-                entry, book = self.add("BUY", day_word, symbol=symbol, qty=qty, price=price, note=note, source=source)
-                self._site_levels_for(symbol, entry.day, price)
-                from tradingagents.market import vn_rules
-
-                t2 = vn_rules.add_sessions(entry.day, SETTLEMENT_SESSIONS)
-                lv = self.levels().get(symbol) or {}
-                levels = (f" Cắt lỗ theo Siêu tín hiệu {vnd(lv['stop'])}" + (f", mục tiêu {vnd(lv['target'])}" if lv.get("target") else "")
-                          + "." if lv.get("stop") else f" Chưa có mức cắt lỗ: đặt bằng /tscatlo {symbol} GIÁ.")
-                h = book.holdings[symbol]
-                return (f"✅ #{entry.id} MUA {symbol} {vnd(entry.qty)} cp @ {vnd(entry.price)} ngày {ddmmyyyy(entry.day)}. "
-                        f"Đang giữ {vnd(h.qty)} cp, giá vốn BQ {vnd(h.avg)}. Bán được từ chiều {ddmm(t2)}. "
-                        f"Tiền mặt còn {vnd(book.cash)}.{levels}" + "".join(f"\n⚠️ {w}" for w in book.warnings))
-            entry, book = self.add("SELL", day_word, symbol=symbol, qty=qty, price=price, note=note, source=source)
-            row = next(r for r in book.rows if r.entry.id == entry.id)
-            left = book.holdings.get(symbol)
-            self._prune_state(book)
-            return (f"✅ #{entry.id} BÁN {symbol} {vnd(entry.qty)} cp @ {vnd(entry.price)} ngày {ddmmyyyy(entry.day)}: "
-                    f"lãi/lỗ {signed(row.pnl)} ({pct((entry.price / row.avg_cost - 1) * 100) if row.avg_cost else '-'}) "
-                    f"theo giá vốn BQ {vnd(row.avg_cost)}. "
-                    + (f"Còn {vnd(left.qty)} cp. " if left else "Đã bán hết. ")
-                    + f"Tiền mặt {vnd(book.cash)}.")
+            record = self.record_buy if command == "/tsmua" else self.record_sell
+            return record(code(rest[0]), _amount(rest[1]), _amount(rest[2]), day_word, " ".join(rest[3:]), source=source)
         if command == "/tsthuong":
             if len(rest) != 2:
                 raise LedgerError("Dùng: /tsthuong FPT 15 [YYYY-MM-DD] - số cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về")
-            symbol = code(rest[0])
-            entry, book = self.add("BONUS", day_word, symbol=symbol, qty=_amount(rest[1]), source=source)
-            h = book.holdings[symbol]
-            return (f"✅ #{entry.id} {symbol} +{vnd(entry.qty)} cp thưởng: đang giữ {vnd(h.qty)} cp, giá vốn BQ "
-                    f"{vnd(h.avg)} (tổng vốn giữ nguyên). Bán được ngay.")
+            return self.record_bonus(code(rest[0]), _amount(rest[1]), day_word, source=source)
         if command == "/tscotuc":
             if len(rest) not in (2, 3):
                 raise LedgerError("Dùng: /tscotuc FPT 2000 [số cp được hưởng] [YYYY-MM-DD] - số đồng mỗi cổ phiếu "
@@ -1377,60 +1481,41 @@ class TaiSan:
                 shares = int(pend["eligible"]) if pend else (held.qty if held else 0)
             if shares <= 0:
                 raise LedgerError(f"Không biết số cổ phiếu {symbol} được hưởng: ghi thêm, ví dụ /tscotuc {symbol} 2000 100")
-            entry, book = self.add("DIVIDEND", day_word, symbol=symbol, amount=per_share * shares,
-                                   note=f"{vnd(per_share)} đ/cp x {vnd(shares)} cp", source=source)
-            return (f"✅ #{entry.id} Cổ tức {symbol}: {vnd(per_share)} đ/cp × {vnd(shares)} cp = {vnd(entry.amount)} đ. "
-                    f"Tiền mặt {vnd(book.cash)}. Sai thì /tshuy rồi ghi lại.")
+            return self.record_dividend(symbol, per_share * shares, day_word,
+                                        f"{vnd(per_share)} đ/cp x {vnd(shares)} cp", source=source)
         if command in ("/tsnap", "/tsrut"):
             if len(rest) < 1:
                 raise LedgerError(f"Dùng: {command} 50000000 [YYYY-MM-DD] [ghi chú]")
             kind = "DEPOSIT" if command == "/tsnap" else "WITHDRAW"
-            entry, book = self.add(kind, day_word, amount=_amount(rest[0]), note=" ".join(rest[1:]), source=source)
-            return (f"✅ #{entry.id} {KIND_VI[kind]} {vnd(entry.amount)} ngày {ddmmyyyy(entry.day)}. "
-                    f"Tiền mặt {vnd(book.cash)} · vốn gốc {vnd(book.capital)}.")
+            return self.record_cash(kind, _amount(rest[0]), day_word, " ".join(rest[1:]), source=source)
         if command == "/tstien":
             if len(rest) != 1:
                 raise LedgerError("Dùng: /tstien 1268895 - đặt tiền mặt bằng số dư thật trên app CTCK")
-            actual = _amount(rest[0])
-            book = self.book()
-            gap = actual - book.cash
-            if abs(gap) < 1:
-                return f"Tiền mặt đã đúng {vnd(actual)}, không cần điều chỉnh."
-            entry, book = self.add("ADJUST", day_word, amount=gap, note="khớp số dư CTCK", source=source)
-            return (f"✅ #{entry.id} Điều chỉnh tiền mặt {signed(gap)} (phí, thuế, lãi ký quỹ... chưa ghi): "
-                    f"tiền mặt {vnd(book.cash)}. Khoản này tính vào lãi/lỗ, không vào vốn gốc.")
+            return self.match_cash(_amount(rest[0]), day_word, source=source)
         if command == "/tscatlo":
             if len(rest) < 2:
                 raise LedgerError("Dùng: /tscatlo FPT 52000 [60000] - mức cắt lỗ [và mục tiêu]; /tscatlo FPT xoa")
             symbol = code(rest[0])
             if rest[1].lower() in ("xoa", "xoá", "xóa"):
-                self._update_state(lambda s: s["levels"].pop(symbol, None))
-                return f"✅ Đã xoá mức cắt lỗ/mục tiêu của {symbol}."
-            stop = _amount(rest[1])
-            target = _amount(rest[2]) if len(rest) > 2 else None
-            self.set_levels(symbol, stop, target)
-            return (f"✅ {symbol}: cắt lỗ {vnd(stop)}" + (f", mục tiêu {vnd(target)}" if target else "")
-                    + ". Bot báo ⛔ khi giá ≤ cắt lỗ" + (" và 🎯 khi chạm mục tiêu." if target else "."))
+                return self.clear_levels(symbol)
+            return self.levels_text(symbol, _amount(rest[1]), _amount(rest[2]) if len(rest) > 2 else None)
         if command == "/tsnhatky":
             n = int(rest[0]) if rest and rest[0].isdigit() else 20
             return self.journal_text(max(1, min(n, 60)))
         if command == "/tshuy":
-            target = self.void(int(rest[0]) if rest and rest[0].isdigit() else None, source=source)
-            self._prune_state(self.book())
-            return f"↩️ Đã huỷ #{target.id}: {ddmmyyyy(target.day)} {self.entry_text(target)}."
+            return self.undo(int(rest[0]) if rest and rest[0].isdigit() else None, source=source)
         if command == "/tsbaocao":
-            from tradingagents.market import vn_rules
-
-            day = today_vn()
-            if not vn_rules.is_session_day(day) or now_vn().strftime("%H:%M") < "15:05":
-                day = vn_rules.prev_session(day)
-            return self.report_text(day)
+            return self.report_text(self.report_day())
         if command == "/tsnguong":
             if len(rest) != 2:
                 warn, danger = self.thresholds()
                 return f"Ngưỡng tỷ trọng một mã: cảnh báo {warn:g}%, nguy hiểm {danger:g}%. Đổi: /tsnguong 25 40"
-            self.set_thresholds(float(rest[0].replace(",", ".")), float(rest[1].replace(",", ".")))
-            return f"✅ Ngưỡng tỷ trọng: cảnh báo {rest[0]}%, nguy hiểm {rest[1]}%."
+            try:
+                warn, danger = float(rest[0].replace(",", ".")), float(rest[1].replace(",", "."))
+            except ValueError:
+                raise LedgerError("Dùng: /tsnguong 25 40 - hai số phần trăm") from None
+            self.set_thresholds(warn, danger)
+            return f"✅ Ngưỡng tỷ trọng: cảnh báo {warn:g}%, nguy hiểm {danger:g}%."
         if command == "/tsxuat":
             from vnbot import taisan_excel
 

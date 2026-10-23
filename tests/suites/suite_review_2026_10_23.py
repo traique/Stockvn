@@ -148,7 +148,7 @@ from dataclasses import replace  # noqa: E402
 
 from tradingagents.quant import params as qp, policy  # noqa: E402
 from tradingagents.trading import factor  # noqa: E402
-from tradingagents.trading.ledger import Bar, Ledger, Order, Position, Signal, _ExitRules  # noqa: E402
+from tradingagents.trading.ledger import Bar, Ledger, Order, Signal, _ExitRules  # noqa: E402
 
 RULES = _ExitRules(max_hold_sessions=30, t1_sell_fraction=0.5, use_t2=True)
 P = qp.DEFAULT

@@ -736,17 +736,10 @@ class TelegramBot:
         else:
             self.send(chat_id, reply)
         if command == "/tsnhap" and isinstance(reply, str) and reply.startswith("✅ Đã nhập"):
-            threading.Thread(target=self._rebuild_taisan, args=(account, chat_id), name="taisan-rebuild",
-                             daemon=True).start()
-
-    def _rebuild_taisan(self, account, chat_id) -> None:
-        try:
-            added = account.rebuild()
-            account.refresh_events()
-            self.send(chat_id, f"📈 Đã dựng lại biểu đồ tài sản ({added} giá đóng cửa). Xem trang /taisan.")
-        except Exception as exc:  # noqa: BLE001 - the daily job tries again
-            logger.exception("Tài sản rebuild failed")
-            self.send(chat_id, f"⚠️ Chưa dựng lại được biểu đồ ({redact(exc)}); bot thử lại ở báo cáo 15:30.")
+            def done(added, error):
+                self.send(chat_id, f"⚠️ Chưa dựng lại được biểu đồ ({redact(error)}); bot thử lại ở báo cáo 15:30."
+                          if error else f"📈 Đã dựng lại biểu đồ tài sản ({added} giá đóng cửa). Xem trang /taisan.")
+            account.rebuild_in_background(done)
 
     def _download(self, file_id: str) -> bytes:
         """A file the owner sent (Bot API getFile), at most MAX_IMPORT_BYTES."""
