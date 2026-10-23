@@ -103,7 +103,7 @@ sent = []
 main_botkeep._announce_version(sent.append)
 main_botkeep._announce_version(sent.append)
 t.ok("start: announced once, then quiet", len(sent) == 1 and sent[0].startswith("🏷️ Bot đang chạy"), sent)
-(main_botkeep.SETTINGS.data_dir / "last_version.txt").write_text(f"{names[1]} 1234567", encoding="utf-8")
+(main_botkeep.SETTINGS.data_dir / "last_version.txt").write_text(f"{previous} 1234567", encoding="utf-8")
 main_botkeep._announce_version(sent.append)
 t.ok("start after an upload: 'Bot đã cập nhật'", len(sent) == 2 and sent[1].startswith("🆕 Bot đã cập nhật"), sent[-1:])
 
