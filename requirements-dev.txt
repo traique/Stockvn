@@ -1,0 +1,3 @@
+# Chỉ để chạy bộ kiểm thử (tests/): bot không cần các gói này khi chạy thật.
+pytest>=8.0
+httpx>=0.27
