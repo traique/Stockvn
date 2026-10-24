@@ -5,3 +5,4 @@ data/
 dist/
 .pytest_cache/
 docs/backtest_2026-10-23/out/
+docs/backtest_2026-10-24/out/

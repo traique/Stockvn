@@ -1,0 +1,113 @@
+═══ 1. VỊ TRÍ TRONG KÊNH LÀM BỘ LỌC MUA ═══
+
+Quy tắc TB20+MACD (ước tính của bot), 39 mã, mỗi lần đổi sang MUA:
+ vị trí trong kênh 60 phiên · học 2022-06/2024:
+  < 35%                                        n= 229  TB  +1.32%  trung vị  -1.21%  thắng  44.5%  lỗ>10%  27
+  35-70%                                       n= 240  TB  -0.09%  trung vị  -1.65%  thắng  34.2%  lỗ>10%   7
+  70-100%                                      n= 172  TB  -0.19%  trung vị  -1.94%  thắng  38.4%  lỗ>10%   2
+  > 100% (vượt trần)                           n=  49  TB  +1.38%  trung vị  -2.29%  thắng  36.7%  lỗ>10%   0
+    bỏ MUA khi 70-100% (giữ phần còn lại)      n= 518  TB  +0.67%  trung vị  -1.50%  thắng  39.0%  lỗ>10%  34  · chênh TB, khoảng 90%: [-0.30, +2.04] điểm %
+    tất cả                                     n= 690  TB  +0.46%  trung vị  -1.66%  thắng  38.8%  lỗ>10%  36
+ vị trí trong kênh 60 phiên · kiểm tra 07/2024-10/2026:
+  < 35%                                        n= 223  TB  -0.41%  trung vị  -2.24%  thắng  34.1%  lỗ>10%  17
+  35-70%                                       n= 262  TB  +1.22%  trung vị  -1.15%  thắng  37.8%  lỗ>10%   6
+  70-100%                                      n= 160  TB  +3.08%  trung vị  -1.79%  thắng  35.6%  lỗ>10%   5
+  > 100% (vượt trần)                           n=  48  TB  -1.61%  trung vị  -3.13%  thắng  29.2%  lỗ>10%   5
+    bỏ MUA khi 70-100% (giữ phần còn lại)      n= 533  TB  +0.28%  trung vị  -1.83%  thắng  35.5%  lỗ>10%  28  · chênh TB, khoảng 90%: [-4.95, -0.69] điểm %
+    tất cả                                     n= 693  TB  +0.93%  trung vị  -1.82%  thắng  35.5%  lỗ>10%  33
+ vị trí trong kênh 120 phiên · học 2022-06/2024:
+  < 35%                                        n= 220  TB  +1.26%  trung vị  -0.47%  thắng  45.9%  lỗ>10%  26
+  35-70%                                       n= 212  TB  +0.54%  trung vị  -1.76%  thắng  39.2%  lỗ>10%   3
+  70-100%                                      n= 142  TB  +0.94%  trung vị  -1.37%  thắng  41.5%  lỗ>10%   1
+  > 100% (vượt trần)                           n=  33  TB  +1.12%  trung vị  -2.29%  thắng  36.4%  lỗ>10%   0
+    bỏ MUA khi 70-100% (giữ phần còn lại)      n= 465  TB  +0.92%  trung vị  -1.28%  thắng  42.2%  lỗ>10%  29  · chênh TB, khoảng 90%: [-1.41, +1.27] điểm %
+    tất cả                                     n= 607  TB  +0.93%  trung vị  -1.28%  thắng  42.0%  lỗ>10%  30
+ vị trí trong kênh 120 phiên · kiểm tra 07/2024-10/2026:
+  < 35%                                        n= 246  TB  +0.33%  trung vị  -1.91%  thắng  37.8%  lỗ>10%  13
+  35-70%                                       n= 261  TB  +1.28%  trung vị  -1.19%  thắng  35.2%  lỗ>10%   7
+  70-100%                                      n= 147  TB  +1.98%  trung vị  -2.56%  thắng  34.7%  lỗ>10%   9
+  > 100% (vượt trần)                           n=  39  TB  -1.60%  trung vị  -3.70%  thắng  25.6%  lỗ>10%   4
+    bỏ MUA khi 70-100% (giữ phần còn lại)      n= 546  TB  +0.64%  trung vị  -1.63%  thắng  35.7%  lỗ>10%  24  · chênh TB, khoảng 90%: [-3.64, +0.80] điểm %
+    tất cả                                     n= 693  TB  +0.93%  trung vị  -1.82%  thắng  35.5%  lỗ>10%  33
+
+Tín hiệu MUA thật của Siêu tín hiệu (08/2024-10/2026), thoát R4:
+ vị trí trong kênh 60 phiên:
+  < 35%                                        n= 192  TB  -0.52%  trung vị  -2.69%  thắng  30.2%  lỗ>10%   0
+  35-70%                                       n= 211  TB  +1.59%  trung vị  -1.15%  thắng  37.9%  lỗ>10%   1
+  70-100%                                      n= 134  TB  +3.46%  trung vị  -2.60%  thắng  32.1%  lỗ>10%   3
+  > 100% (vượt trần)                           n=  45  TB  -0.73%  trung vị  -3.18%  thắng  31.1%  lỗ>10%   1
+    bỏ MUA khi 70-100% (giữ phần còn lại)      n= 448  TB  +0.45%  trung vị  -2.16%  thắng  33.9%  lỗ>10%   2  · chênh TB, khoảng 90%: [-5.44, -0.57] điểm %
+    tất cả                                     n= 582  TB  +1.14%  trung vị  -2.24%  thắng  33.5%  lỗ>10%   5
+ vị trí trong kênh 120 phiên:
+  < 35%                                        n= 209  TB  +0.20%  trung vị  -2.34%  thắng  34.0%  lỗ>10%   0
+  35-70%                                       n= 213  TB  +1.62%  trung vị  -1.24%  thắng  35.7%  lỗ>10%   0
+  70-100%                                      n= 125  TB  +2.46%  trung vị  -3.03%  thắng  31.2%  lỗ>10%   4
+  > 100% (vượt trần)                           n=  35  TB  -0.79%  trung vị  -5.09%  thắng  25.7%  lỗ>10%   1
+    bỏ MUA khi 70-100% (giữ phần còn lại)      n= 457  TB  +0.78%  trung vị  -1.93%  thắng  34.1%  lỗ>10%   1  · chênh TB, khoảng 90%: [-4.31, +0.71] điểm %
+    tất cả                                     n= 582  TB  +1.14%  trung vị  -2.24%  thắng  33.5%  lỗ>10%   5
+ 13 mã của anh, Siêu tín hiệu, 60 phiên:
+  < 35%                                        n=  80  TB  -1.72%  trung vị  -4.10%  thắng  25.0%  lỗ>10%   0
+  35-70%                                       n=  72  TB  +1.30%  trung vị  -1.08%  thắng  37.5%  lỗ>10%   0
+  70-100%                                      n=  32  TB  +4.45%  trung vị  -2.89%  thắng  37.5%  lỗ>10%   2
+  > 100% (vượt trần)                           n=  11  TB  +2.05%  trung vị  +0.33%  thắng  54.5%  lỗ>10%   1
+
+═══ 2. SPRING VÀ TEST CẠN CUNG LÀM ĐIỂM MUA (giữ 20 phiên, cắt lỗ dưới đáy) ═══
+ học 01/2022-06/2024:
+  mua bất kỳ phiên nào ở đáy kênh (đối chứng)  n=1309  TB  -0.48%  trung vị  -2.61%  thắng  37.7%  lỗ>10%  26
+  Spring (mọi khối lượng)                      n= 191  TB  -1.85%  trung vị  -2.96%  thắng  23.0%  lỗ>10%   4  · chênh TB, khoảng 90%: [-2.16, -0.53] điểm %
+  Spring khối lượng ≤ TB                       n= 112  TB  -1.99%  trung vị  -3.16%  thắng  21.4%  lỗ>10%   4  · chênh TB, khoảng 90%: [-2.48, -0.48] điểm %
+  Spring khối lượng ≥ 1,25×TB                  n=  78  TB  -3.35%  trung vị  -4.00%  thắng  16.7%  lỗ>10%   2  · chênh TB, khoảng 90%: [-3.81, -1.88] điểm %
+  Test cạn cung                                n= 292  TB  -1.00%  trung vị  -3.07%  thắng  36.6%  lỗ>10%  10  · chênh TB, khoảng 90%: [-1.26, +0.20] điểm %
+ kiểm tra 07/2024-10/2026:
+  mua bất kỳ phiên nào ở đáy kênh (đối chứng)  n=1683  TB  -0.81%  trung vị  -2.39%  thắng  36.4%  lỗ>10%  39
+  Spring (mọi khối lượng)                      n= 212  TB  -0.64%  trung vị  -2.40%  thắng  31.6%  lỗ>10%  10  · chênh TB, khoảng 90%: [-0.67, +0.96] điểm %
+  Spring khối lượng ≤ TB                       n= 113  TB  -0.62%  trung vị  -2.32%  thắng  26.5%  lỗ>10%   5  · chênh TB, khoảng 90%: [-0.92, +1.34] điểm %
+  Spring khối lượng ≥ 1,25×TB                  n= 101  TB  +0.03%  trung vị  -2.29%  thắng  39.6%  lỗ>10%   6  · chênh TB, khoảng 90%: [-0.36, +2.15] điểm %
+  Test cạn cung                                n= 415  TB  -1.03%  trung vị  -2.62%  thắng  36.1%  lỗ>10%  11  · chênh TB, khoảng 90%: [-0.81, +0.41] điểm %
+ vùng giá 120 phiên, cả giai đoạn:
+  mua bất kỳ phiên nào ở đáy kênh (đối chứng)  n=1875  TB  -0.01%  trung vị  -1.19%  thắng  42.5%  lỗ>10%  49
+  Spring (mọi khối lượng)                      n= 146  TB  -1.28%  trung vị  -3.00%  thắng  27.4%  lỗ>10%   3  · chênh TB, khoảng 90%: [-2.14, -0.36] điểm %
+  Spring khối lượng ≤ TB                       n=  68  TB  -1.39%  trung vị  -3.13%  thắng  25.0%  lỗ>10%   2  · chênh TB, khoảng 90%: [-2.63, -0.07] điểm %
+  Spring khối lượng ≥ 1,25×TB                  n=  74  TB  -0.29%  trung vị  -2.54%  thắng  36.5%  lỗ>10%   2  · chênh TB, khoảng 90%: [-1.55, +1.10] điểm %
+  Test cạn cung                                n= 388  TB  -0.22%  trung vị  -1.46%  thắng  42.3%  lỗ>10%   9  · chênh TB, khoảng 90%: [-0.87, +0.45] điểm %
+
+ Vào sớm hơn Siêu tín hiệu, chỉ dùng điều biết được lúc đó: mua ở Spring/test cạn cung khi trang đang BÁN;
+ trang chuyển MUA trong 15 phiên thì giữ như lệnh của trang (R4), không thì bán sau 15 phiên (hoặc cắt lỗ trước):
+  39 mã:
+  chỉ theo Siêu tín hiệu (R4)                  n= 582  TB  +1.14%  trung vị  -2.24%  thắng  33.5%  lỗ>10%   5  · tổng +666.1 điểm %
+  lệnh vào sớm (gồm cả lần trang không MUA)    n= 295  TB  -0.88%  trung vị  -2.62%  thắng  30.5%  lỗ>10%   7
+  thêm vào sớm (thay lệnh trang tương ứng)     n= 733  TB  +0.68%  trung vị  -2.42%  thắng  32.2%  lỗ>10%  11  · tổng +495.2 điểm %  · 144 lệnh trang được vào sớm, 151 lần vào sớm mà trang không MUA/cắt lỗ
+  13 mã của anh:
+  chỉ theo Siêu tín hiệu (R4)                  n= 195  TB  +0.62%  trung vị  -3.03%  thắng  33.3%  lỗ>10%   3  · tổng +120.8 điểm %
+  lệnh vào sớm (gồm cả lần trang không MUA)    n= 106  TB  -2.05%  trung vị  -3.66%  thắng  24.5%  lỗ>10%   4
+  thêm vào sớm (thay lệnh trang tương ứng)     n= 258  TB  -0.02%  trung vị  -3.33%  thắng  31.4%  lỗ>10%   7  · tổng -6.3 điểm %  · 43 lệnh trang được vào sớm, 63 lần vào sớm mà trang không MUA/cắt lỗ
+
+═══ 3. SOW LÀM CẢNH BÁO BÁN ═══
+ học 01/2022-06/2024: giá sau SOW (từ giá mở cửa phiên sau) so với mọi phiên
+  sau  5 phiên: SOW TB +0.92% (thấp hơn 47% số lần, n=192) · mọi phiên TB +0.00% (thấp hơn 50%)  · chênh TB, khoảng 90%: [-0.18, +2.04] điểm %
+  sau 10 phiên: SOW TB +0.96% (thấp hơn 45% số lần, n=192) · mọi phiên TB -0.09% (thấp hơn 50%)  · chênh TB, khoảng 90%: [-0.26, +2.36] điểm %
+  sau 20 phiên: SOW TB +1.75% (thấp hơn 46% số lần, n=192) · mọi phiên TB +0.06% (thấp hơn 49%)  · chênh TB, khoảng 90%: [-0.13, +3.57] điểm %
+ kiểm tra 07/2024-10/2026: giá sau SOW (từ giá mở cửa phiên sau) so với mọi phiên
+  sau  5 phiên: SOW TB +1.28% (thấp hơn 40% số lần, n=167) · mọi phiên TB +0.14% (thấp hơn 50%)  · chênh TB, khoảng 90%: [+0.42, +1.87] điểm %
+  sau 10 phiên: SOW TB +1.90% (thấp hơn 37% số lần, n=167) · mọi phiên TB +0.43% (thấp hơn 49%)  · chênh TB, khoảng 90%: [+0.54, +2.35] điểm %
+  sau 20 phiên: SOW TB +4.33% (thấp hơn 26% số lần, n=167) · mọi phiên TB +1.06% (thấp hơn 49%)  · chênh TB, khoảng 90%: [+2.02, +4.44] điểm %
+ vùng giá 120 phiên, cả giai đoạn: giá sau SOW (từ giá mở cửa phiên sau) so với mọi phiên
+  sau  5 phiên: SOW TB +1.57% (thấp hơn 41% số lần, n=231) · mọi phiên TB +0.11% (thấp hơn 49%)  · chênh TB, khoảng 90%: [+0.60, +2.35] điểm %
+  sau 10 phiên: SOW TB +2.27% (thấp hơn 39% số lần, n=231) · mọi phiên TB +0.25% (thấp hơn 49%)  · chênh TB, khoảng 90%: [+0.95, +3.10] điểm %
+  sau 20 phiên: SOW TB +4.00% (thấp hơn 34% số lần, n=231) · mọi phiên TB +0.84% (thấp hơn 48%)  · chênh TB, khoảng 90%: [+1.77, +4.59] điểm %
+
+ Thêm SOW làm điểm bán (bán phiên sau SOW) vào các lệnh đang giữ:
+ Siêu tín hiệu, thoát R4:
+  không có SOW                                 n= 582  TB  +1.14%  trung vị  -2.24%  thắng  33.5%  lỗ>10%   5
+  thêm SOW                                     n= 582  TB  +1.15%  trung vị  -2.24%  thắng  33.5%  lỗ>10%   5  · chênh TB, khoảng 90%: [-1.18, +1.18] điểm %  · SOW đổi kết quả 2 lệnh
+ Siêu tín hiệu R4, 13 mã của anh:
+  không có SOW                                 n= 195  TB  +0.62%  trung vị  -3.03%  thắng  33.3%  lỗ>10%   3
+  thêm SOW                                     n= 195  TB  +0.62%  trung vị  -3.03%  thắng  33.3%  lỗ>10%   3  · chênh TB, khoảng 90%: [-2.09, +2.02] điểm %  · SOW đổi kết quả 0 lệnh
+ Quy tắc TB20+MACD · học:
+  không có SOW                                 n= 702  TB  +0.37%  trung vị  -1.75%  thắng  38.3%  lỗ>10%  37
+  thêm SOW                                     n= 702  TB  +0.35%  trung vị  -1.76%  thắng  38.2%  lỗ>10%  38  · chênh TB, khoảng 90%: [-0.83, +0.81] điểm %  · SOW đổi kết quả 3 lệnh
+ Quy tắc TB20+MACD · kiểm tra:
+  không có SOW                                 n= 693  TB  +0.93%  trung vị  -1.82%  thắng  35.5%  lỗ>10%  33
+  thêm SOW                                     n= 693  TB  +0.90%  trung vị  -1.85%  thắng  35.2%  lỗ>10%  33  · chênh TB, khoảng 90%: [-1.08, +1.08] điểm %  · SOW đổi kết quả 5 lệnh
+
+DONE
