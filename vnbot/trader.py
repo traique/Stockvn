@@ -2487,7 +2487,9 @@ class TradingBot:
                 step(day)
             except Exception as exc:  # noqa: BLE001 - the report goes out without that part
                 logger.warning("Tài sản: %s on %s failed: %s", step.__name__, day, exc)
-        return account.report_text(day)
+        text = account.report_text(day)
+        account.save_report(day, text)
+        return text
 
     def set_capital(self, cash: float, book: str = "real") -> str:
         """Set the real book's cash (/von), as the broker shows it."""

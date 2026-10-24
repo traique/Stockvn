@@ -42,23 +42,29 @@ PUBLIC_NAV = (("/docs", "Hướng dẫn"), ("/support", "Hỗ trợ"), ("/privac
 
 PUBLIC_CSS = """
 .doc{max-width:860px;margin:0 auto}
-.doc .card-b{padding:8px 30px 30px}
-@media (max-width:620px){.doc .card-b{padding:6px 18px 22px}}
-.doc h1{font-size:34px;margin:18px 0 4px}
-.doc h2{font:600 19px/1.3 "Playfair Display",Georgia,serif;margin:26px 0 6px}
+.doc .card-b{padding:28px 32px 32px}
+@media (max-width:620px){.doc .card-b{padding:20px 18px 24px}}
+.doc h1{margin:0 0 8px}
+.doc h2{font-size:18px;margin:28px 0 8px}
 .doc p,.doc li{color:var(--ink-2)}
 .doc code,.url{font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--surface-2);
-  border:1px solid var(--line);border-radius:7px;padding:2px 7px;word-break:break-all}
+  border:1px solid var(--line);border-radius:8px;padding:2px 7px;word-break:break-all}
 .lang{border-top:1px solid var(--line);margin-top:34px;padding-top:6px}
-.box{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:14px 0;font-size:14px}
+.box{background:var(--tile);border:1px solid var(--tile-line);border-radius:20px;padding:14px 16px;margin:14px 0;font-size:15px}
 .kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
 .kv:first-child{border-top:0}
-.kv b{display:block;font-size:13.5px}.kv .url{display:inline-block;margin-top:5px}
-.ok{color:var(--up);font-weight:700}.no{color:var(--down);font-weight:700}
-.pubnav{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap}
-.pubnav a{padding:7px 11px;border-radius:10px;color:var(--ink-2);font-size:13px;font-weight:500}
-.pubnav a:hover{text-decoration:none;background:var(--surface-2);color:var(--ink)}
-.pubnav a[aria-current]{color:var(--ink);background:var(--surface-2)}
+.kv b{display:block;font-size:14px}.kv .url{display:inline-block;margin-top:5px}
+.ok{color:var(--up);font-weight:800}.no{color:var(--down);font-weight:800}
+.pubnav{display:flex;flex-wrap:wrap;gap:4px}
+.pubnav a{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:999px;color:var(--ink-2);font-weight:700;font-size:14px}
+.pubnav a:hover{text-decoration:none;color:var(--ink)}
+.pubnav a[aria-current]{background:var(--pill-on);color:var(--ink);box-shadow:var(--shadow-sm)}
+.pubhead{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pubhead .tools{margin-left:auto;display:flex;align-items:center;gap:8px;order:2}
+.doc td.cmd code{white-space:nowrap}
+@media (max-width:899px){.pubnav{order:3;flex-basis:100%}}
+@media (max-width:620px){.doc td.en{display:none}.doc table,.doc tbody,.doc tr,.doc td{display:block}
+  .doc tr{padding:10px 0;border-top:1px solid var(--line)}.doc td{border:0;padding:2px 0}}
 """
 
 
@@ -85,12 +91,13 @@ def public_page(title: str, body: str, current: str = "") -> str:
         '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
         f"<title>{html.escape(title)} · {APP_NAME}</title>{ui.FAVICON}{ui.THEME_BOOT}{ui.FONTS}"
         f"<style>{ui.STYLE}{PUBLIC_CSS}</style></head><body>"
-        '<header class="top"><div class="top-in">'
-        f'<a class="brand" href="/docs">{ui.LOGO}<span class="brand-name">{APP_NAME}'
-        "<small>Zoom Team Chat</small></span></a>"
-        f'<nav class="pubnav">{nav}</nav>'
-        f'<button class="icon-btn" id="theme-toggle" type="button" aria-label="Đổi giao diện sáng/tối">{ui.MOON}{ui.SUN}</button>'
-        f'</div></header><main><div class="doc"><section class="card"><div class="card-b">{body}</div></section></div></main>'
+        '<a class="skip" href="#main">Bỏ qua tới nội dung</a>'
+        '<header class="top"><div class="top-in"><div class="head pubhead">'
+        f'<a class="wordmark" href="/docs" aria-label="{APP_NAME}, hướng dẫn">LCTA</a>'
+        f'<nav class="pubnav" aria-label="Trang thông tin">{nav}</nav>'
+        f'<div class="tools"><button class="icon-btn" id="theme-toggle" type="button" aria-label="Đổi giao diện sáng/tối">'
+        f'{ui.MOON}{ui.SUN}</button></div>'
+        f'</div></div></header><main id="main" tabindex="-1"><div class="doc"><section class="card"><div class="card-b">{body}</div></section></div></main>'
         f"<footer><span>{APP_NAME} · Trang này không đặt cookie theo dõi và không thu thập dữ liệu người xem.</span>"
         "<span>This page sets no tracking cookie.</span></footer>"
         f"{ui.THEME_TOGGLE}</body></html>"
@@ -215,7 +222,8 @@ COMMANDS = (
 
 
 def docs_body() -> str:
-    rows = "".join(f"<tr><td><code>{c}</code></td><td>{vi}</td><td class='muted'>{en}</td></tr>" for c, vi, en in COMMANDS)
+    rows = "".join(f"<tr><td class='cmd'><code>{c}</code></td><td>{vi}</td><td class='muted en'>{en}</td></tr>"
+                   for c, vi, en in COMMANDS)
     return f"""
 <h1>Hướng dẫn sử dụng</h1>
 <p>{APP_NAME} gửi báo cáo, ý kiến AI phản biện và cảnh báo trong phiên, và nhận lệnh qua Zoom Team Chat.</p>
@@ -486,4 +494,4 @@ try{navigator.clipboard.writeText(b.getAttribute('data-copy'));b.textContent='Đ
             + ui.card("Các bước cài đặt (Local Test)", steps) + "</div>"
             + "</div>" + script
         )
-        return HTMLResponse(ui.page("Cấu hình Zoom", f"<style>{PUBLIC_CSS}</style>" + body, active="ai"))
+        return HTMLResponse(ui.page("Cấu hình Zoom", f"<style>{PUBLIC_CSS}</style>" + body, active="zoom"))

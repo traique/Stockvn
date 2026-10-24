@@ -49,6 +49,7 @@ ALERT_LEVELS = {
     "target": ("🎯", "Chốt lời", "chạm mục tiêu"),
 }
 SHADOW_SESSIONS = (5, 10)
+SPARK_SESSIONS = 62          # about three months of closes on the page's stock cards
 
 KINDS = ("BUY", "SELL", "BONUS", "DEPOSIT", "WITHDRAW", "DIVIDEND", "ADJUST", "VOID")
 KIND_VI = {"BUY": "Mua", "SELL": "Bán", "BONUS": "Thưởng CP", "DEPOSIT": "Nạp tiền", "WITHDRAW": "Rút tiền",
@@ -545,7 +546,7 @@ class TaiSan:
     # ── state: levels, marks, settings, alerts ──
     def state(self) -> dict:
         data = _read_json(self.state_path, {})
-        for key in ("levels", "marks", "alerts", "shadow", "events", "notes"):
+        for key in ("levels", "marks", "alerts", "shadow", "events", "notes", "names", "spark"):
             data.setdefault(key, {} if key not in ("shadow",) else [])
         data.setdefault("thresholds", {"warn": WARN_PCT, "danger": DANGER_PCT})
         return data
@@ -800,7 +801,7 @@ class TaiSan:
                 unit_value = (total - flow) / units if units else 100.0
                 units += flow / unit_value if unit_value > 0 else 0.0
             points.append({"day": day, "total": round(total), "cash": round(cash), "market": round(market),
-                           "capital": round(capital), "pnl": round(total - capital),
+                           "capital": round(capital), "pnl": round(total - capital), "held": len(held),
                            "nav": round(unit_value, 4), "vnindex": vni.get(day), "rebuilt": day <= rebuilt_until})
         if points and points[0]["vnindex"]:
             base = points[0]["vnindex"]
@@ -869,6 +870,7 @@ class TaiSan:
             try:
                 added = self.rebuild()
                 self.refresh_events()
+                self.refresh_analytics()
             except Exception as exc:  # noqa: BLE001 - the 15:30 run tries again
                 logger.exception("Tài sản: rebuild failed")
                 error = exc
@@ -1072,7 +1074,7 @@ class TaiSan:
         day = day or today_vn()
         book = self.book()
         symbols = sorted(book.holdings)
-        returns = {}
+        returns, spark = {}, {}
         for symbol in symbols:
             try:
                 series = self.market.daily_closes(symbol, day)
@@ -1081,6 +1083,7 @@ class TaiSan:
                 continue
             days = sorted(series)[-(sessions + 1):]
             returns[symbol] = {days[i]: series[days[i]] / series[days[i - 1]] - 1 for i in range(1, len(days))}
+            spark[symbol] = {"days": days[-SPARK_SESSIONS:], "c": [round(series[d], 2) for d in days[-SPARK_SESSIONS:]]}
         summary = self.summary(book=book)
         weights = {p["symbol"]: (p["value"] or p["cost"]) for p in summary["positions"]}
         total_w = sum(weights.values()) or 1.0
@@ -1126,8 +1129,57 @@ class TaiSan:
                          "suggested": round(inv[s] / inv_total * 100, 1) if s in inv else None,
                          "vol_pct": round(vol[s] * math.sqrt(252) * 100, 1)} for s in names],
         }
-        self._update_state(lambda s: s.__setitem__("analytics", result))
+        def change(s):
+            s["analytics"] = result
+            s["spark"] = spark
+        self._update_state(change)
+        self.refresh_names(symbols)
         return result
+
+    # ── company names (the page's stock cards) ──
+    def refresh_names(self, symbols: list[str]) -> dict[str, str]:
+        """Keep the short company name of ``symbols`` (VCI listing, cached a day)."""
+        from tradingagents.dataflows.symbols import listing_entry
+
+        found = {}
+        for symbol in symbols:
+            try:
+                row = listing_entry(symbol) or {}
+            except Exception as exc:  # noqa: BLE001 - a card without a name
+                logger.info("Tài sản: no listing row for %s: %s", symbol, exc)
+                continue
+            name = str(row.get("organShortName") or row.get("organName") or "").strip()
+            if name:
+                found[symbol] = name[:80]
+        if found:
+            self._update_state(lambda s: s.setdefault("names", {}).update(found))
+        return found
+
+    def names(self, symbols: list[str]) -> dict[str, str]:
+        """The saved company names; the listing kept on disk for the others (no request)."""
+        saved = dict(self.state().get("names") or {})
+        missing = [s for s in symbols if s not in saved]
+        if missing:
+            try:
+                from tradingagents.dataflows.symbols import _saved_listing
+
+                rows = {str(r.get("symbol", "")).upper(): r for r in (_saved_listing() or [])}
+            except Exception:  # noqa: BLE001
+                rows = {}
+            for symbol in missing:
+                row = rows.get(symbol) or {}
+                name = str(row.get("organShortName") or row.get("organName") or "").strip()
+                if name:
+                    saved[symbol] = name[:80]
+        return {s: saved[s] for s in symbols if s in saved}
+
+    # ── the evening report, kept for the page ──
+    def save_report(self, day: str, text: str) -> None:
+        _write_json(self.dir / "last_report.json", {"day": day, "at": now_vn().isoformat(timespec="minutes"), "text": text})
+
+    def last_report(self) -> dict:
+        data = _read_json(self.dir / "last_report.json", {})
+        return data if isinstance(data, dict) and data.get("text") else {}
 
     # ── what to do at the next session ──
     def actions(self, day: str, summary: dict, closes: dict[str, float], site: dict[str, dict]) -> list[tuple[int, str]]:
@@ -1442,13 +1494,14 @@ class TaiSan:
             backup = self.backup_journal()
 
             def change(s):
-                for key in ("levels", "marks", "alerts", "events", "notes"):
+                for key in ("levels", "marks", "alerts", "events", "notes", "spark"):
                     s[key] = {}
                 s["shadow"] = []
                 for key in ("rebuilt_until", "analytics", "imported"):
                     s.pop(key, None)
             self._update_state(change)
             self.pending_path.unlink(missing_ok=True)
+            (self.dir / "last_report.json").unlink(missing_ok=True)
         self._forget_live()
         return f"🗑️ Đã xoá danh mục Tài sản; sổ cũ lưu tại {backup.name}."
 

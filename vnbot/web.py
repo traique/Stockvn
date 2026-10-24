@@ -544,7 +544,7 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
                 + stats + warn
                 + '<div class="grid g-wide mt">' + ui.card("Lịch sử phiên bản", history, sub="mới nhất ở trên")
                 + ui.card("Cập nhật bot", how) + "</div>")
-        return _page("Phiên bản", body, show_bot=trader is not None and settings.trade_mode != "off")
+        return _page("Phiên bản", body, active="phienban", show_bot=trader is not None and settings.trade_mode != "off")
 
     @app.get("/static/{name}")
     def static_file(name: str):
@@ -607,7 +607,8 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     from vnbot.taisan import TaiSan
 
     taisan_web.register(app, getattr(trader, "taisan", None) or TaiSan(settings.data_dir), guard=guard,
-                        post_guard=post_guard, show_bot=lambda: trader is not None and settings.trade_mode != "off")
+                        post_guard=post_guard, show_bot=lambda: trader is not None and settings.trade_mode != "off",
+                        notify=getattr(trader, "notify", None))
 
     critic_llm: list = []        # the provider chain, built on the first web /critic
 

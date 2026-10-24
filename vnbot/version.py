@@ -24,13 +24,21 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.1.0"
-RELEASED = "2026-10-23"
-RELEASE_BUILD = "1a77c57"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.2.0"
+RELEASED = "2026-10-24"
+RELEASE_BUILD = "162b543"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.2.0", "2026-10-24", (
+        "Giao diện mới cho toàn bộ web theo app LCTA: nền lavender, thẻ bo tròn, sáng/tối, gọn trên điện thoại",
+        "Đầu trang: ngày âm lịch, trạng thái thị trường; menu HOME · DANH MỤC · TIỆN ÍCH",
+        "Danh mục: lời chào, cảnh báo tỷ trọng, thẻ từng mã (tên công ty, giá 3 tháng, PnL, tin tức)",
+        "Biểu đồ hiệu suất vẽ theo bề rộng màn hình, so sánh VN-Index, xem từng ngày bằng phím mũi tên",
+        "Nhật ký lọc theo loại và mã; báo cáo cuối ngày trên web, gửi ngay qua Telegram và Zoom",
+        "Đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở cả giao diện sáng và tối",
+    )),
     ("v1.1.0", "2026-10-23", (
         "Tài sản: danh mục tiền thật riêng (lệnh /ts, tab web /taisan), thay sổ /stvkhop",
         "Nhập Excel của app cũ (xem trước, đối chiếu từng số), xuất Excel 4 sheet và CSV",

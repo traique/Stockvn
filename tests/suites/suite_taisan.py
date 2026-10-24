@@ -25,7 +25,7 @@ import openpyxl  # noqa: E402
 from tradingagents.market import vn_rules  # noqa: E402
 from vnbot import taisan as ts  # noqa: E402
 from vnbot import taisan_excel as tx  # noqa: E402
-from vnbot.taisan import LedgerError, TaiSan  # noqa: E402
+from vnbot.taisan import TaiSan  # noqa: E402
 
 t = _common.Checks()
 NOW = {"t": datetime(2026, 10, 24, 10, 0, tzinfo=vn_rules.VN_TZ)}       # Saturday: no live prices
@@ -404,6 +404,9 @@ from vnbot.jobs import JobQueue  # noqa: E402
 from vnbot.service import Watchlist  # noqa: E402
 from vnbot.web import create_app  # noqa: E402
 
+import tradingagents.dataflows.symbols as _symbols  # noqa: E402
+
+_symbols.listing_entry = lambda code: {"symbol": code, "organShortName": f"Công ty {code}"}   # the VCI listing, offline
 app = create_app(SETTINGS, JobQueue(SETTINGS), Watchlist(SETTINGS), switches=Switches(SETTINGS.data_dir, {}))
 w = app.state.taisan
 w.market, w.site = FakeMarket(), None
@@ -420,10 +423,16 @@ def post(path, data=None, **kw):
 
 t.ok("GET /taisan needs the password", web.get("/taisan").status_code == 401)
 page = web.get("/taisan", auth=AUTH)
-t.ok("empty page: how to start, the tab marked", page.status_code == 200 and "Bắt đầu" in page.text
-     and 'href="/taisan" class="on"' in page.text, page.status_code)
+t.ok("empty page: how to start, the tab marked", page.status_code == 200 and "Bắt đầu theo dõi tài sản" in page.text
+     and 'href="/taisan" class="on" aria-current="page"' in page.text, page.status_code)
+t.ok("header: weekday, date and the lunar date (24/10/2026 = 15/09 ÂL), the market's phase",
+     "Thứ 7 24/10" in page.text and "15/09 ÂL" in page.text and "Thị trường nghỉ" in page.text)
+t.ok("header: the Tiện ích menu holds the other pages", '<details class="dd">' in page.text
+     and 'href="/ai"' in page.text and 'href="/phienban"' in page.text and 'href="/zoom"' in page.text)
+t.ok("one h1 and a skip link", page.text.count("<h1") == 1 and 'class="skip" href="#main"' in page.text)
 for path in ("/taisan/them", "/taisan/tien", "/taisan/khoptien", "/taisan/catlo", "/taisan/nguong", "/taisan/huy",
-             "/taisan/nhap", "/taisan/nhap/xacnhan", "/taisan/nhap/huy", "/taisan/reset"):
+             "/taisan/nhap", "/taisan/nhap/xacnhan", "/taisan/nhap/huy", "/taisan/reset", "/taisan/lammoi",
+             "/taisan/baocao"):
     t.ok(f"POST {path} without password -> 401", web.post(path, data={"x": "1"}).status_code == 401)
     t.ok(f"POST {path} cross-site -> 403", web.post(path, data={"x": "1"}, auth=AUTH,
                                                     headers={"origin": "https://evil.example"}).status_code == 403)
@@ -460,14 +469,42 @@ t.ok("web thresholds", w.thresholds() == (22.5, 35.0), loc)
 w.rebuild(through="2026-10-23")
 w.refresh_analytics("2026-10-23")
 page = web.get("/taisan", auth=AUTH).text
-for piece in ("Tổng tài sản", "Việc cần làm phiên 26/10", "Tỷ trọng và cảnh báo phân bổ", "Danh mục đang nắm giữ",
-              'class="achart"', "Rủi ro và tối ưu", "Kết quả cảnh báo bán", "Ghi giao dịch cổ phiếu", "Nhật ký",
-              "Nhập Excel", "Xuất file", "<b>25.000</b>"):
+for piece in ("Chào buổi sáng", "Tổng tài sản", "Tỷ trọng vị thế",
+              "Rủi ro &amp; phân bổ", 'role="tablist"', 'class="achart"', "Mã đang nắm giữ", "Công ty FPT",
+              'class="spark"', "Đọc tin tức", 'href="/taisan?ma=FPT#nhatky"', "Chi tiết danh mục", "Thêm giao dịch",
+              "Nhật ký giao dịch", "Nạp / rút / cổ tức / điều chỉnh", "Cắt lỗ &amp; mục tiêu", "Nhận xét &amp; chiến lược",
+              "Kết quả cảnh báo bán", "Báo cáo cuối ngày", "Nhập file Excel", "Ngưỡng cảnh báo tỷ trọng", "Reset danh mục",
+              'href="/taisan/xuat.xlsx"', 'href="/taisan/xuat.csv"', "Cắt lỗ 25.000", "Mục tiêu 40.000"):
     t.ok(f"page shows {piece!r}", piece in page)
+t.ok("the stock card: price, change against the previous close, P&L", "GIÁ HIỆN TẠI".lower() in page.lower()
+     and 'class="sk-chg' in page and 'class="pnl ' in page)
+t.ok("news opens outside, safely", 'target="_blank" rel="noopener noreferrer"' in page)
+t.ok("the sections open from a link (#nhatky...) and close natively", '<details class="acc" id="nhatky">' in page
+     and '<details class="acc" id="ghi">' in page)
 t.ok("page escapes what was typed", "<script>alert(1)" not in page and "&lt;script&gt;alert(1)" in page)
 pts = json.loads(__import__("html").unescape(page.split('data-points="', 1)[1].split('"', 1)[0]))
 t.ok("chart data: one point per session from the first entry", pts["d"][0] == "2026-04-13" and pts["d"][-1] == "2026-10-23"
      and len(pts["d"]) == len(pts["t"]) == len(pts["v"]), {k: len(v) for k, v in pts.items()})
+jr = web.get("/taisan?ma=FPT&loai=ban", auth=AUTH).text
+t.ok("journal filtered by symbol and kind, the section open", '<details class="acc" id="nhatky" open>' in jr
+     and jr.count('<li class="jr') == 1 and "400 cp × 33.000" in jr and "Bỏ lọc" in jr)
+w.set_thresholds(10, 20)
+hot = web.get("/taisan", auth=AUTH).text
+t.ok("over the danger weight: the alert card and the to-do line", "Cảnh báo tỷ trọng — 1 mã" in hot
+     and 'data-sym="FPT"' in hot and "Việc cần làm phiên 26/10" in hot and "⚠️ FPT chiếm" in hot)
+w.set_thresholds(22.5, 35)
+odd = web.get("/taisan?ma=%3Cx%3E&loai=zzz", auth=AUTH)
+t.ok("odd filter values ignored", odd.status_code == 200 and "&lt;x&gt;" not in odd.text and "<x>" not in odd.text)
+code, loc = post("/taisan/lammoi")
+t.ok("Làm mới giá: back to the holdings", code == 303 and loc.endswith("#danhmuc") and "🔄" in loc, loc)
+code, loc = post("/taisan/baocao")
+t.ok("Gửi ngay without a channel says so", "⚠️" in loc and "kênh gửi" in loc, loc)
+w.save_report("2026-10-23", "💼 TÀI SẢN · phiên 23/10/2026\nnội dung")
+page = web.get("/taisan", auth=AUTH).text
+t.ok("the last evening report on the page", "Báo cáo phiên 23/10/2026" in page and "💼 TÀI SẢN · phiên 23/10/2026" in page)
+fresh = web.get("/taisan?baocao=1", auth=AUTH).text
+t.ok("a fresh report on demand, its section open", '<details class="acc" id="baocao" open>' in fresh
+     and "bản tính lúc này" in fresh)
 undo_id = w.entries()[-1].id
 code, loc = post("/taisan/huy", {"id": str(undo_id)})
 t.ok("web undo of one line", loc.startswith("/taisan?msg=↩️ Đã huỷ #") and abs(w.book().cash - 84_000_000) > 1, loc)
@@ -488,7 +525,7 @@ code, loc = post("/taisan/nhap/xacnhan", {"replace": "1"})
 t.ok("replace needs the box ticked", "⚠️" in loc and tx.pending(w) is not None, loc)
 code, loc = post("/taisan/nhap/xacnhan", {"replace": "1", "confirm": "1"})
 t.ok("replace confirmed", "✅ Đã nhập 8 dòng" in loc and abs(w.book().cash - 58_784_700) < 1, loc)
-for _ in range(100):
+for _ in range(600):
     if not w.rebuilding:
         break
     time.sleep(0.05)
@@ -512,7 +549,7 @@ code, loc = post("/taisan/reset", {"word": "xoa"})
 t.ok("reset: empty book, the journal kept as a copy, thresholds kept",
      "🗑️ Đã xoá" in loc and not w.entries() and len(list(w.dir.glob("journal.jsonl.bak-*"))) == 2
      and w.thresholds() == (22.5, 35.0), loc)
-t.ok("nav shows the Tài sản tab on other pages", 'href="/taisan"' in web.get("/", auth=AUTH).text)
+t.ok("nav shows the Danh mục tab on other pages", 'href="/taisan"' in web.get("/", auth=AUTH).text)
 
 # ───────────── 10. Telegram: a document, the moved commands ─────────────
 from vnbot.telegram_bot import TelegramBot  # noqa: E402

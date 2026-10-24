@@ -136,7 +136,20 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 | `/tsxuat` | File Excel (Telegram); Zoom trả về đường link tải trên web (cần mật khẩu web) |
 | `/tsnhap` | Gửi file `.xlsx` vào bot Telegram kèm chú thích `/tsnhap`: bot cho xem trước và đối chiếu; ghi bằng `/tsnhap xacnhan` (sổ trống) hoặc `/tsnhap thaythe` (thay toàn bộ, sổ cũ lưu bản sao); bỏ: `/tsnhap huy` |
 
-**Trang web `/taisan`** (tab Tài sản, cần mật khẩu web), bố cục như trang Danh mục của app cũ: tổng tài sản và lãi/lỗ phiên gần nhất (không tính nạp/rút), các ô tiền mặt, giá trị cổ phiếu, lãi/lỗ đã chốt và đang mở, cổ tức, quyền chờ về, biến động năm, điểm đa dạng hoá; **việc cần làm phiên tới**; tỷ trọng theo mã và theo ngành với cảnh báo (đổi ngưỡng ngay trên trang); bảng danh mục (giá vốn, thị giá, lãi/lỗ, tỷ trọng, cắt lỗ/mục tiêu, tín hiệu Siêu tín hiệu, cổ phiếu chờ T+2); **biểu đồ hiệu suất** 7N/1T/3T/6T/1N/Tất cả, xem theo đồng (tổng tài sản và vốn gốc) hoặc theo % so với VNINDEX, di chuột/chạm để xem từng ngày; rủi ro và tối ưu (biến động, cặp mã tương quan cao, tỷ trọng cân bằng rủi ro); quyền chờ về (nút ghi nhận khi về) và sắp tới; kết quả cảnh báo bán; form ghi giao dịch, tiền, cắt lỗ; nhật ký có nút huỷ; nhập Excel (xem trước rồi xác nhận, tối đa 1 MB), xuất Excel/CSV, xoá sổ (gõ `XOA`, sổ cũ lưu bản sao).
+**Tab DANH MỤC (`/taisan`, cần mật khẩu web)**, bố cục như trang Danh mục của app cũ, từ trên xuống:
+- **Lời chào** và biến động phiên gần nhất (không tính nạp/rút), số phiên tăng/giảm liên tiếp, số việc cần làm.
+- **Cảnh báo tỷ trọng**: mã vượt ngưỡng, bấm × để ẩn trong phiên; nút xuất **XLSX** và **CSV**.
+- **Tổng tài sản**: lãi/lỗ so với vốn gốc, các ô tiền mặt, giá trị thị trường, lãi/lỗ đã chốt và đang mở, cổ tức, quyền chờ về, VN-Index.
+- **Việc cần làm phiên tới** (chỉ hiện khi có).
+- **Tỷ trọng vị thế** và **Tối ưu danh mục**: điểm đa dạng hoá, biến động năm, các thẻ Tỷ trọng (vạch cân bằng rủi ro), Ngành, Tương quan.
+- **Hiệu suất danh mục**: 7N/1T/3T/6T/1N/Tất cả; bật **So sánh VN-Index** để xem % theo đơn vị quỹ, tắt để xem tổng tài sản và vốn gốc theo đồng; chạm, di chuột hoặc dùng phím mũi tên để xem từng ngày.
+- **Mã đang nắm giữ**, mỗi mã một thẻ: tên công ty, số lô và số lượng, biểu đồ giá 3 tháng, giá hiện tại và thay đổi so với phiên trước, PnL, vốn trung bình, cắt lỗ/mục tiêu, cổ phiếu chờ T+2, tín hiệu Siêu tín hiệu, tổng mua và giá trị hiện tại, nút **Đọc tin tức** và **Xem lệnh** (nhật ký lọc theo mã). Nút **Làm mới giá** lấy lại giá khớp và biểu đồ nhỏ.
+- **Quyền chờ về** (nút ghi nhận khi về) và quyền sắp tới.
+- Các mục thu gọn: Chi tiết danh mục, Thêm giao dịch, Nhật ký giao dịch (lọc theo loại và mã, có nút huỷ), Nạp/rút/cổ tức/điều chỉnh, Cắt lỗ & mục tiêu, Nhận xét & chiến lược, Báo cáo cuối ngày, Nhập file Excel, Ngưỡng cảnh báo tỷ trọng.
+  - **Nhận xét & chiến lược**: tín hiệu Siêu tín hiệu của từng mã, nút Quant Engine và AI phản biện, kết quả cảnh báo bán.
+  - **Báo cáo cuối ngày**: bản gửi lúc 15:30, xem bản mới nhất, nút gửi ngay qua Telegram và Zoom.
+  - **Nhập file Excel**: xem trước rồi xác nhận, tối đa 1 MB.
+- **Reset danh mục**: gõ `XOA` để xoá, sổ cũ được lưu bản sao.
 
 **Biểu đồ:** một điểm mỗi phiên từ dòng đầu tiên của nhật ký, theo giá đóng cửa gốc (chưa điều chỉnh quyền, đúng với số cổ phiếu thật đang giữ). Phần trăm tính theo **đơn vị quỹ** nên nạp/rút tiền không bị tính là lãi/lỗ. Sau khi nhập Excel, bot dựng lại toàn bộ lịch sử (vài phút); sau đó mỗi phiên thêm một điểm lúc 15:30.
 
@@ -152,13 +165,16 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 
 ### Trang web
 
-- **Phân tích đầy đủ**: xếp hàng như `/phantich`; trang tự tải lại đến khi xong.
-- **Chỉ quyết định hệ thống**: như `/nhanh`.
-- **Theo dõi hằng ngày**: sửa danh sách watchlist.
-- Bảng **Nhà cung cấp AI**: thứ tự dự phòng và ai đang nghỉ vì lỗi/quota.
-- Trang **Tài sản** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên dưới.
-- Trang **Bot giao dịch** (`/bot`): biểu đồ NAV, hai danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
-- Nút mặt trời/mặt trăng trên thanh đầu trang đổi giao diện sáng/tối.
+Giao diện theo app danh mục LCTA của anh: nền lavender, thẻ trắng bo tròn, tiêu đề chữ đậm in hoa, có giao diện sáng và tối. Trang dựng sẵn cho điện thoại (từ màn 320 px), lên máy tính thì chia hai cột. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở cả hai giao diện.
+
+- **Thanh đầu trang:** ngày (thứ, dương lịch, âm lịch) và trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành). Menu gồm **HOME** (phân tích), **DANH MỤC** (tài sản tiền thật) và **TIỆN ÍCH** (AI & cảnh báo, Bot giao dịch, Phiên bản, Cấu hình Zoom).
+- **HOME** (`/`):
+  - **Phân tích đầy đủ**: xếp hàng như `/phantich`; trang tự tải lại đến khi xong.
+  - **Chỉ quyết định hệ thống**: như `/nhanh`.
+  - **Theo dõi hằng ngày**: sửa danh sách watchlist.
+  - Bảng **Nhà cung cấp AI**: thứ tự dự phòng và ai đang nghỉ vì lỗi/quota.
+- **DANH MỤC** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
+- **Bot giao dịch** (`/bot`, trong Tiện ích): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
 
 ### Báo cáo tự động
 

@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 _PAGE = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">{refresh}<title>{title} · TradingAgents VN</title>
-<style>:root{{--bg:#F6F4EF;--ink:#14161B;--mut:#6F737D;--gold:#B8963E;--gold2:#E3C979;--card:#fff;--line:#E7E2D7}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#0B0D12;--ink:#ECEEF2;--mut:#8A909C;--card:#14171F;--line:#252A36}}}}
+<style>:root{{--bg:#E9EBFB;--ink:#0E1226;--mut:#5B6184;--card:rgba(255,255,255,.72);--line:#DDE0F1}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#0B0E1C;--ink:#EEF0FB;--mut:#9AA0C2;--card:#171B30;--line:#2A3050}}}}
 body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
-font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px;box-sizing:border-box}}
-.c{{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px 26px;max-width:420px;text-align:center}}
-.m{{display:block;width:124px;height:88px;margin:0 auto 10px;object-fit:contain}}
-h1{{font:600 22px/1.3 Georgia,serif;margin:0 0 6px}}p{{color:var(--mut);margin:0}}</style></head>
-<body><div class="c"><img class="m" src="/static/logo.png" alt="LCTA"><h1>{title}</h1><p>{text}</p></div></body></html>"""
+font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px;box-sizing:border-box}}
+.c{{background:var(--card);border:1px solid var(--line);border-radius:28px;padding:32px 28px;max-width:440px;text-align:center}}
+.m{{display:block;font:700 30px/1 Georgia,serif;letter-spacing:.14em;margin:0 auto 16px}}
+h1{{font:800 22px/1.3 system-ui,sans-serif;text-transform:uppercase;letter-spacing:-.01em;margin:0 0 8px}}p{{color:var(--mut);margin:0}}</style></head>
+<body><div class="c"><div class="m" aria-hidden="true">LCTA</div><h1>{title}</h1><p>{text}</p></div></body></html>"""
 
 
 class LateApp:
