@@ -123,8 +123,9 @@ HELP = (
     "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
     "Claude chọn bóng (cần ANTHROPIC_API_KEY và SIEUTINHIEU=1; chỉ ghi lại để đo, không phải lệnh):\n"
-    "/claude - lựa chọn gần nhất và thành tích so với các lệnh MUA khác của trang\n"
-    "/claude chay - chọn ngay cho phiên gần nhất (tốn phí API, mỗi phiên một lần) · /claude lichsu - các phiên gần đây\n\n"
+    "/claude - phiên gần nhất: mã Claude chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
+    "/claude chay - chạy ngay cho phiên gần nhất (tốn phí API, mỗi phiên một lần) · /claude lichsu - các phiên gần đây\n"
+    "/claude tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
     "Hành động và mọi mức giá do hệ thống định lượng chốt; các agent AI chỉ diễn giải."
@@ -555,7 +556,7 @@ class TelegramBot:
             off = cp.why_off()
             if off:
                 raise ValueError(f"{cp.NAME} {off}.")
-            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới của trang phiên {cp._ddmm(cp.latest_session())} cho Claude "
+            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho Claude "
                                "(đọc tin, 1-3 phút)...")
             try:
                 text = pick.run()
@@ -566,11 +567,13 @@ class TelegramBot:
             self.send(chat_id, text)
         elif word in ("lichsu", "lịch sử", "lich su", "ls"):
             self.send(chat_id, cp.history_text(pick.log.days()))
+        elif word in ("tuan", "tuần"):
+            self.send(chat_id, pick.last_week_text())
         elif not word:
             pick.settle()
             self.send(chat_id, pick.text())
         else:
-            raise ValueError("Dùng: /claude · /claude chay · /claude lichsu")
+            raise ValueError("Dùng: /claude · /claude chay · /claude lichsu · /claude tuan")
 
     def _zoom_pairing(self, command: str, args: str, *, from_zoom: bool) -> str:
         """Pair, unpair or show the one Zoom account allowed to use the bot (from Telegram only)."""

@@ -418,6 +418,8 @@ class TaiSan:
         self._live: tuple[float, dict] = (0.0, {})
         self.rebuilding = False
         self._bad_lines: set[str] = set()
+        # (level, symbol, price, day) on a new alert: Claude's look at the news (vnbot.claude_pick), set by main
+        self.on_alert = None
 
     # ── the journal ──
     def entries(self) -> list[Entry]:
@@ -996,6 +998,11 @@ class TaiSan:
             del rows[:-500]
             added.append(True)
         self._update_state(change)
+        if added and self.on_alert is not None:
+            try:
+                self.on_alert(level, symbol, price, day)
+            except Exception as exc:  # noqa: BLE001 - the alert itself is kept and sent anyway
+                logger.warning("Tài sản: alert hook for %s failed: %s", symbol, exc)
         return bool(added)
 
     def settle_shadow(self, day: str | None = None) -> int:

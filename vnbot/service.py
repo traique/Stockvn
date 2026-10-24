@@ -172,6 +172,8 @@ class DailyScheduler:
         self._claude_next = 0.0
         self._claude_tries = 0
         self._claude_day = ""
+        self._week_next = 0.0
+        self._week_tries = 0
         self.critic_log = CriticLog(settings.data_dir)
         self._critic_llm = critic_llm
         self._screened: dict = {}
@@ -202,6 +204,10 @@ class DailyScheduler:
                 day = self._claude_due()
                 if day:
                     self._claude_run(day)
+                else:
+                    week = self._claude_week_due()
+                    if week:
+                        self._claude_week(week)
             except Exception:  # noqa: BLE001 - the loop must keep running
                 logger.exception("Claude pick loop failed")
             time.sleep(30)
@@ -217,6 +223,37 @@ class DailyScheduler:
         if not vn_rules.is_session_day(day) or now.strftime("%H:%M") < claude_pick.pick_time():
             return None
         return None if claude_pick.PickLog(self.settings.data_dir).get(day) else day
+
+    def _claude_week_due(self) -> str | None:
+        """The week's last session, once the evening answer of it is recorded and its review is not."""
+        from tradingagents.market import vn_rules
+        from vnbot import claude_pick
+
+        if time.time() < self._week_next or not claude_pick.enabled():
+            return None
+        now = vn_rules.now_vn()
+        day = now.strftime("%Y-%m-%d")
+        if now.strftime("%H:%M") < claude_pick.pick_time():
+            return None
+        pick = claude_pick.ClaudePick(self.settings.data_dir)
+        if pick.log.get(day) is None or not pick.week_due(day):
+            return None
+        return day
+
+    def _claude_week(self, day: str) -> None:
+        """The weekly review to Telegram and Zoom; a failure is tried twice more, then left."""
+        from vnbot import claude_pick
+
+        try:
+            text = claude_pick.ClaudePick(self.settings.data_dir).weekly_review(day)
+        except Exception as exc:  # Claude not reached (Retry), or a fault: never a loop of requests
+            self._week_tries += 1
+            logger.warning("Claude weekly review %s: %s: %s (try %d)", day, type(exc).__name__, exc, self._week_tries)
+            self._week_next = time.time() + (86400 if self._week_tries >= 3 else self.CLAUDE_RETRY_SECONDS)
+            return
+        self._week_tries = 0
+        if text:
+            self.notify(text)
 
     def _claude_run(self, day: str) -> None:
         """Claude's choice of ``day``, sent to Telegram and Zoom; retried while Claude cannot be

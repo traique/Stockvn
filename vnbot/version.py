@@ -24,13 +24,19 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.3.0"
+VERSION = "v1.4.0"
 RELEASED = "2026-10-24"
-RELEASE_BUILD = "af2cb04"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "896ce12"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.4.0", "2026-10-24", (
+        "Claude chọn bóng đo nhanh hơn: giá sau 10 phiên, chỉ tính phiên có từ 2 lệnh, cả bảng xếp hạng",
+        "Thêm ứng viên bot ước tính trong 300 mã; kết luận ở mốc 20 (sơ bộ) và 40 phiên có lựa chọn",
+        "Claude xem danh mục mỗi chiều: GIỮ / CÂN NHẮC BÁN từng mã, đo bằng giá 10 phiên sau",
+        "Có cảnh báo ⛔/🔴/🟠 thì Claude tìm tin của mã đó; tổng kết tuần về kỷ luật (/claude tuan)",
+    )),
     ("v1.3.0", "2026-10-24", (
         "Claude chọn bóng: mỗi phiên Claude đọc các lệnh MUA mới của trang, tìm tin, chọn 1 mã, nêu mã nên tránh",
         "Chỉ ghi để đo, không phải lệnh: mọi mã chấm theo ⛔/🔴, so với TB các lệnh cùng ngày (cần 50 phiên)",

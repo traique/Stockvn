@@ -111,8 +111,8 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/stvquet` · `/stvsang` | Quét ngay danh mục Tài sản + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
 | `/stvthitruong` | Bot quét 300 mã thanh khoản cao nhất thị trường: mã đã qua mức đổi chiều (trong phiên: theo giá khớp; ngoài giờ: theo giá đóng cửa), so với phần trang cho xem miễn phí, và kết quả đối chiếu các phiên trước |
 | `/stvdoichieu` | Đổi chiều trong phiên do bot ước tính cho danh mục + watchlist: mã đã qua mức đổi chiều, rồi mã sát mức (cách ≤ 2%). Ngoài giờ: mức giá đóng cửa sẽ làm từng mã đổi chiều ở phiên tới |
-| `/claude` · `/claude lichsu` | Claude chọn bóng: lựa chọn của phiên gần nhất và thành tích so với các lệnh MUA khác của trang · các phiên gần đây (cần `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`) |
-| `/claude chay` | Cho Claude chọn ngay cho phiên gần nhất (tốn phí API; mỗi phiên chỉ chọn một lần) |
+| `/claude` · `/claude lichsu` · `/claude tuan` | Claude chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`) |
+| `/claude chay` | Chạy ngay cho phiên gần nhất (tốn phí API; mỗi phiên chỉ một lần) |
 | `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
 | `/id` | Telegram id của bạn |
 
@@ -254,19 +254,26 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 
 ### Claude chọn bóng (tuỳ chọn, cần API của Claude)
 
-Câu hỏi: dùng Claude đọc các lệnh MUA của sieutinhieu.vn thì có chọn ra lệnh tốt hơn không? Không ai biết trước, và **không backtest được**: Claude đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**, giống kết quả bóng của AI phản biện. **Lựa chọn của Claude không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào.
+Câu hỏi: dùng Claude đọc các lệnh MUA và danh mục thì có chọn tốt hơn, có giúp quyết định đúng lúc hơn không? Không ai biết trước, và **không backtest được**: Claude đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**. **Mọi ý kiến của Claude không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào; quy tắc ⛔/🔴 vẫn là quy tắc chính.
 
 - **Bật:** đặt `ANTHROPIC_API_KEY` (tạo tại platform.claude.com, nên đặt luôn hạn mức chi tiêu ở đó) và `SIEUTINHIEU=1`, rồi khởi động lại.
-- **Mỗi phiên lúc `CLAUDE_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08):
-  1. Ứng viên là các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), tối đa 25 mã mạnh nhất. Không có lệnh MUA mới thì bot ghi lại và **không gọi Claude**.
-  2. Bot gửi cho Claude: giá tín hiệu, vùng vào, mục tiêu, cắt lỗ của trang và các số liệu code tính từ giá đóng cửa (thay đổi 1/20/60 phiên, khoảng cách tới TB20/50/200, đỉnh 52 tuần, giá trị giao dịch, khối lượng), cùng VNINDEX và số mã trang đang MUA. Claude không tự đưa ra giá.
-  3. Claude tìm tin (tối đa `CLAUDE_PICK_SEARCHES` lượt, chỉ trên CafeF, Vietstock, VnExpress, Tin nhanh chứng khoán, VnEconomy, Báo Đầu tư, Người quan sát, HOSE, HNX, UBCKNN): phát hành thêm, cổ đông lớn mua bán, bị cảnh báo/kiểm soát, kết quả kinh doanh, pháp lý, ngày GDKHQ.
-  4. Claude trả lời qua một biểu mẫu cố định: **một mã chọn** (hoặc không chọn), độ tin, lý do, nguồn; **các mã nên tránh** kèm lý do; xếp hạng mọi mã. Mã ngoài danh sách ứng viên bị loại; nguồn chỉ được giữ khi đúng là trang Claude đã tìm thấy.
-  5. Bot nhắn Telegram và Zoom, ghi vào `data/claude_pick.json`.
-- **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã Claude chọn và mã Claude bảo tránh): mua ở giá mở cửa phiên sau; bán ở giá mở cửa sau khi trang báo BÁN (đợi đủ T+2), khi giá chạm cắt lỗ của trang (từ T+2; mở cửa dưới cắt lỗ thì bán ở giá mở cửa), hoặc sau 60 phiên. Tính chênh lệch giá, **chưa trừ phí và thuế** (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh).
-- **So sánh:** trên các phiên mà mọi ứng viên đã có kết quả, lệnh Claude chọn được so với **trung bình mọi lệnh MUA cùng ngày** và với **lệnh có độ mạnh cao nhất của trang**; lệnh Claude bảo tránh được so với các lệnh còn lại. Bot chỉ kết luận khi đủ **50 phiên** Claude có chọn, kèm khoảng tin cậy 90%. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
-- **Xem:** `/claude` (phiên gần nhất và thành tích), `/claude lichsu`, trang web **Claude chọn bóng** (`/claude`, trong Tiện ích) có bảng ứng viên, nguồn tin, lịch sử và nút chọn ngay.
-- **Chi phí:** mặc định Claude Opus 5.5, mức suy nghĩ `medium`, khoảng 0,1-0,3 USD một phiên (khoảng 3-6 USD một tháng). Trần `CLAUDE_PICK_MONTHLY_USD` (mặc định 10 USD) tính trên số token và lượt tìm thực tế; chạm trần thì bot ngừng gọi tới tháng sau và báo lý do. Mỗi phiên chỉ gọi một lần; Claude không trả lời được (mạng, quá tải) thì bot thử lại sau 15, 30, 45 phút rồi bỏ phiên đó và báo một lần.
+- **Mỗi phiên lúc `CLAUDE_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08), một lượt gọi Claude:
+  1. **Ứng viên:** các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), mạnh nhất trước; rồi tới **các mã bot ước tính vừa đổi sang MUA** trong 300 mã thanh khoản cao nhất (cùng cách tính với trang, khớp ~88% ngày đổi chiều; tắt bằng `CLAUDE_PICK_BOT=0`), tối đa 25 mã. Nhờ vậy gần như phiên nào cũng có nhiều lệnh để chọn.
+  2. **Danh mục Tài sản:** từng mã đang giữ với khối lượng, giá vốn đúng như anh nhập (đã gồm phí, bot không trừ gì), giá đóng cửa, lãi/lỗ, tỷ trọng, cắt lỗ/mục tiêu, trạng thái của trang và **quy tắc đang báo gì** (⛔ thủng cắt lỗ hoặc 🔴 trang BÁN → BÁN; còn lại GIỮ).
+  3. Kèm số liệu code tính từ giá đóng cửa (thay đổi 1/20/60 phiên, khoảng cách tới TB20/50/200, đỉnh 52 tuần, giá trị giao dịch, khối lượng) và VNINDEX. Claude không tự đưa ra giá.
+  4. Claude tìm tin (tối đa `CLAUDE_PICK_SEARCHES` lượt, chỉ trên CafeF, Vietstock, VnExpress, Tin nhanh chứng khoán, VnEconomy, Báo Đầu tư, Người quan sát, HOSE, HNX, UBCKNN): phát hành thêm, cổ đông lớn mua bán, bị cảnh báo/kiểm soát, kết quả kinh doanh, pháp lý, ngày GDKHQ.
+  5. Claude trả lời qua một biểu mẫu cố định: **một mã chọn** (hoặc không chọn), **các mã nên tránh**, **xếp hạng mọi mã**, và **ý kiến GIỮ / CÂN NHẮC BÁN cho từng mã đang giữ**, kèm lý do và nguồn. Mã ngoài danh sách bị loại; nguồn chỉ được giữ khi đúng là trang Claude đã tìm thấy. Claude được dặn không khuyên mua thêm mã đang lỗ để bình quân giá.
+  6. Bot nhắn Telegram và Zoom, ghi vào `data/claude_pick.json`. Không có lệnh MUA mới nhưng có danh mục thì Claude chỉ xem danh mục; không có cả hai thì không gọi Claude.
+- **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ** (trong phiên hoặc sau giờ đóng cửa): ngay sau cảnh báo của bot, Claude tìm tin của mã đó (tối đa 3 lượt), cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `CLAUDE_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt), mỗi cảnh báo một lần. Cảnh báo của bot vẫn gửi ngay, không chờ Claude.
+- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi và lúc đó trang đang MUA hay BÁN, mua cao hơn giá tín hiệu bao nhiêu; các cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa; tài sản cuối tuần), Claude viết vài dòng nhận xét về kỷ luật và một việc cho tuần tới. Tắt: `CLAUDE_PICK_WEEKLY=0`. Xem lại: `/claude tuan`.
+- **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã Claude chọn và mã Claude bảo tránh), chưa trừ phí và thuế (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh):
+  - **Sau 10 phiên** (cách đo chính, có kết quả sau 2 tuần): mua ở giá mở cửa phiên sau, so với giá đóng cửa 10 phiên sau.
+  - **Theo quy tắc ⛔/🔴** (chỉ lệnh của trang): bán ở giá mở cửa sau khi trang báo BÁN (đợi đủ T+2), khi giá chạm cắt lỗ của trang (từ T+2; mở cửa dưới cắt lỗ thì bán ở giá mở cửa), hoặc sau 60 phiên.
+  - **Ý kiến về danh mục và về cảnh báo:** giá 5 và 10 phiên sau so với giá đóng cửa hôm đó; bot tách riêng những lần Claude nói khác quy tắc.
+- **So sánh:** chỉ các phiên có **từ 2 lệnh trở lên** (có lựa chọn thật) và mọi lệnh đã đủ 10 phiên. Lệnh Claude chọn được so với **trung bình mọi lệnh cùng ngày** và với **lệnh mạnh nhất của trang**; **nửa trên bảng xếp hạng** của Claude so với nửa dưới; lệnh **bảo tránh** so với phần còn lại.
+- **Kết luận ở mốc định sẵn:** bot chỉ kết luận ở **20 phiên có lựa chọn (sơ bộ)** và **40 phiên**, mỗi mốc tính đúng trên chừng ấy phiên đầu tiên, kèm khoảng tin cậy 90%. Xem kết quả mỗi ngày rồi dừng khi thấy đẹp dễ tưởng nhầm may mắn là tài, nên kết luận ở một mốc không đổi theo các phiên sau. Với nhiễu thực tế của lệnh MUA (±5 điểm % sau 10 phiên), mốc 20 phiên chỉ thấy được khi Claude hơn trung bình khoảng 2 điểm %/lệnh trở lên. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
+- **Xem:** `/claude` (phiên gần nhất, ý kiến danh mục, thành tích), `/claude lichsu`, `/claude tuan`, trang web **Claude chọn bóng** (`/claude`, trong Tiện ích): bảng ứng viên với hai cách chấm, danh mục, các lần Claude xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay.
+- **Chi phí:** mặc định Claude Opus 5.5, mức suy nghĩ `medium`: khoảng 0,2-0,5 USD một phiên (10 lượt tìm tin là 0,1 USD), 0,03-0,08 USD một lần xem cảnh báo, khoảng 0,01 USD một bản tổng kết tuần; tổng khoảng 6-12 USD một tháng. Trần `CLAUDE_PICK_MONTHLY_USD` (mặc định 15 USD) tính trên số token và lượt tìm thực tế của mọi lượt gọi; chạm trần thì bot ngừng gọi tới tháng sau và báo lý do. Mỗi phiên chỉ gọi một lần; Claude không trả lời được (mạng, quá tải) thì bot thử lại sau 15, 30, 45 phút rồi bỏ phiên đó và báo một lần; chưa lấy được tín hiệu của trang thì bot chờ chứ không ghi "không có lệnh".
 - **An toàn:** key không bao giờ được in ra trong tin nhắn lỗi; nội dung trang web Claude đọc được coi là dữ liệu, không phải chỉ dẫn; trang web chỉ hiện link http(s). Nếu bộ lọc an toàn của Claude từ chối một yêu cầu, API tự chạy lại trên model dự phòng Anthropic khuyến nghị (tham số `fallbacks`).
 
 ### Cảnh báo trong phiên (không gọi AI)
@@ -414,9 +421,12 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 | `CLAUDE_PICK` | 1 | 0 = tắt Claude chọn bóng dù đã có key |
 | `CLAUDE_PICK_MODEL` | `claude-opus-5-5` | Model Claude |
 | `CLAUDE_PICK_EFFORT` | `medium` | Mức suy nghĩ: `low` / `medium` / `high` / `xhigh` / `max` |
-| `CLAUDE_PICK_MONTHLY_USD` | 10 | Trần chi phí mỗi tháng (USD) |
-| `CLAUDE_PICK_SEARCHES` | 8 | Số lượt tìm tin tối đa mỗi phiên (1-20) |
+| `CLAUDE_PICK_MONTHLY_USD` | 15 | Trần chi phí mỗi tháng (USD), mọi lượt gọi Claude cộng lại |
+| `CLAUDE_PICK_SEARCHES` | 10 | Số lượt tìm tin tối đa mỗi phiên (1-20) |
 | `CLAUDE_PICK_TIME` | `15:50` | Giờ chọn mỗi ngày giao dịch (không sớm hơn 15:10) |
+| `CLAUDE_PICK_BOT` | 1 | Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (300 mã, cần `STV_MARKET=1`) |
+| `CLAUDE_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày Claude xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
+| `CLAUDE_PICK_WEEKLY` | 1 | Tổng kết tuần sau phiên cuối tuần (0 = tắt) |
 
 ## 10. Giới hạn và xử lý sự cố
 
