@@ -81,6 +81,8 @@ CSS = """
 @media (max-width:620px){#danhmuc .card-b{padding:0 10px 12px}.stock{padding:16px}.stock .tile{padding:12px}
   .stock .tile .v{font-size:clamp(15px,4.4vw,22px)}}
 .sk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.sk-top>div{min-width:0}.sk-top .btn{flex:none;white-space:nowrap}
+.ts-export .btn,.chips .btn{white-space:nowrap}
 .sk-sym{font:800 clamp(28px,8vw,34px)/1 "Be Vietnam Pro",sans-serif;letter-spacing:-.01em;color:var(--ink);margin:0;text-transform:none}
 .sk-name{color:var(--ink-2);margin-top:6px}
 .sk-meta{font:800 13px/1.2 "Be Vietnam Pro",sans-serif;letter-spacing:.06em;color:var(--label);margin-top:8px;text-transform:uppercase}
