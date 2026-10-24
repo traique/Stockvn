@@ -24,13 +24,19 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.2.0"
+VERSION = "v1.3.0"
 RELEASED = "2026-10-24"
-RELEASE_BUILD = "4bbabff"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "af2cb04"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.3.0", "2026-10-24", (
+        "Claude chọn bóng: mỗi phiên Claude đọc các lệnh MUA mới của trang, tìm tin, chọn 1 mã, nêu mã nên tránh",
+        "Chỉ ghi để đo, không phải lệnh: mọi mã chấm theo ⛔/🔴, so với TB các lệnh cùng ngày (cần 50 phiên)",
+        "Lệnh /claude, /claude chay, /claude lichsu (Telegram và Zoom); trang web Claude chọn bóng trong Tiện ích",
+        "Cần ANTHROPIC_API_KEY và SIEUTINHIEU=1; trần chi phí CLAUDE_PICK_MONTHLY_USD (mặc định 10 USD)",
+    )),
     ("v1.2.0", "2026-10-24", (
         "Giao diện mới cho toàn bộ web theo app LCTA: nền lavender, thẻ bo tròn, sáng/tối, gọn trên điện thoại",
         "Đầu trang: ngày âm lịch, trạng thái thị trường; menu HOME · DANH MỤC · TIỆN ÍCH",

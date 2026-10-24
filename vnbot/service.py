@@ -144,6 +144,10 @@ class DailyScheduler:
     TAISAN_TIME, TAISAN_GIVE_UP = "15:30", "18:00"
     TAISAN_RETRY_SECONDS = 600
     TAISAN_MAX_TRIES = 6
+    # Claude chọn bóng (vnbot.claude_pick): once a session from claude_pick.pick_time(); a Claude
+    # that cannot be reached is tried again with a growing delay, then the day is given up.
+    CLAUDE_RETRY_SECONDS = 900
+    CLAUDE_MAX_TRIES = 4
 
     def __init__(self, settings: Settings, jobs: JobQueue, watchlist: Watchlist, bot=None, notify=None,
                  critic_llm=None, zoom_notify=None):
@@ -165,6 +169,9 @@ class DailyScheduler:
         self._taisan_next = 0.0
         self._taisan_tries = 0
         self._taisan_day = ""
+        self._claude_next = 0.0
+        self._claude_tries = 0
+        self._claude_day = ""
         self.critic_log = CriticLog(settings.data_dir)
         self._critic_llm = critic_llm
         self._screened: dict = {}
@@ -186,6 +193,54 @@ class DailyScheduler:
         threading.Thread(target=self._scan_loop, name="stv-scan", daemon=True).start()
         # The owner's portfolio report runs on its own: minutes of downloads on a first rebuild.
         threading.Thread(target=self._taisan_loop, name="taisan", daemon=True).start()
+        # Claude's evening choice: one to three minutes with the searches, on its own as well.
+        threading.Thread(target=self._claude_loop, name="claude-pick", daemon=True).start()
+
+    def _claude_loop(self) -> None:
+        while True:
+            try:
+                day = self._claude_due()
+                if day:
+                    self._claude_run(day)
+            except Exception:  # noqa: BLE001 - the loop must keep running
+                logger.exception("Claude pick loop failed")
+            time.sleep(30)
+
+    def _claude_due(self) -> str | None:
+        from tradingagents.market import vn_rules
+        from vnbot import claude_pick
+
+        if time.time() < self._claude_next or not claude_pick.enabled():
+            return None
+        now = vn_rules.now_vn()
+        day = now.strftime("%Y-%m-%d")
+        if not vn_rules.is_session_day(day) or now.strftime("%H:%M") < claude_pick.pick_time():
+            return None
+        return None if claude_pick.PickLog(self.settings.data_dir).get(day) else day
+
+    def _claude_run(self, day: str) -> None:
+        """Claude's choice of ``day``, sent to Telegram and Zoom; retried while Claude cannot be
+        reached, then given up for the day (said once)."""
+        from vnbot import claude_pick
+
+        if self._claude_day != day:
+            self._claude_day, self._claude_tries = day, 0
+        pick = claude_pick.ClaudePick(self.settings.data_dir)
+        try:
+            text = pick.run(day)
+        except claude_pick.PickError as exc:          # switched off meanwhile, or a run in progress
+            logger.info("Claude pick %s: %s", day, exc)
+            self._claude_next = time.time() + 600
+            return
+        except Exception as exc:  # Claude not reached (Retry), or a fault: never a loop of requests
+            self._claude_tries += 1
+            logger.warning("Claude pick %s: %s: %s (try %d)", day, type(exc).__name__, exc, self._claude_tries)
+            if self._claude_tries >= self.CLAUDE_MAX_TRIES:
+                self.notify(pick.give_up(day, str(exc)))
+            else:
+                self._claude_next = time.time() + self.CLAUDE_RETRY_SECONDS * self._claude_tries
+            return
+        self.notify(text)
 
     def _taisan_loop(self) -> None:
         while True:

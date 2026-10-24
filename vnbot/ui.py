@@ -407,8 +407,8 @@ e = html.escape
 
 # The main tabs, then the "Tiện ích" menu (key, path, label).
 NAV = (("home", "/", "Home"), ("taisan", "/taisan", "Danh mục"))
-TOOLS = (("ai", "/ai", "AI & cảnh báo"), ("bot", "/bot", "Bot giao dịch"), ("phienban", "/phienban", "Phiên bản"),
-         ("zoom", "/zoom", "Cấu hình Zoom"))
+TOOLS = (("ai", "/ai", "AI & cảnh báo"), ("claude", "/claude", "Claude chọn bóng"), ("bot", "/bot", "Bot giao dịch"),
+         ("phienban", "/phienban", "Phiên bản"), ("zoom", "/zoom", "Cấu hình Zoom"))
 _WEEKDAY = ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN")
 _PHASE = {"closed": "Thị trường nghỉ", "pre_open": "Trước giờ mở cửa", "ato": "Phiên ATO", "continuous": "Đang khớp lệnh",
           "lunch": "Nghỉ trưa", "atc": "Phiên ATC", "put_through": "Thoả thuận", "after_close": "Đã đóng cửa"}
