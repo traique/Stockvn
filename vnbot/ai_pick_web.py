@@ -1,6 +1,6 @@
-"""The AI chọn bóng page (/claude): the latest session (the pick, the avoided, the views
+"""The AI chọn bóng page (/chonbong): the latest session (the pick, the avoided, the views
 on the holdings), the running comparisons, the AI's notes on the rule alerts, the weekly
-review, the history and the month's spending (``vnbot.claude_pick``).
+review, the history and the month's spending (``vnbot.ai_pick``).
 
 The page only reads the saved files; the button runs the evening answer in the background
 (one to three minutes with Gemini's web search on 9Router) and the page refreshes itself while it runs.
@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from vnbot import claude_pick as cp
+from vnbot import ai_pick as cp
 from vnbot import external, ui
 
 logger = logging.getLogger(__name__)
@@ -79,13 +79,16 @@ def _web(line: str) -> str:
 
 
 def _who(entry: dict) -> str:
-    """The model that answered a record, on 9Router."""
-    return f'{_e(entry.get("served_by") or entry.get("model"))} qua 9Router' if entry.get("model") else "Chưa gọi AI"
+    """The model that answered a record, on 9Router, and why the other did not."""
+    if not entry.get("model"):
+        return "Chưa gọi AI"
+    return f'{_e(entry["model"])} qua 9Router' + (f' ({_e(entry["fallback"])})' if entry.get("fallback") else "")
 
 
 def _route() -> str:
-    """The model that answers now, under the title ("" when 9Router is not set)."""
-    return f'<br><span class="small">Trả lời: {_e(cp.model())} qua 9Router</span>' if cp.ready() else ""
+    """The models that answer now, under the title ("" when 9Router is not set)."""
+    return (f'<br><span class="small">Trả lời: {_e(cp.main_model())}, khi lỗi chuyển sang {_e(cp.fast_model())} '
+            "(qua 9Router)</span>" if cp.ready() else "")
 
 
 def _stats_strip(st: dict) -> str:
@@ -264,14 +267,14 @@ def _history(days: list[dict]) -> str:
                    sub="Kết quả tính tới hôm nay, chưa trừ phí và thuế (như nhau cho mọi lệnh)", flush=True)
 
 
-def page_body(pick: cp.ClaudePick, msg: str = "") -> str:
+def page_body(pick: cp.AiPick, msg: str = "") -> str:
     days = pick.log.days()
     notes = pick.notes.rows()
     st = pick.stats()                       # the checkpoints pinned on their first sessions
     off = cp.why_off()
     running = pick.running
     button = ("" if off else
-              '<form method="post" action="/claude/chay" style="margin:0">'
+              '<form method="post" action="/chonbong/chay" style="margin:0">'
               f'<button class="btn btn-primary" type="submit"{" disabled" if running else ""}>'
               f'{"AI đang xem…" if running else "Chạy ngay phiên gần nhất"}</button></form>')
     notice = ""
@@ -300,7 +303,8 @@ def page_body(pick: cp.ClaudePick, msg: str = "") -> str:
         "<li>Mã chỉ được chọn trong danh sách ứng viên. Nguồn tin là link AI tự nêu: bot chỉ giữ link tới các trang tin tài "
         "chính đã định (CafeF, Vietstock, VnExpress...), không xem được AI đã tìm gì.</li>"
         "<li>Không chạy lại trên dữ liệu quá khứ: AI đã đọc tin của quá khứ nên kết quả sẽ không trung thực.</li></ul>")
-    run = (f'<dl class="sheet-foot run"><div><dt>Mô hình</dt><dd>{_e(cp.model())} qua 9Router</dd></div>'
+    run = (f'<dl class="sheet-foot run"><div><dt>Phiên chiều</dt><dd>{_e(cp.main_model())}</dd></div>'
+           f'<div><dt>Cảnh báo, tổng kết tuần, dự phòng</dt><dd>{_e(cp.fast_model())}</dd></div>'
            "<div><dt>Tìm tin</dt><dd>Gemini tự tìm trên web</dd></div>"
            f"<div><dt>Chạy mỗi phiên</dt><dd>lúc {_e(cp.pick_time())}</dd></div></dl>")
     latest = days[-1] if days else None
@@ -321,26 +325,26 @@ def page_body(pick: cp.ClaudePick, msg: str = "") -> str:
 
 
 def register(app, data_dir, *, guard, post_guard, show_bot=lambda: True) -> None:
-    """The /claude routes on ``app``."""
+    """The /chonbong routes on ``app``."""
     from fastapi import Depends
 
     def render(msg: str = "") -> HTMLResponse:
-        pick = cp.ClaudePick(data_dir)
-        return HTMLResponse(ui.page(cp.NAME, page_body(pick, msg[:600]), active="claude",
+        pick = cp.AiPick(data_dir)
+        return HTMLResponse(ui.page(cp.NAME, page_body(pick, msg[:600]), active="chonbong",
                                     refresh=15 if pick.running else None, show_bot=show_bot()))
 
-    @app.get("/claude", dependencies=[Depends(guard)])
-    def claude_page(msg: str = "") -> HTMLResponse:
+    @app.get("/chonbong", dependencies=[Depends(guard)])
+    def chonbong_page(msg: str = "") -> HTMLResponse:
         return render(msg)
 
-    @app.post("/claude/chay", dependencies=post_guard)
-    def claude_run():
-        pick = cp.ClaudePick(data_dir)
+    @app.post("/chonbong/chay", dependencies=post_guard)
+    def chonbong_run():
+        pick = cp.AiPick(data_dir)
         off = cp.why_off()
         if off:
-            return RedirectResponse(f"/claude?msg={quote(f'⚠️ Tính năng {off}.')}", status_code=303)
+            return RedirectResponse(f"/chonbong?msg={quote(f'⚠️ Tính năng {off}.')}", status_code=303)
         if pick.running:
-            return RedirectResponse(f"/claude?msg={quote('AI đang chạy, đợi một chút.')}", status_code=303)
+            return RedirectResponse(f"/chonbong?msg={quote('AI đang chạy, đợi một chút.')}", status_code=303)
 
         def work():
             try:
@@ -350,9 +354,9 @@ def register(app, data_dir, *, guard, post_guard, show_bot=lambda: True) -> None
                 logger.exception("AI pick from the web failed")
                 _LAST["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
 
-        threading.Thread(target=work, name="claude-pick-web", daemon=True).start()
+        threading.Thread(target=work, name="ai-pick-web", daemon=True).start()
         for _ in range(40):                  # the page that follows shows it running (and refreshes)
             if pick.running:
                 break
             time.sleep(0.05)
-        return RedirectResponse("/claude", status_code=303)   # no message in the URL: the page refreshes itself
+        return RedirectResponse("/chonbong", status_code=303)   # no message in the URL: the page refreshes itself

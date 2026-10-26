@@ -420,7 +420,7 @@ class TaiSan:
         self._live: tuple[float, dict] = (0.0, {})
         self.rebuilding = False
         self._bad_lines: set[str] = set()
-        # (level, symbol, price, day) on a new alert: the AI's look at the news (vnbot.claude_pick), set by main
+        # (level, symbol, price, day) on a new alert: the AI's look at the news (vnbot.ai_pick), set by main
         self.on_alert = None
 
     # ── the journal ──

@@ -61,7 +61,7 @@ FIELDS: tuple[Field, ...] = (
        "trước 15:05 (nến ngày chưa chốt).", "hhmm", "", "lich", restart=True),
     _F("STV_MORNING_TIME", "Giờ bản tin sáng", "Bản tin Siêu tín hiệu vào Zoom (hoặc Telegram) các ngày giao dịch; phải trước 11:30.",
        "hhmm", "08:30", "lich"),
-    _F("CLAUDE_PICK_TIME", "Giờ AI chọn bóng", "Sau khi trang chốt tín hiệu; không sớm hơn 15:10.", "hhmm", "15:50", "lich"),
+    _F("AI_PICK_TIME", "Giờ AI chọn bóng", "Sau khi trang chốt tín hiệu; không sớm hơn 15:10.", "hhmm", "15:50", "lich"),
     # Sàng lọc & AI
     _F("WATCHLIST", "Watchlist mặc định", "Các mã theo dõi khi chưa lưu danh sách trên trang Tổng quan (danh sách lưu ở đó được ưu tiên).",
        "list", "", "sangloc", restart=True, max_items=30),
@@ -132,15 +132,17 @@ FIELDS: tuple[Field, ...] = (
     _F("TAISAN_MAX_WEIGHT_NEW", "Tỷ trọng tối đa sau khi mua", "Một mã không quá chừng này % tài sản sau lệnh mua.", "float", "30", "taisan",
        lo=5, hi=100, unit="%"),
     # AI chọn bóng
-    _F("CLAUDE_PICK", "AI chọn bóng", "Mỗi phiên AI (qua 9Router) đọc các lệnh MUA mới và danh mục, tìm tin trên web, chọn một mã để đo. "
-       "Cần ROUTER9_BASE_URL, ROUTER9_API_KEY và Siêu tín hiệu bật.", "flag", "1", "claude"),
-    _F("CLAUDE_PICK_MODEL", "Model trên 9Router", "Model có tìm web, ví dụ gmw/gemini-pro hoặc gmw/gemini-flash (Gemini web của "
-       "UniRouter). Tên model Claude cũ được bỏ qua.", "text", "gmw/gemini-pro", "claude"),
-    _F("CLAUDE_PICK_BOT", "Thêm mã bot ước tính", "Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (cần quét toàn thị trường).",
-       "flag", "1", "claude"),
-    _F("CLAUDE_PICK_ALERTS", "Xem tin khi có cảnh báo", "Số lần tối đa mỗi ngày AI tìm tin khi một mã đang giữ có cảnh báo; 0 = tắt.",
-       "int", "5", "claude", lo=0, hi=20, unit="lần"),
-    _F("CLAUDE_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, AI nhận xét kỷ luật so với quy tắc.", "flag", "1", "claude"),
+    _F("AI_PICK", "AI chọn bóng", "Mỗi phiên AI (qua 9Router) đọc các lệnh MUA mới và danh mục, tìm tin trên web, chọn một mã để đo. "
+       "Cần ROUTER9_BASE_URL, ROUTER9_API_KEY và Siêu tín hiệu bật.", "flag", "1", "chonbong"),
+    _F("AI_PICK_MODEL", "Model chính", "Chọn mã buổi chiều (1-2 lượt mỗi ngày). Gemini web của UniRouter tự tìm tin: "
+       "gmw/gemini-pro kỹ hơn nhưng tài khoản free có hạn mức ngày.", "text", "gmw/gemini-pro", "chonbong"),
+    _F("AI_PICK_MODEL_FAST", "Model nhanh", "Xem tin khi có cảnh báo và tổng kết tuần; cũng là model dự phòng: model này "
+       "lỗi hoặc hết hạn mức thì tự chuyển sang model kia, và ngược lại.", "text", "gmw/gemini-flash", "chonbong"),
+    _F("AI_PICK_BOT", "Thêm mã bot ước tính", "Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (cần quét toàn thị trường).",
+       "flag", "1", "chonbong"),
+    _F("AI_PICK_ALERTS", "Xem tin khi có cảnh báo", "Số lần tối đa mỗi ngày AI tìm tin khi một mã đang giữ có cảnh báo; 0 = tắt.",
+       "int", "5", "chonbong", lo=0, hi=20, unit="lần"),
+    _F("AI_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, AI nhận xét kỷ luật so với quy tắc.", "flag", "1", "chonbong"),
     # Kết nối & trang web
     _F("PUBLIC_URL", "Địa chỉ công khai", "Để bot gửi kèm link báo cáo và khai báo với Zoom, ví dụ https://abc.botkeep.cloud.", "text", "",
        "ketnoi", restart=True),
@@ -158,7 +160,7 @@ GROUPS: tuple[Group, ...] = tuple(
         ("bot", "Bot giao dịch ảo", "Ba tài khoản ảo. Bot không bao giờ đặt lệnh tới công ty chứng khoán."),
         ("stv", "Siêu tín hiệu", "So sánh với sieutinhieu.vn, dùng cá nhân."),
         ("taisan", "Danh mục Tài sản", "Ngân sách rủi ro cho sổ tiền thật; chỉ để kiểm tra, không khuyên mua."),
-        ("claude", "AI chọn bóng", "Chọn bóng để đo, không phải lệnh. AI là model trên 9Router (UniRouter), mặc định Gemini có tìm web."),
+        ("chonbong", "AI chọn bóng", "Chọn bóng để đo, không phải lệnh. AI là model trên 9Router (UniRouter), mặc định Gemini có tìm web."),
         ("ketnoi", "Kết nối & trang web", "Khoá và token chỉ đặt được trên Botkeep; trang này chỉ cho biết đã có hay chưa."),
     ))
 
