@@ -1,4 +1,4 @@
-"""AI chọn bóng on 9Router (UniRouter, Gemini web with its own web search): the two models
+"""AI thẩm định tín hiệu on 9Router (UniRouter, Gemini web with its own web search): the two models
 and their hand-over, what is asked, how the JSON answer is read and checked, what is recorded
 and said (``ai_pick``)."""
 import json
@@ -394,7 +394,9 @@ def fake_run(self, day=None, *, force=False, live=False):
 cpw._LAST.clear()
 with mock.patch.object(cp.AiPick, "run", fake_run), \
         mock.patch.object(cp, "manual_plan", return_value={"day": "2026-10-23", "live": True, "note": "giá khớp lúc 10:30"}):
-    page = TestClient(app).post("/chonbong/chay")
+    page = TestClient(app).post("/thamdinh/chay")
+old = TestClient(app).get("/chonbong", follow_redirects=False)
+t.ok("the old address leads to the new one", old.status_code == 301 and old.headers["location"] == "/thamdinh")
 t.ok("the button: a forced run of today's live data, the page then says so", calls == [("2026-10-23", True, True)]
      and page.status_code == 200 and "Chạy tay lúc" in page.text and "AI chọn BBB" in page.text, (calls, cpw._LAST))
 

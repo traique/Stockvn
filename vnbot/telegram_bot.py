@@ -122,11 +122,11 @@ HELP = (
     "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã đang theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
-    "AI chọn bóng (Gemini qua 9Router, cần SIEUTINHIEU=1; chỉ ghi lại để đo, không phải lệnh):\n"
-    "/chonbong - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
-    "/chonbong chay (hoặc ngay) - chạy ngay với dữ liệu mới nhất: trong phiên là giá khớp hôm nay, sau 15:10 là tín hiệu "
-    "đã chốt · /chonbong lichsu - các phiên gần đây\n"
-    "/chonbong tuan - bản tổng kết tuần gần nhất\n\n"
+    "AI thẩm định tín hiệu (Gemini qua 9Router, cần SIEUTINHIEU=1; ghi lại để kiểm chứng, không phải lệnh đặt):\n"
+    "/thamdinh - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
+    "/thamdinh chay (hoặc ngay) - chạy ngay với dữ liệu mới nhất: trong phiên là giá khớp hôm nay, sau 15:10 là tín hiệu "
+    "đã chốt · /thamdinh lichsu - các phiên gần đây\n"
+    "/thamdinh tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
     "Hành động và mọi mức giá do hệ thống định lượng chốt; các agent AI chỉ diễn giải."
@@ -524,8 +524,8 @@ class TelegramBot:
                 self._taisan(chat_id, command, args, message, from_zoom=user_id == ZOOM_USER)
             elif command == "/stvtheodoi":
                 self._stv_watch(chat_id, args)
-            elif command == "/chonbong":
-                self._chonbong(chat_id, args)
+            elif command in ("/thamdinh", "/chonbong"):      # /chonbong: its name until v1.11.0
+                self._thamdinh(chat_id, args)
             elif command in ("/danhmuc", "/lenh", "/hieuchinh", "/khop", "/von", "/chay", "/thuong"):
                 self._trading(chat_id, command, args)
             else:
@@ -551,8 +551,8 @@ class TelegramBot:
         wait = f" (đang có {ahead} lượt chờ trước)" if ahead else ""
         self.send(chat_id, f"⏳ Đã nhận {code} ngày {day}{wait}. Quyết định hệ thống sẽ tới trước, báo cáo đầy đủ của các agent tới sau vài phút.")
 
-    def _chonbong(self, chat_id, args: str) -> None:
-        """AI chọn bóng: the latest choice and the comparison, a run now, the history."""
+    def _thamdinh(self, chat_id, args: str) -> None:
+        """AI thẩm định tín hiệu: the latest choice and the comparison, a run now, the history."""
         from vnbot import ai_pick as cp
 
         pick = cp.AiPick(self.settings.data_dir)
@@ -571,7 +571,7 @@ class TelegramBot:
                 try:
                     text = pick.run(plan["day"], force=True, live=plan["live"])
                 except cp.Retry as exc:
-                    text = f"⚠️ Chưa gọi được AI ({exc}). Gửi lại /chonbong chay sau ít phút."
+                    text = f"⚠️ Chưa gọi được AI ({exc}). Gửi lại /thamdinh chay sau ít phút."
                 except cp.PickError as exc:
                     text = f"⚠️ {exc}"
                 except Exception as exc:  # noqa: BLE001 - said to the owner, logged
@@ -587,7 +587,7 @@ class TelegramBot:
         elif not word:
             self.send(chat_id, pick.text())      # the evening run scores the open results; no download here
         else:
-            raise ValueError("Dùng: /chonbong · /chonbong chay (hoặc ngay) · /chonbong lichsu · /chonbong tuan")
+            raise ValueError("Dùng: /thamdinh · /thamdinh chay (hoặc ngay) · /thamdinh lichsu · /thamdinh tuan")
 
     def _zoom_pairing(self, command: str, args: str, *, from_zoom: bool) -> str:
         """Pair, unpair or show the one Zoom account allowed to use the bot (from Telegram only)."""

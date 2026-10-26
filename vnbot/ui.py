@@ -123,8 +123,8 @@ _ALIAS = """
   --c-factor:var(--chart-3); --c-engine:var(--chart-1); --c-mom:var(--chart-2); --c-bench:var(--chart-muted);
 """
 
-STAMP = """/* Hallmark · shape: app screen · genre: modern-minimal · theme: Coral (deal 2/3, seed private-dashboard-one-vietnamese-3889·b0dc1612·2026-10-26·r0) · redesign: restyle (site), full (/chonbong)
- * nav: kept (labelled sidebar, a 48px bar and a sheet under 60rem) · signature: the session's pick sheet, the code pressed in coral (/chonbong) · states: empty, error, running, full
+STAMP = """/* Hallmark · shape: app screen · genre: modern-minimal · theme: Coral (deal 2/3, seed private-dashboard-one-vietnamese-3889·b0dc1612·2026-10-26·r0) · redesign: restyle (site), full (/thamdinh)
+ * nav: kept (labelled sidebar, a 48px bar and a sheet under 60rem) · signature: the session's pick sheet, the code pressed in coral (/thamdinh) · states: empty, error, running, full
  * axes: light/grotesk-sans/warm · posture: restrained · contrast: pass · modes: light+dark · face: Be Vietnam Pro for General Sans (no Vietnamese) · v2.0.0 */
 /* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, an app keeps its shell; the variety is in the pick sheet, not the frame */
 /* Hallmark · finish-review: subagent · 6 findings · 6 resolved (verdict open, run line out of the disclosure, one figure face, ranking a card of its own, status outlines in ink, words in the strip at title size, three buttons on one row) · gap: none */
@@ -413,7 +413,7 @@ tr.void td{opacity:.55;text-decoration:line-through}
 .tag{display:inline-block;font-size:var(--fs-tiny);color:var(--muted)}
 @media (min-width:60.0625rem){.sidebar{position:sticky;top:0}}
 @media (min-width:900px){.set{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--space-xl)}}
-/* the session's pick sheet (/chonbong): the code large, pressed as chosen, its figures in a column */
+/* the session's pick sheet (/thamdinh): the code large, pressed as chosen, its figures in a column */
 .sect{margin-top:var(--space-xl);margin-bottom:var(--space-sm)}
 .sheet-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-lg);padding:var(--pad)}
 .sheet-head{min-width:0}
@@ -525,7 +525,7 @@ NONE = "chưa có"   # a figure that is missing (a zero is a zero)
 
 # The sidebar: the main screens, then the tools and the system pages (key, path, label, icon).
 NAV = (("home", "/", "Tổng quan", "home"), ("taisan", "/taisan", "Danh mục", "wallet"))
-TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("chonbong", "/chonbong", "AI chọn bóng", "spark"),
+TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("thamdinh", "/thamdinh", "AI thẩm định tín hiệu", "spark"),
          ("bot", "/bot", "Bot giao dịch", "bot"))
 SYSTEM = (("caidat", "/caidat", "Cài đặt", "gear"), ("zoom", "/zoom", "Cấu hình Zoom", "video"),
           ("phienban", "/phienban", "Phiên bản", "tag"))

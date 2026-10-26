@@ -57,7 +57,7 @@ PUBLIC_URL=https://<ten-server>.botkeep...   # địa chỉ Botkeep cấp
 TELEGRAM_TOKEN=123456:ABC...
 TELEGRAM_ALLOWED_IDS=        # để trống lúc đầu, xem bước 4
 
-# Tuỳ chọn: AI chọn bóng (Gemini qua 9Router, cần thêm SIEUTINHIEU=1), xem mục "AI chọn bóng"
+# Tuỳ chọn: AI thẩm định tín hiệu (Gemini qua 9Router, cần thêm SIEUTINHIEU=1), xem mục "AI thẩm định tín hiệu"
 ```
 
 5. Bấm **Start**. Log khởi động cần có:
@@ -110,8 +110,8 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/stvquet` · `/stvsang` | Quét ngay danh mục Tài sản + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
 | `/stvthitruong` | Bot quét 300 mã thanh khoản cao nhất thị trường: mã đã qua mức đổi chiều (trong phiên: theo giá khớp; ngoài giờ: theo giá đóng cửa), so với phần trang cho xem miễn phí, và kết quả đối chiếu các phiên trước |
 | `/stvdoichieu` | Đổi chiều trong phiên do bot ước tính cho danh mục + watchlist: mã đã qua mức đổi chiều, rồi mã sát mức (cách ≤ 2%). Ngoài giờ: mức giá đóng cửa sẽ làm từng mã đổi chiều ở phiên tới |
-| `/chonbong` · `/chonbong lichsu` · `/chonbong tuan` | AI chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần 9Router và `SIEUTINHIEU=1`) |
-| `/chonbong chay` (hoặc `ngay`) | Chạy ngay với dữ liệu mới nhất: trong phiên (09:15-15:10) là giá khớp hôm nay, sau 15:10 là tín hiệu đã chốt của hôm nay, trước giờ mở cửa hoặc ngày nghỉ là phiên gần nhất |
+| `/thamdinh` · `/thamdinh lichsu` · `/thamdinh tuan` | AI thẩm định tín hiệu: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần 9Router và `SIEUTINHIEU=1`) |
+| `/thamdinh chay` (hoặc `ngay`) | Chạy ngay với dữ liệu mới nhất: trong phiên (09:15-15:10) là giá khớp hôm nay, sau 15:10 là tín hiệu đã chốt của hôm nay, trước giờ mở cửa hoặc ngày nghỉ là phiên gần nhất |
 | `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
 | `/id` | Telegram id của bạn |
 
@@ -175,7 +175,7 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 - Kiểm tra trước khi mua `/tskiemtra` và thẻ 📏 trên mọi `/tsmua`: sổ không bao giờ từ chối một lệnh, chỉ gắn nhãn (✅ trong ngân sách / ⚠️ có lưu ý / ⛔ ngoài quy tắc) để sau này so kết quả các nhóm bằng giá 10 và 20 phiên sau. Bán khi trang vẫn MUA và chưa có ⛔/🔴 được gắn «bán trước tín hiệu», cũng để đo.
 - Việc treo: mỗi ⛔/🔴 có hạn bán là phiên sau (hoặc phiên đầu tiên bán được theo T+2 với cổ phiếu mới mua); đóng khi anh bán, khi anh giữ có lý do (`/tsgiu`, bắt buộc cắt lỗ), hoặc tự rút khi trang MUA lại; huỷ lệnh bán bằng `/tshuy` thì việc treo mở lại. Thước kỷ luật thứ Sáu đếm: bán trong 1 phiên / giữ có lý do / bỏ qua, và tài sản sẽ ra sao nếu mọi ⛔/🔴 được bán ở phiên sau (giá đóng cửa phiên sau, gần đúng).
 - Mục tiêu hoàn vốn: số học trên số đo. Ví dụ 24/10/2026: cần +38%; VNINDEX 2022-10/2026 **chưa có cửa sổ 2 tháng nào** đạt mức đó (1.152 cửa sổ, tốt nhất +23,5%), 6 tháng 1,0% số cửa sổ, 12 tháng 9,6%; quy tắc ⛔/🔴 đo được +1,14%/lệnh (582 lệnh) nên mục tiêu 2 tháng đòi gấp ~10 lần mức đo được, hoàn vốn với mức đo được là việc ~20 tháng. Bot nói thẳng điều đó mỗi tuần thay vì «cần +x%/phiên». Chi tiết: `docs/backtest_2026-10-24/README.md`.
-- **Bot không đặt lệnh; không khuyên margin hay bình quân giá xuống; không trừ phí/thuế vào giá anh nhập.** Mọi ý kiến của AI vẫn chỉ là bóng để đo (xem *AI chọn bóng*).
+- **Bot không đặt lệnh; không khuyên margin hay bình quân giá xuống; không trừ phí/thuế vào giá anh nhập.** Mọi ý kiến của AI vẫn chỉ là bóng để đo (xem *AI thẩm định tín hiệu*).
 
 **Backtest các quy tắc bán** (23/10/2026, `docs/backtest_2026-10-23/thoat_tai_san.md`; 39 mã: 13 mã anh từng giao dịch và VN30, 582 lần MUA của trang): bán khi ⛔ **hoặc** 🔴 (cách bot đang báo) cho lãi trung bình như chỉ chờ trang BÁN (+1,1% so với +1,2% mỗi lệnh) nhưng số lệnh lỗ quá 10% giảm từ 31 xuống 5; trên 13 mã của anh đây là quy tắc tốt nhất (+0,6%/lệnh). Bán sớm theo 🟠 không tốt hơn chờ trang chốt (đúng 48% số lần), nên cảnh báo 🟠 khuyên theo dõi, chỉ bán sớm khi sát mức cắt lỗ. Giữ tới khi thủng cắt lỗ bắt được vài xu hướng rất lớn (VIC, VHM) nhưng thắng 23%, lỗ trung bình −7%, và thua trên 13 mã của anh.
 
@@ -183,13 +183,13 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 
 ### Trang web
 
-Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, mỗi bản ghi là một tờ giấy cotton có cạnh sáng bên trái và bóng đổ nhẹ sang phải, nút như thẻ in nổi (nút chính màu mực), lựa chọn 2-4 mục là một rãnh có thẻ trượt. Màu coral chỉ dùng cho vòng focus, gạch chân link và con dấu "Đã chọn" trên phiếu của AI chọn bóng; xanh lá/đỏ chỉ ở lãi/lỗ; trạng thái là khung viền mực theo màu của nó. Chữ Be Vietnam Pro (vẽ riêng cho tiếng Việt), số trong bảng bằng Geist Mono; số thiếu ghi "chưa có", không dùng gạch ngang. Giao diện tối được suy ra (không đảo màu): không bóng đổ, nền sáng dần theo tầng. Trên điện thoại các bảng của trang AI chọn bóng thành từng khối có nhãn. Thanh bên trái liệt kê mọi trang; trên điện thoại thanh này gập thành thanh 48 px với nút menu mở trang chọn toàn màn hình (hoạt động cả khi tắt JavaScript). Có giao diện sáng và tối. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở mọi trang, cả hai giao diện, từ màn 390 px.
+Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, mỗi bản ghi là một tờ giấy cotton có cạnh sáng bên trái và bóng đổ nhẹ sang phải, nút như thẻ in nổi (nút chính màu mực), lựa chọn 2-4 mục là một rãnh có thẻ trượt. Màu coral chỉ dùng cho vòng focus, gạch chân link và con dấu "Đã chọn" trên phiếu của AI thẩm định tín hiệu; xanh lá/đỏ chỉ ở lãi/lỗ; trạng thái là khung viền mực theo màu của nó. Chữ Be Vietnam Pro (vẽ riêng cho tiếng Việt), số trong bảng bằng Geist Mono; số thiếu ghi "chưa có", không dùng gạch ngang. Giao diện tối được suy ra (không đảo màu): không bóng đổ, nền sáng dần theo tầng. Trên điện thoại các bảng của trang AI thẩm định tín hiệu thành từng khối có nhãn. Thanh bên trái liệt kê mọi trang; trên điện thoại thanh này gập thành thanh 48 px với nút menu mở trang chọn toàn màn hình (hoạt động cả khi tắt JavaScript). Có giao diện sáng và tối. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở mọi trang, cả hai giao diện, từ màn 390 px.
 
-- **Thanh bên:** **Tổng quan** (`/`), **Danh mục** (`/taisan`); nhóm *Công cụ*: AI & cảnh báo, AI chọn bóng, Bot giao dịch; nhóm *Hệ thống*: **Cài đặt** (`/caidat`), Cấu hình Zoom, Phiên bản. Dưới cùng: ngày (thứ, dương lịch, âm lịch), trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành).
+- **Thanh bên:** **Tổng quan** (`/`), **Danh mục** (`/taisan`); nhóm *Công cụ*: AI & cảnh báo, AI thẩm định tín hiệu, Bot giao dịch; nhóm *Hệ thống*: **Cài đặt** (`/caidat`), Cấu hình Zoom, Phiên bản. Dưới cùng: ngày (thứ, dương lịch, âm lịch), trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành).
 - **Tổng quan** (`/`): dải số đầu trang (lượt AI, thị trường, cảnh báo, rổ sàng lọc), phân tích một mã (AI phản biện, quyết định định lượng, phân tích chuyên sâu), lượt gần đây, ba tài khoản ảo, watchlist, nhà cung cấp AI.
 - **Danh mục** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
-- **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, AI chọn bóng, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, 9Router, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
-- **AI chọn bóng** (`/chonbong`): xem mục **AI chọn bóng**.
+- **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, AI thẩm định tín hiệu, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, 9Router, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
+- **AI thẩm định tín hiệu** (`/thamdinh`): xem mục **AI thẩm định tín hiệu**.
 - **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
 
 ### Báo cáo tự động
@@ -206,7 +206,7 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 
    Mã khác muốn AI xem thì gửi `/phanbien MÃ` (1 lượt) hoặc `/phantich MÃ` (đầy đủ).
 3. **Báo cáo Tài sản** (danh mục tiền thật), các ngày giao dịch lúc **15:30**, gửi Telegram và Zoom; chạy riêng, không phụ thuộc `TRADE_MODE` hay `SIEUTINHIEU`. Xem mục **Tài sản**.
-4. **AI chọn bóng** (nếu có 9Router và `SIEUTINHIEU=1`), các ngày giao dịch lúc `AI_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **AI chọn bóng**.
+4. **AI thẩm định tín hiệu** (nếu có 9Router và `SIEUTINHIEU=1`), các ngày giao dịch lúc `AI_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **AI thẩm định tín hiệu**.
 
 - **Ngày lễ:** bot giao dịch chỉ xử lý những phiên VNINDEX thực sự có nến, nên ngày lễ tự bỏ qua; phân tích watchlist cũng bỏ qua ngày lễ khi chạy sau 15:05.
 - **Chạy bù:** mỗi lần chạy (kể cả lúc server khởi động), bot xử lý lần lượt mọi phiên bị lỡ từ phiên cuối đã xử lý, mỗi phiên chỉ dùng dữ liệu tới phiên đó. Bù tối đa 20 phiên; phiên cũ hơn bị bỏ qua và lệnh chờ của chúng bị huỷ (báo cáo có ghi).
@@ -262,7 +262,7 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 - **Tin nhắn dễ đọc trên điện thoại:** chia mục có biểu tượng (📊 toàn thị trường, 👀 watchlist, 💼 tài khoản thật), mỗi mã một dòng, chi tiết (vùng vào, mục tiêu, cắt lỗ) ở dòng thụt vào bên dưới.
 - **`/stv`**: tổng quan - dòng Tài sản của anh, sổ ảo, lợi nhuận của từng sổ so với các sổ của bot. **`/stvdanhmuc`**: từng mã của sổ ảo so sánh. **`/stv MÃ`**: tín hiệu của một mã và lịch sử của nó tính lại hai cách - theo giá tín hiệu (giá đóng cửa ngày phát, chưa phí) và làm được thật (mở cửa phiên sau, có phí). Lịch sử cũ của trang được tạo lại hàng loạt (backtest), nên chỉ sổ ảo chạy từ hôm bật mới là phép so sánh công bằng.
 
-### AI chọn bóng (tuỳ chọn, Gemini có tìm web qua 9Router)
+### AI thẩm định tín hiệu (tuỳ chọn, Gemini có tìm web qua 9Router)
 
 Câu hỏi: dùng AI đọc các lệnh MUA và danh mục thì có chọn tốt hơn, có giúp quyết định đúng lúc hơn không? Không ai biết trước, và **không backtest được**: AI đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**. **Mọi ý kiến của AI không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào; quy tắc ⛔/🔴 vẫn là quy tắc chính.
 
@@ -279,15 +279,15 @@ Câu hỏi: dùng AI đọc các lệnh MUA và danh mục thì có chọn tốt
   5. Câu trả lời: **một mã chọn** (hoặc không chọn), **các mã nên tránh**, **xếp hạng mọi mã**, và **ý kiến GIỮ / CÂN NHẮC BÁN cho từng mã đang giữ**, kèm lý do và nguồn. Mã ngoài danh sách bị loại. **Nguồn** là link AI tự nêu: bot chỉ giữ link tới các trang tin trên (không xem được AI đã tìm gì), trang web ghi rõ điều đó.
   6. Bot nhắn Telegram và Zoom, ghi vào `data/ai_pick.json` (giữ tên file cũ để không mất lịch sử). Không có lệnh MUA mới nhưng có danh mục thì AI chỉ xem danh mục; không có cả hai thì không hỏi.
 - **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ**: ngay sau cảnh báo của bot, AI tìm tin của mã đó, cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `AI_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt). Cảnh báo của bot vẫn gửi ngay, không chờ AI.
-- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi, cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa, tài sản cuối tuần, thước kỷ luật), AI viết vài dòng nhận xét và một việc cho tuần tới. Tắt: `AI_PICK_WEEKLY=0`. Xem lại: `/chonbong tuan`.
+- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi, cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa, tài sản cuối tuần, thước kỷ luật), AI viết vài dòng nhận xét và một việc cho tuần tới. Tắt: `AI_PICK_WEEKLY=0`. Xem lại: `/thamdinh tuan`.
 - **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã AI chọn và mã AI bảo tránh), chưa trừ phí và thuế (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh):
   - **Sau 10 phiên** (cách đo chính, có kết quả sau 2 tuần): mua ở giá mở cửa phiên sau, so với giá đóng cửa 10 phiên sau.
   - **Theo quy tắc ⛔/🔴** (chỉ lệnh của trang): bán ở giá mở cửa sau khi trang báo BÁN (đợi đủ T+2), khi giá chạm cắt lỗ của trang (từ T+2; mở cửa dưới cắt lỗ thì bán ở giá mở cửa), hoặc sau 60 phiên.
   - **Ý kiến về danh mục và về cảnh báo:** giá 5 và 10 phiên sau so với giá đóng cửa hôm đó; bot tách riêng những lần AI nói khác quy tắc.
 - **So sánh:** chỉ các phiên có **từ 2 lệnh trở lên** (có lựa chọn thật) và mọi lệnh đã đủ 10 phiên. Lệnh AI chọn được so với **trung bình mọi lệnh cùng ngày** và với **lệnh mạnh nhất của trang**; **nửa trên bảng xếp hạng** của AI so với nửa dưới; lệnh **bảo tránh** so với phần còn lại.
 - **Kết luận ở mốc định sẵn:** bot chỉ kết luận ở **20 phiên có lựa chọn (sơ bộ)** và **40 phiên**, mỗi mốc tính đúng trên chừng ấy phiên đầu tiên, kèm khoảng tin cậy 90%. Xem kết quả mỗi ngày rồi dừng khi thấy đẹp dễ tưởng nhầm may mắn là tài, nên kết luận ở một mốc không đổi theo các phiên sau. Với nhiễu thực tế của lệnh MUA (±5 điểm % sau 10 phiên), mốc 20 phiên chỉ thấy được khi AI hơn trung bình khoảng 2 điểm %/lệnh trở lên. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
-- **Xem:** `/chonbong` (phiên gần nhất, ý kiến danh mục, thành tích), `/chonbong lichsu`, `/chonbong tuan`, trang web **AI chọn bóng** (`/chonbong`, trong Công cụ): mở đầu bằng **phiếu chọn của phiên** (mã được chọn in lớn, đóng dấu "Đã chọn", giá tín hiệu, cắt lỗ, mục tiêu, lý do, mã nên tránh, model đã trả lời), bảng xếp hạng mọi ứng viên, danh mục, kết quả đo, các lần AI xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay. Lệnh và đường dẫn vẫn là `/chonbong` để thói quen cũ không đổi.
-- **Chạy tay** (nút **Chạy ngay với dữ liệu mới nhất** trên trang, hoặc `/chonbong chay`): luôn hỏi lại, kể cả khi phiên đã có kết quả, và dùng dữ liệu mới nhất lúc bấm. Dưới nút ghi sẵn bấm lúc này sẽ dùng dữ liệu nào.
+- **Xem:** `/thamdinh` (phiên gần nhất, ý kiến danh mục, thành tích), `/thamdinh lichsu`, `/thamdinh tuan`, trang web **AI thẩm định tín hiệu** (`/thamdinh`, trong Công cụ): mở đầu bằng **phiếu chọn của phiên** (mã được chọn in lớn, đóng dấu "Đã chọn", giá tín hiệu, cắt lỗ, mục tiêu, lý do, mã nên tránh, model đã trả lời), bảng xếp hạng mọi ứng viên, danh mục, kết quả đo, các lần AI xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay. Lệnh và đường dẫn vẫn là `/thamdinh` để thói quen cũ không đổi. Lệnh `/chonbong` và địa chỉ `/chonbong` cũ vẫn dùng được, tự chuyển sang `/thamdinh`.
+- **Chạy tay** (nút **Chạy ngay với dữ liệu mới nhất** trên trang, hoặc `/thamdinh chay`): luôn hỏi lại, kể cả khi phiên đã có kết quả, và dùng dữ liệu mới nhất lúc bấm. Dưới nút ghi sẵn bấm lúc này sẽ dùng dữ liệu nào.
   - **Trong phiên (09:15 tới 15:10):** trang sieutinhieu.vn chưa có tín hiệu của hôm nay (chốt sau 15:10), nên ứng viên là các mã **bot ước tính** vừa qua mức đổi sang MUA theo **giá khớp hiện tại** trong 300 mã thanh khoản cao (như `/stvthitruong`), và danh mục tính theo giá khớp. Kết quả ghi là **tạm**: lượt tự động lúc `AI_PICK_TIME` hỏi lại với tín hiệu đã chốt và thay nó (lần hỏi trước vẫn được ghi lại).
   - **Sau 15:10:** tín hiệu đã chốt của hôm nay.
   - **Trước giờ mở cửa hoặc ngày nghỉ:** phiên gần nhất (hôm nay chưa có dữ liệu mới), và nói rõ như vậy.
@@ -442,7 +442,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `MAX_TOOL_ROUNDS` | 8 | Số lượt gọi tool tối đa của mỗi analyst |
 | `KEEP_REPORTS` | 60 | Số thư mục báo cáo giữ lại |
 | `CACHE_MAX_AGE_DAYS` | 3 | Xoá cache giá cũ hơn số ngày này |
-| `AI_PICK` | 1 | 0 = tắt **AI chọn bóng** (cần 9Router và `SIEUTINHIEU=1`) |
+| `AI_PICK` | 1 | 0 = tắt **AI thẩm định tín hiệu** (cần 9Router và `SIEUTINHIEU=1`) |
 | `AI_PICK_MODEL` | `gmw/gemini-pro` | Model chính (chọn mã buổi chiều); Gemini web (`gmw/…`) tự tìm tin trên web |
 | `AI_PICK_MODEL_FAST` | `gmw/gemini-flash` | Model nhanh (cảnh báo, tổng kết tuần) và dự phòng khi model kia lỗi |
 | `AI_PICK_TIME` | `15:50` | Giờ chọn mỗi ngày giao dịch (không sớm hơn 15:10) |

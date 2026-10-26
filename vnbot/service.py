@@ -144,7 +144,7 @@ class DailyScheduler:
     TAISAN_TIME, TAISAN_GIVE_UP = "15:30", "18:00"
     TAISAN_RETRY_SECONDS = 600
     TAISAN_MAX_TRIES = 6
-    # AI chọn bóng (vnbot.ai_pick): once a session from ai_pick.pick_time(); a 9Router
+    # AI thẩm định tín hiệu (vnbot.ai_pick): once a session from ai_pick.pick_time(); a 9Router
     # that cannot be reached is tried again with a growing delay, then the day is given up.
     PICK_RETRY_SECONDS = 900
     PICK_MAX_TRIES = 4
@@ -231,7 +231,7 @@ class DailyScheduler:
         if status == "done":
             self._pick_done = day                 # remembered: the file is not parsed again every 30 s
             return None
-        if status == "pending":                     # in flight from /chonbong chay or the web: looked at again
+        if status == "pending":                     # in flight from /thamdinh chay or the web: looked at again
             return None
         return day                                  # nothing yet, a failure that cost nothing, or a stale request
 
