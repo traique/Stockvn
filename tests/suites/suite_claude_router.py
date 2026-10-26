@@ -265,4 +265,22 @@ week = {"week": "2026-W43", "day": DAY, "facts": ["f"], "text": "• ổn", "via
 t.ok("a weekly review by 9Router says so", "Nhận xét của 9Router:" in cp.week_text(week))
 t.ok("Claude's own texts unchanged", "9Router" not in cp.week_text({**week, "via": None}))
 
+# ───────────── 6. the page ─────────────
+from vnbot import claude_pick_web as cpw  # noqa: E402
+
+env(**ROUTER, ROUTER9_MODEL="gpt-x", SIEUTINHIEU=1)
+body = cpw.page_body(cp.ClaudePick(evening_dir, now=lambda: NOW))
+t.ok("the page leads with the pick sheet: the code pressed as chosen", '<section class="card sheet"' in body
+     and 'id="pick">AAA</h2><span class="stamp">Đã chọn</span>' in body
+     and body.index("sheet") < body.index("Kết quả đo tới nay"))
+t.ok("...says who answers now and who answered this session",
+     "Trả lời: 9Router (gpt-x), vì chưa có ANTHROPIC_API_KEY" in body and "9Router (gpt-x) trả lời thay Claude" in body)
+t.ok("...the candidates restack on a phone, every cell labelled", '<table class="stack">' in body and 'data-label="Giá"' in body)
+t.ok("...no dotted meta strings or dash placeholders", " · " not in body.split("<style")[0] and "—" not in body)
+os.environ["ANTHROPIC_API_KEY"] = "k"
+t.ok("with a key: Claude answers, 9Router stands by", "Trả lời: Claude (claude-opus-5-5), dự phòng 9Router (gpt-x)" in cpw.page_body(
+    cp.ClaudePick(evening_dir, now=lambda: NOW)))
+body = cpw.page_body(cp.ClaudePick(retry_dir, now=lambda: NOW))
+t.ok("a failed session: the error on the sheet, no stamp", "không có lựa chọn" in body and 'class="stamp"' not in body)
+
 t.done()

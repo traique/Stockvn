@@ -67,7 +67,7 @@ FIELDS: tuple[Field, ...] = (
        "list", "", "sangloc", restart=True, max_items=30),
     _F("SCAN_UNIVERSE", "Rổ mã sàng lọc", "Lượt 15:30 xét rổ này cộng thêm watchlist.", "choice", "vn100", "sangloc", restart=True,
        options=(("vn100", "VN100"), ("vn30", "VN30"), ("watchlist", "Chỉ watchlist"))),
-    _F("DAILY_AI_MODE", "AI ở lượt tự động", "critic: mỗi mã một lượt phản biện · full: chuỗi agent, khoảng 25 lượt mỗi mã · off: không gọi AI.",
+    _F("DAILY_AI_MODE", "AI ở lượt tự động", "critic: mỗi mã một lượt phản biện; full: chuỗi agent, khoảng 25 lượt mỗi mã; off: không gọi AI.",
        "choice", "critic", "sangloc", restart=True,
        options=(("critic", "AI phản biện (1 lượt/mã)"), ("full", "Phân tích chuyên sâu (~25 lượt/mã)"), ("off", "Không dùng AI"))),
     _F("DAILY_AI_MAX", "Số mã gửi AI mỗi ngày", "Những mã mạnh nhất có hành động trong danh sách dưới; 0 = không gọi AI.",
@@ -100,12 +100,12 @@ FIELDS: tuple[Field, ...] = (
     _F("INTRADAY_EARLY", "Đẩy dấu hiệu bán sớm", "Nhắn khi một mã có dấu hiệu BÁN sớm giữa phiên. Đo trên dữ liệu: bán sớm không hơn "
        "chờ tín hiệu chốt, nên mặc định tắt.", "flag", "0", "canhbao", restart=True),
     # Bot giao dịch ảo
-    _F("TRADE_MODE", "Chế độ bot", "paper: ba tài khoản ảo · signal: như paper và gửi lệnh đề xuất cho tài khoản thật · off: tắt bot. "
+    _F("TRADE_MODE", "Chế độ bot", "paper: ba tài khoản ảo; signal: như paper và gửi lệnh đề xuất cho tài khoản thật; off: tắt bot. "
        "Bot không bao giờ đặt lệnh tới công ty chứng khoán.", "choice", "paper", "bot", restart=True,
        options=(("paper", "Tài khoản ảo"), ("signal", "Tài khoản ảo kèm tín hiệu thật"), ("off", "Tắt"))),
     _F("PAPER_CAPITAL", "Vốn tài khoản ảo", "Vốn khởi điểm cho tài khoản ảo mới; đổi vốn của tài khoản đang chạy ở trang Bot giao dịch.",
        "int", "1000000000", "bot", restart=True, lo=10_000_000, hi=1_000_000_000_000, unit="đ"),
-    _F("UNIVERSE_VN30", "Giao dịch rổ VN30", "Bật: VN30 cộng watchlist · tắt: chỉ watchlist.", "flag", "1", "bot", restart=True),
+    _F("UNIVERSE_VN30", "Giao dịch rổ VN30", "Bật: VN30 cộng watchlist; tắt: chỉ watchlist.", "flag", "1", "bot", restart=True),
     _F("AUTO_CALIBRATE", "Tự hiệu chỉnh hằng đêm", "Quant Engine và Động lượng: tối đa một điều chỉnh nhỏ mỗi đêm; Phòng thủ giữ bộ đã kiểm định.",
        "flag", "1", "bot", restart=True),
     _F("SIGNAL_STRATEGY", "Chiến lược cho tín hiệu thật", "Ở chế độ signal, lệnh đề xuất theo chiến lược này.", "choice", "factor", "bot",

@@ -124,8 +124,8 @@ config.clear(DATA, "DAILY_REPORT_TIME")
 t.ok("nothing changed: said plainly", "không có gì thay đổi" in unquote(web.post(
     "/caidat", data={"group": "taisan", "TAISAN_RISK_PCT": "2", "TAISAN_OPEN_RISK_PCT": "6", "TAISAN_MAX_WEIGHT_NEW": "30"},
     auth=AUTH, follow_redirects=False).headers["location"]))
-t.ok("the pages: no gradient, glass, uppercase labels, shadows or emoji in the chrome",
-     all(x not in page for x in ("gradient(", "backdrop-filter", "box-shadow", "⭐", "👋"))
+t.ok("the pages: no gradient, glass, uppercase labels or emoji in the chrome",
+     all(x not in page for x in ("gradient(", "backdrop-filter", "⭐", "👋"))
      and page.count("text-transform:uppercase") == 1)   # only the stock-code input types in capitals
 
 t.done()

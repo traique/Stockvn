@@ -47,14 +47,14 @@ CSS = """
 @media (min-width:1100px){.ts-top.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .greet{padding:var(--pad)}
 .greet .gh{font-size:var(--fs-section);font-weight:600;margin:0}
-.greet .gs{color:var(--muted);margin:4px 0 10px}
+.greet .gs{color:var(--muted);margin:var(--space-2xs) 0 var(--space-sm)}
 .greet .chip{white-space:normal}
-.warn-card .wh{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:var(--pad) var(--pad) 8px}
-.warn-card .wh h2{display:flex;align-items:center;gap:8px}
+.warn-card .wh{display:flex;align-items:center;justify-content:space-between;gap:var(--space-sm);padding:var(--pad) var(--pad) var(--space-xs)}
+.warn-card .wh h2{display:flex;align-items:center;gap:var(--space-xs)}
 .warn-card .wh h2 svg{width:16px;height:16px;color:var(--negative)}
-.ar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px 12px;padding:10px 0;margin:0 var(--pad);
+.ar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:var(--space-xs) var(--space-sm);padding:var(--space-sm) 0;margin:0 var(--pad);
   border-top:1px solid var(--rule)}
-.ar .s{display:flex;align-items:center;gap:6px;font-weight:500}
+.ar .s{display:flex;align-items:center;gap:var(--space-xs);font-weight:500}
 .ar .s svg{width:14px;height:14px;color:var(--negative)}
 .ar .p{text-align:right;font-weight:500;color:var(--negative);font-variant-numeric:tabular-nums}
 .ar .p small{display:block;color:var(--muted);font-weight:400;font-size:var(--fs-small)}
@@ -64,46 +64,46 @@ CSS = """
 .ar .track{grid-column:1/-1}
 .ar .chip{justify-self:start}
 @media (min-width:620px){.ar{grid-template-columns:auto minmax(80px,1fr) auto auto auto}.ar .track{grid-column:auto}}
-.warn-card .wf{padding:8px var(--pad) var(--pad);color:var(--muted);font-size:var(--fs-small);line-height:16px}
-.ts-export{display:flex;justify-content:flex-end;gap:8px}
-.total{font-size:32px;line-height:1.15;font-weight:500;letter-spacing:-.01em;margin:2px 0 10px;overflow-wrap:anywhere}
-.vni-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:var(--gap);padding-top:var(--gap);
+.warn-card .wf{padding:var(--space-xs) var(--pad) var(--pad);color:var(--muted);font-size:var(--fs-small);line-height:16px}
+.ts-export{display:flex;justify-content:flex-end;gap:var(--space-xs)}
+.total{font-size:32px;line-height:1.15;font-weight:500;letter-spacing:-.01em;margin:var(--space-3xs) 0 var(--space-sm);overflow-wrap:anywhere}
+.vni-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:var(--space-xs);margin-top:var(--gap);padding-top:var(--gap);
   border-top:1px solid var(--rule)}
 .vni-row .v{font-weight:500}
 .todo li{align-items:flex-start}
-.stats2{display:flex;flex-wrap:wrap;gap:12px 32px;margin-bottom:var(--gap)}
-.stats2 .l{color:var(--muted);font-size:var(--fs-small)}
-.stats2 .v{font-size:var(--fs-kpi);line-height:1.15;font-weight:500;margin-top:4px;font-variant-numeric:tabular-nums}
+.stats2{display:flex;flex-wrap:wrap;gap:var(--space-sm) var(--space-xl);margin-bottom:var(--gap)}
+.stats2 .l{font-variant-numeric:tabular-nums;color:var(--muted);font-size:var(--fs-small)}
+.stats2 .v{font-size:var(--fs-kpi);line-height:1.15;font-weight:500;margin-top:var(--space-2xs);font-variant-numeric:tabular-nums}
 .stocks{display:grid;gap:var(--gap)}
 @media (min-width:900px){.stocks{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.stock{border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
-.sk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.stock{border:1px solid var(--border);border-radius:var(--radius);padding:var(--space-md);display:flex;flex-direction:column;gap:var(--space-sm);min-width:0}
+.sk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-sm)}
 .sk-top>div{min-width:0}.sk-top .btn{flex:none}
 .sk-sym{font-size:20px;line-height:1.2;font-weight:600;margin:0}
-.sk-name{color:var(--muted);font-size:var(--fs-small);line-height:16px;margin-top:2px}
-.sk-meta{color:var(--muted);font-size:var(--fs-small);line-height:16px;margin-top:4px}
-.sk-spark{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:var(--fs-small)}
-.sk-mid{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
-.sk-price{font-size:var(--fs-kpi);line-height:1.15;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums}
-.sk-chg{font-size:var(--fs-small);margin-top:2px;font-variant-numeric:tabular-nums}
+.sk-name{color:var(--muted);font-size:var(--fs-small);line-height:16px;margin-top:var(--space-3xs)}
+.sk-meta{color:var(--muted);font-size:var(--fs-small);line-height:16px;margin-top:var(--space-2xs)}
+.sk-spark{display:flex;align-items:center;gap:var(--space-sm);color:var(--muted);font-size:var(--fs-small)}
+.sk-mid{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-sm);flex-wrap:wrap}
+.sk-price{font-size:var(--fs-kpi);line-height:1.15;font-weight:500;margin-top:var(--space-3xs);font-variant-numeric:tabular-nums}
+.sk-chg{font-size:var(--fs-small);margin-top:var(--space-3xs);font-variant-numeric:tabular-nums}
 .pnl{min-width:120px;text-align:right}
 .pnl .l{color:var(--muted);font-size:var(--fs-small)}
-.pnl .v{font-size:20px;line-height:1.2;font-weight:500;margin-top:2px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pnl .v{font-size:20px;line-height:1.2;font-weight:500;margin-top:var(--space-3xs);white-space:nowrap;font-variant-numeric:tabular-nums}
 .pnl .pc{font-size:var(--fs-small);font-variant-numeric:tabular-nums}
 .jfilter{display:flex;flex-wrap:wrap;gap:var(--gap);align-items:flex-end;margin-bottom:var(--gap)}
 .jfilter .fld{flex:1 1 140px}
 .jl{list-style:none;margin:0;padding:0}
-.jr{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--rule)}
+.jr{display:flex;justify-content:space-between;gap:var(--space-sm);padding:var(--space-sm) 0;border-top:1px solid var(--rule)}
 .jr:first-child{border-top:0;padding-top:0}
 .jr.void{opacity:.5}.jr.void .jr-t{text-decoration:line-through}
-.jr-t{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.jr-s{font-size:var(--fs-small);line-height:16px;color:var(--muted);margin-top:2px}
+.jr-t{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-xs)}
+.jr-s{font-size:var(--fs-small);line-height:16px;color:var(--muted);margin-top:var(--space-3xs)}
 .jr-r{text-align:right;flex:none;font-variant-numeric:tabular-nums}
-.sig-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px;padding:10px 0;border-top:1px solid var(--rule)}
+.sig-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:var(--space-xs) var(--space-sm);padding:var(--space-sm) 0;border-top:1px solid var(--rule)}
 .sig-row:first-child{border-top:0;padding-top:0}
-.sig-row .acts{display:flex;flex-wrap:wrap;gap:8px}
-.goal-line{margin:0 0 4px}
-.danger-card .card-b p{color:var(--muted);margin:0 0 12px}
+.sig-row .acts{display:flex;flex-wrap:wrap;gap:var(--space-xs)}
+.goal-line{margin:0 0 var(--space-2xs)}
+.danger-card .card-b p{color:var(--muted);margin:0 0 var(--space-sm)}
 """
 
 _DISMISS_JS = """<script>
@@ -125,12 +125,12 @@ def e(text) -> str:
 
 
 def _signed(value) -> str:
-    return "—" if value is None else ts.signed(value)
+    return ui.NONE if value is None else ts.signed(value)
 
 
 def _p1(value) -> str:
     """12.34 -> "12,3%"."""
-    return "—" if value is None else f"{value:.1f}%".replace(".", ",")
+    return ui.NONE if value is None else f"{value:.1f}%".replace(".", ",")
 
 
 def _price_label(label: str) -> str:
@@ -176,11 +176,11 @@ def _alert(msg: str) -> str:
 
 
 def _vnd(value) -> str:
-    return "—" if value is None else f"{ui.money(value)} đ"
+    return ui.NONE if value is None else f"{ui.money(value)} đ"
 
 
 def _svnd(value) -> str:
-    return "—" if value is None else f"{_signed(value)} đ"
+    return ui.NONE if value is None else f"{_signed(value)} đ"
 
 
 # ─── what the numbers say ────────────────────────────────────────────────────
@@ -314,7 +314,7 @@ def _risk_tile(account: ts.TaiSan, s: dict) -> str:
         r = kyluat.risk_summary(account, s)
     except Exception as exc:  # noqa: BLE001 - the tile says so
         logger.warning("Tài sản web: risk tile: %s", exc)
-        return ui.tile("Rủi ro đang mở", "—", "chưa tính được")
+        return ui.tile("Rủi ro đang mở", ui.NONE, "chưa tính được")
     share = min(1.0, r["pct"] / r["cap"]) if r["cap"] else 0.0
     meter = (f'<div class="meter{" hot" if share >= 0.85 else ""}" role="img" '
              f'aria-label="Rủi ro đang mở {_p1(r["pct"])} trên trần {r["cap"]:g}%"><span style="width:{share * 100:.1f}%"></span></div>')
@@ -410,9 +410,9 @@ def _optimize(state: dict, alloc: dict) -> str:
     a = state.get("analytics") or {}
     level = {x["symbol"]: x["level"] for x in alloc["symbols"]}
     head = ('<div class="stats2"><div><div class="l">Đa dạng hoá</div><div class="v" style="color:var(--warn)">'
-            + (f'{a["diversification"]}<span class="muted" style="font-size:16px">/100</span>' if a.get("diversification") is not None else "—")
+            + (f'{a["diversification"]}<span class="muted" style="font-size:16px">/100</span>' if a.get("diversification") is not None else ui.NONE)
             + '</div></div><div><div class="l">Biến động/năm</div><div class="v">'
-            + (_p1(a["vol_pct"]) if a.get("vol_pct") is not None else "—") + "</div></div></div>")
+            + (_p1(a["vol_pct"]) if a.get("vol_pct") is not None else ui.NONE) + "</div></div></div>")
     if a.get("weights"):
         rows = []
         for w in sorted(a["weights"], key=lambda w: -w["current"]):
@@ -485,7 +485,7 @@ def _stock_card(p: dict, h: ts.Holding, name: str, spark: dict, level: dict, sig
     spark_label = f"Giá {sym} khoảng 3 tháng"
     news = f"https://news.google.com/search?q={quote(p['symbol'] + ' cổ phiếu')}&hl=vi&gl=VN&ceid=VN:vi"
     change = (f'<div class="sk-chg {ui.tone(chg)}">{_signed(chg)} · {ui.pct(chg_pct)}</div>' if chg is not None
-              else '<div class="sk-chg muted">—</div>')
+              else f'<div class="sk-chg muted">{ui.NONE}</div>')
     closes = [c for c in (spark.get("c") or []) if c]
     three = f"3 tháng {ui.pct((closes[-1] / closes[0] - 1) * 100)}" if len(closes) > 1 and closes[0] else "3 tháng · chưa đủ giá"
     return (
@@ -597,7 +597,7 @@ def _details(s: dict, book: ts.Book) -> str:
         ui.tile("Điều chỉnh thủ công", _svnd(book.adjustments), "Cân bằng sổ sách"),
         ui.tile("Đã nạp", _vnd(book.deposits), ""), ui.tile("Đã rút", _vnd(book.withdrawals), ""),
         ui.tile("Lệnh bán", str(book.sells), f"thắng {book.wins} · thua {book.losses}"),
-        ui.tile("Bắt đầu theo dõi", ts.ddmmyyyy(book.first_day) or "—", f"dòng cuối {ts.ddmmyyyy(book.last_day)}"),
+        ui.tile("Bắt đầu theo dõi", ts.ddmmyyyy(book.first_day) or ui.NONE, f"dòng cuối {ts.ddmmyyyy(book.last_day)}"),
     ])
     return ui.acc("chitiet", "Thống kê", "Chi tiết danh mục", f'<div class="tiles">{tiles}</div>')
 
@@ -724,8 +724,8 @@ def _levels_form(book: ts.Book, levels: dict) -> str:
         return ui.acc("catlo", "Kỷ luật", "Cắt lỗ & mục tiêu", '<p class="muted" style="margin:0">Chưa nắm giữ mã nào.</p>')
     options = "".join(f'<option value="{e(s)}">{e(s)}</option>' for s in held)
     current = "".join(
-        f'<li><b style="flex:1">{e(s)}</b><span class="num">cắt lỗ {ui.money(lv.get("stop")) if lv.get("stop") else "—"}'
-        f' · mục tiêu {ui.money(lv.get("target")) if lv.get("target") else "—"}</span>'
+        f'<li><b style="flex:1">{e(s)}</b><span class="num">cắt lỗ {ui.money(lv.get("stop")) if lv.get("stop") else ui.NONE}'
+        f' · mục tiêu {ui.money(lv.get("target")) if lv.get("target") else ui.NONE}</span>'
         f' <span class="badge {"b-info" if lv.get("source") == "owner" else "b-none"}">{"anh đặt" if lv.get("source") == "owner" else "Siêu tín hiệu"}</span></li>'
         for s, lv in sorted(levels.items()) if s in book.holdings)
     body = (f"""
@@ -781,7 +781,7 @@ def _assistant(account: ts.TaiSan, book: ts.Book, site: dict) -> str:
 
 
 def _right(value) -> str:
-    return "—" if value is None else f"{value:.0f}%"
+    return ui.NONE if value is None else f"{value:.0f}%"
 
 
 def _report(account: ts.TaiSan, fresh: bool, can_send: bool) -> str:

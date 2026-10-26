@@ -24,13 +24,21 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.6.0"
-RELEASED = "2026-10-25"
-RELEASE_BUILD = "4a5cc0f"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.7.0"
+RELEASED = "2026-10-26"
+RELEASE_BUILD = "ea0167c"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.7.0", "2026-10-26", (
+        "Claude chọn bóng: chưa có ANTHROPIC_API_KEY, Claude lỗi hoặc chạm trần USD thì 9Router trả lời thay (CLAUDE_PICK_ROUTER9)",
+        "9Router dùng chung hạn mức ngày và thời gian nghỉ với các agent; không tìm tin nên không có nguồn, không tính vào trần USD",
+        "Mỗi tin nhắn, bản ghi và trang web ghi rõ Claude hay 9Router trả lời, và vì sao",
+        "Giao diện Coral: giấy xám ấm, bản ghi như tờ giấy cotton, nút in nổi, chữ Be Vietnam Pro, số trong bảng Geist Mono",
+        "Trang Claude chọn bóng mở đầu bằng phiếu chọn của phiên, mã được chọn đóng dấu; bảng thành khối có nhãn trên điện thoại",
+        "Số thiếu ghi chưa có thay gạch ngang; axe 0 lỗi ở mọi trang, sáng và tối, 390 và 1440 px",
+    )),
     ("v1.6.0", "2026-10-25", (
         "Giao diện web mới kiểu sổ cái không màu: nền xanh xám, thẻ trắng viền mỏng, chữ Geist, số dạng bảng",
         "Thanh bên trái thay cho đầu trang; trên điện thoại gập thành thanh 48 px và menu toàn màn hình",

@@ -29,9 +29,8 @@ def _hint(f: config.Field, saved: dict[str, str]) -> str:
         default = "bật" if f.default == "1" else "tắt"
     elif f.kind == "choice":
         default = dict(f.options).get(f.default, f.default)
-    tail = f"Mặc định {default}" + (f" {f.unit}" if f.unit and f.kind in ("int", "float") else "") + f" · {where}"
-    if f.restart:
-        tail += " · có hiệu lực sau khi khởi động lại"
+    tail = (f"Mặc định {default}" + (f" {f.unit}" if f.unit and f.kind in ("int", "float") else "")
+            + f", đang lấy từ {where}" + (", có hiệu lực sau khi khởi động lại" if f.restart else "") + ".")
     bits.append(tail)
     return " ".join(bits)
 
@@ -91,9 +90,9 @@ def page_body(data_dir, msg: str = "") -> str:
     kind = "err" if msg[:1] in ("⚠", "❌") else "ok" if msg[:1] == "✅" else "info"
     lead = (f"{len(config.FIELDS)} tham số trong {len(config.GROUPS)} nhóm. Giá trị lưu ở đây được ưu tiên hơn biến môi trường "
             "trên Botkeep và giữ qua các lần khởi động lại.")
-    jump = " · ".join(f'<a href="#{_e(g.key)}">{_e(g.title)}</a>' for g in config.GROUPS) + ' · <a href="#khoa">Khoá và token</a>'
+    jump = "".join(f'<a href="#{_e(g.key)}">{_e(g.title)}</a>' for g in config.GROUPS) + '<a href="#khoa">Khoá và token</a>'
     return (ui.title("Cài đặt", lead) + (ui.alert(msg, kind) if msg else "")
-            + f'<p class="muted small" style="margin:0 0 20px">{jump}</p>'
+            + f'<nav class="jump" aria-label="Các nhóm cài đặt">{jump}</nav>'
             + "".join(_section(g, saved) for g in config.GROUPS) + _secrets())
 
 

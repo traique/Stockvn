@@ -67,6 +67,17 @@ class _BodyTooLarge(Exception):
     pass
 
 
+_GLYPH_VI = {"⛔": "Cắt lỗ (⛔)", "🔴": "Trang BÁN (🔴)", "🟠": "Dấu hiệu sớm (🟠)", "🎯": "Mục tiêu (🎯)"}
+
+
+def _named(note: str) -> str:
+    """A release note for the page: opened with the alert's name, not its glyph, and a run
+    joined by middle dots ("HOME · DANH MỤC") joined by commas."""
+    note = note.replace(" · ", ", ")
+    head = note[:1]
+    return f"{_GLYPH_VI[head]}{note[1:]}" if head in _GLYPH_VI else note
+
+
 def _too_large(exc: BaseException, depth: int = 0) -> bool:
     """Whether ``exc`` is, or wraps (exception groups, causes), a ``_BodyTooLarge``."""
     if exc is None or depth > 10:
@@ -268,8 +279,8 @@ def _book_card(title: str, book, *, accent: str, sub: str = "") -> str:
         f'<tr><td class="sym">{html.escape(p.symbol)}</td><td class="num">{ui.money(p.qty)}</td>'
         f'<td class="num">{ui.money(p.avg_price)}</td><td class="num">{ui.money(p.last_price)}</td>'
         f'<td class="num {ui.tone(p.last_price - p.avg_price if p.avg_price else None)}">'
-        f'{ui.pct((p.last_price / p.avg_price - 1) * 100) if p.avg_price else "—"}</td>'
-        f'<td class="num">{ui.money(p.stop) if p.stop else "—"}</td>'
+        f'{ui.pct((p.last_price / p.avg_price - 1) * 100) if p.avg_price else ui.NONE}</td>'
+        f'<td class="num">{ui.money(p.stop) if p.stop else ui.NONE}</td>'
         f'<td>{"" if p.sellable else _T2_BADGE}</td></tr>'
         for p in book.positions.values()]
     orders = [
@@ -530,9 +541,9 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
             "upload thiếu file, lẫn file của bản cũ, hoặc code đã được sửa. Hãy upload lại đủ gói rồi khởi động lại.",
             "err")
         history = "".join(
-            f'<h3>{html.escape(v)} <span class="muted small">· {html.escape(ver._ddmmyyyy(day))}'
-            + (' · <span class="badge b-ok">đang chạy</span>' if v == ver.VERSION else "") + "</span></h3>"
-            + "<ul>" + "".join(f"<li>{html.escape(n)}</li>" for n in notes) + "</ul>"
+            f'<h3>{html.escape(v)}</h3><p class="muted small">phát hành {html.escape(ver._ddmmyyyy(day))}'
+            + (' <span class="badge b-ok">đang chạy</span>' if v == ver.VERSION else "") + "</p>"
+            + "<ul>" + "".join(f"<li>{html.escape(_named(n))}</li>" for n in notes) + "</ul>"
             for v, day, notes in ver.NOTES)
         how = ("<ol><li>Upload đủ gói của phiên bản mới lên Botkeep (ghi đè các file cũ).</li>"
                "<li>Khởi động lại bot.</li>"
@@ -666,9 +677,9 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
       <input id="date" name="date" type="date" value="{today}" max="{today}"></div>
   </div>
   <div class="row" style="margin-top:14px">
-    <button class="btn btn-primary" type="submit" formaction="/critic">AI phản biện · 1 lượt</button>
+    <button class="btn btn-primary" type="submit" formaction="/critic">AI phản biện (1 lượt)</button>
     <button class="btn btn-ghost" type="submit" formaction="/quick">Quyết định định lượng</button>
-    <button class="btn btn-ghost" type="submit">Phân tích chuyên sâu · ~25 lượt</button>
+    <button class="btn btn-ghost" type="submit">Phân tích chuyên sâu (~25 lượt)</button>
   </div>
   <p class="muted small" style="margin:12px 0 0">Quyết định định lượng có sau vài giây và không dùng lượt AI.
   AI phản biện gửi một yêu cầu duy nhất: AI đồng thuận hay phản đối, kèm lý do. Phân tích chuyên sâu huy động
@@ -774,11 +785,11 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
         agree, reject = st["AGREE"], st["REJECT"]
 
         def r_of(x):
-            return f'{x["avg_r"]:+.2f}R'.replace(".", ",") if x["n"] else "—"
+            return f'{x["avg_r"]:+.2f}R'.replace(".", ",") if x["n"] else ui.NONE
 
         stats = ui.strip([
             _ai_stat(usage),
-            ("AI phản đối đúng", f'{st["veto_right_pct"]}%' if st["veto_right_pct"] is not None else "—",
+            ("AI phản đối đúng", f'{st["veto_right_pct"]}%' if st["veto_right_pct"] is not None else ui.NONE,
              f'trên {reject["n"]} lệnh MUA bị phản đối đã có kết quả'),
             ("Kết quả theo dõi", f'{r_of(agree)} <span class="muted" style="font-size:.6em">/ {r_of(reject)}</span>',
              "R trung bình: AI đồng ý / phản đối"),

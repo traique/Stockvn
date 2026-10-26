@@ -42,21 +42,21 @@ PUBLIC_NAV = (("/docs", "Hướng dẫn"), ("/support", "Hỗ trợ"), ("/privac
 
 PUBLIC_CSS = """
 .doc{max-width:860px}
-.doc .card-b{padding:24px 28px 28px}
-@media (max-width:860px){.doc .card-b{padding:16px}}
-.doc h1{margin:0 0 8px}
-.doc h2{font-size:16px;margin:24px 0 8px}
-.doc p,.doc li{margin:8px 0}
-.doc code,.url{font:12px/16px var(--mono);background:var(--raised);border-radius:4px;padding:2px 6px;word-break:break-all}
-.lang{border-top:1px solid var(--border);margin-top:28px;padding-top:8px}
-.box{background:var(--raised);border-radius:var(--radius);padding:12px 14px;margin:12px 0}
-.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--rule)}
+.doc .card-b{padding:var(--space-lg) var(--space-lg) var(--space-lg)}
+@media (max-width:860px){.doc .card-b{padding:var(--space-md)}}
+.doc h1{margin:0 0 var(--space-xs)}
+.doc h2{font-size:16px;margin:var(--space-lg) 0 var(--space-xs)}
+.doc p,.doc li{margin:var(--space-xs) 0}
+.doc code,.url{font:12px/16px var(--mono);background:var(--raised);border-radius:4px;padding:var(--space-3xs) var(--space-xs);word-break:break-all}
+.lang{border-top:1px solid var(--border);margin-top:var(--space-lg);padding-top:var(--space-xs)}
+.box{background:var(--raised);border-radius:var(--radius);padding:var(--space-sm) var(--space-md);margin:var(--space-sm) 0}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-sm);align-items:center;padding:var(--space-sm) 0;border-top:1px solid var(--rule)}
 .kv:first-child{border-top:0;padding-top:0}
-.kv b{display:block;font-weight:500}.kv .url{display:inline-block;margin-top:4px}
+.kv b{display:block;font-weight:500}.kv .url{display:inline-block;margin-top:var(--space-2xs)}
 .ok{color:var(--positive);font-weight:500}.no{color:var(--negative);font-weight:500}
 .doc td.cmd code{white-space:nowrap}
 @media (max-width:620px){.doc td.en{display:none}.doc table,.doc tbody,.doc tr,.doc td{display:block}
-  .doc tr{padding:8px 0;border-top:1px solid var(--rule)}.doc td{border:0;padding:2px 0}}
+  .doc tr{padding:var(--space-xs) 0;border-top:1px solid var(--rule)}.doc td{border:0;padding:var(--space-3xs) 0}}
 """
 
 
@@ -441,7 +441,7 @@ def register(app, settings, zoom, *, guard, post_guard, notify=None, post=None) 
         req_rows = "".join(
             f'<div class="kv"><div><b>{datetime.fromtimestamp(r["ts"], VN_TZ).strftime("%d/%m %H:%M:%S")} · '
             f'{html.escape(r["event"])}</b><span class="muted small">{html.escape(r.get("user") or "")} '
-            f'{html.escape(r.get("cmd") or "")} — {html.escape(r["reason"])}</span></div><div>{chk(r["ok"])}</div></div>'
+            f'{html.escape(r.get("cmd") or "")}: {html.escape(r["reason"])}</span></div><div>{chk(r["ok"])}</div></div>'
             for r in reqs) or (
             '<p class="box">Chưa nhận được yêu cầu nào từ Zoom. Vui lòng kiểm tra <b>Bot endpoint URL</b> trong'
             " Features → Surface → Team Chat Subscription của đúng ứng dụng này (bản Development khi Local Test), và chắc chắn"
