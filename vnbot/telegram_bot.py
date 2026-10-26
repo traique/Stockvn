@@ -124,7 +124,8 @@ HELP = (
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
     "AI chọn bóng (Gemini qua 9Router, cần SIEUTINHIEU=1; chỉ ghi lại để đo, không phải lệnh):\n"
     "/chonbong - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
-    "/chonbong chay - chạy ngay cho phiên gần nhất (mỗi phiên một lần) · /chonbong lichsu - các phiên gần đây\n"
+    "/chonbong chay (hoặc ngay) - chạy ngay với dữ liệu mới nhất: trong phiên là giá khớp hôm nay, sau 15:10 là tín hiệu "
+    "đã chốt · /chonbong lichsu - các phiên gần đây\n"
     "/chonbong tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
@@ -556,18 +557,19 @@ class TelegramBot:
 
         pick = cp.AiPick(self.settings.data_dir)
         word = args.strip().lower()
-        if word in ("chay", "chạy", "run"):
+        if word in ("chay", "chạy", "ngay", "run"):
             off = cp.why_off()
             if off:
                 raise ValueError(f"{cp.NAME} {off}.")
             if pick.running:
                 raise ValueError(f"{cp.NAME} đang chạy, đợi một chút.")
-            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho "
-                               f"{cp.main_model()} qua 9Router (tìm tin trên web, 1-3 phút)...")
+            plan = cp.manual_plan()
+            self.send(chat_id, f"⏳ Đang chạy phiên {cp._ddmm(plan['day'])} với {plan['note']}: gửi cho {cp.main_model()} "
+                               "qua 9Router (tìm tin trên web, 1-3 phút)...")
 
             def work():                      # minutes with the AI: never on the chat's lane
                 try:
-                    text = pick.run()
+                    text = pick.run(plan["day"], force=True, live=plan["live"])
                 except cp.Retry as exc:
                     text = f"⚠️ Chưa gọi được AI ({exc}). Gửi lại /chonbong chay sau ít phút."
                 except cp.PickError as exc:
@@ -585,7 +587,7 @@ class TelegramBot:
         elif not word:
             self.send(chat_id, pick.text())      # the evening run scores the open results; no download here
         else:
-            raise ValueError("Dùng: /chonbong · /chonbong chay · /chonbong lichsu · /chonbong tuan")
+            raise ValueError("Dùng: /chonbong · /chonbong chay (hoặc ngay) · /chonbong lichsu · /chonbong tuan")
 
     def _zoom_pairing(self, command: str, args: str, *, from_zoom: bool) -> str:
         """Pair, unpair or show the one Zoom account allowed to use the bot (from Telegram only)."""

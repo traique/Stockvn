@@ -230,6 +230,30 @@ def bot_candidates(day: str, closes, size: int, exclude, limit: int = BOT_CANDID
     return out[:limit]
 
 
+_LIVE_LEVELS: dict = {}     # the market scan's levels for live_candidates, computed once a session
+
+
+def live_candidates(closes, size: int, now, limit: int = MAX_CANDIDATES, *, board=None) -> tuple[list[dict], str]:
+    """In the session: the stocks among the ``size`` most traded whose matched price now is
+    past the level that turns their trend to BUY (the bot's estimate, ``market_scan.scan``,
+    as /stvthitruong), most traded first, marked ``live``; and why there are none ("")."""
+    from vnbot import market_scan as ms
+
+    snap = ms.scan(closes, size, now, board=board, levels_cache=_LIVE_LEVELS)
+    if snap.get("error"):
+        return [], snap["error"]
+    rows = [r for r in snap["rows"] if r.get("flip") == "BUY"][:limit]
+    series, _floors, _value = closes.series([r["symbol"] for r in rows], snap["basis"])
+    out = []
+    for r in rows:
+        s = (series.get(r["symbol"]) or []) + [r["price"]]
+        avg = r.get("value") or 0.0
+        bars = [{"d": "", "o": c, "h": c, "l": c, "c": c, "v": avg / c if c else 0} for c in s]
+        out.append({"symbol": r["symbol"], "source": "bot", "live": True, "price": r["price"], "level": r["level"],
+                    "sl": None, "tp1": None, "strength": None, "value": avg, "features": features(bars, volume=False)})
+    return out, ""
+
+
 def _bars(frame, day: str | None = None, *, after: bool = False) -> list[dict]:
     """The frame's sessions as dicts (d, o, h, l, c, v): up to ``day``, or after it."""
     rows = []
@@ -285,6 +309,9 @@ def _figures(f: dict) -> str:
 def candidate_line(n: int, cand: dict) -> str:
     """One candidate for the prompt (prices in VND)."""
     fmt = external._fmt
+    if cand.get("live"):
+        return (f"{n}. {cand['symbol']} · bot ước tính đổi sang MUA trong phiên: giá khớp {fmt(cand['price'])} đã qua mức "
+                f"{fmt(cand.get('level'))}, chưa chốt (trang chưa có tín hiệu cho mã này)\n   " + _figures(cand.get("features") or {}))
     if cand.get("source") == "bot":
         return (f"{n}. {cand['symbol']} · bot ước tính đổi sang MUA hôm nay (trang chưa có tín hiệu cho mã này)\n   "
                 + _figures(cand.get("features") or {}))
@@ -355,7 +382,8 @@ def holding_line(item: dict) -> str:
     fmt = external._fmt
     site = item.get("site")
     head = (f"• {item['symbol']} {fmt(item['qty'])} cp · giá vốn {fmt(item['avg'])} (chủ tài khoản nhập, đã gồm phí) · "
-            f"đóng cửa {fmt(item['close'])} ({_pct(item.get('pnl_pct'))}) · tỷ trọng {_num(item.get('weight'))}%")
+            f"{'giá khớp' if item.get('live') else 'đóng cửa'} {fmt(item['close'])} ({_pct(item.get('pnl_pct'))}) · "
+            f"tỷ trọng {_num(item.get('weight'))}%")
     if item.get("stop"):
         head += f" · cắt lỗ {fmt(item['stop'])}"
     if item.get("target"):
@@ -918,13 +946,14 @@ class PickLog(_JsonList):
 
     def status(self, day: str, now) -> str:
         """What the log says of ``day``: "none" (nothing), "pending" (a request in flight),
-        "stale" (in flight too long: the process died), "retryable" (a failure) or "done"."""
+        "stale" (in flight too long: the process died), "retryable" (a failure, or an answer
+        asked in the session, before the site's final signals) or "done"."""
         entry = self.get(day)
         if entry is None:
             return "none"
         if entry.get("pending"):
             return "stale" if self.stale(entry, now) else "pending"
-        if entry.get("error"):
+        if entry.get("error") or entry.get("provisional"):
             return "retryable"
         return "done"
 
@@ -1105,6 +1134,9 @@ def entry_text(entry: dict, st: dict | None = None) -> str:
     if entry.get("pending"):
         lines.append(f"⏳ Đang hỏi AI (từ {entry['pending'][11:16]}); kết quả gửi khi xong.")
         return "\n".join(lines)
+    if entry.get("live"):
+        lines.append(f"🕘 Dữ liệu trong phiên lúc {entry['live'][11:16]} (bot ước tính trên giá khớp, chưa chốt); "
+                     f"bot hỏi lại với tín hiệu đã chốt lúc {pick_time()}.")
     if entry.get("error"):
         lines.append(f"⚠️ Không có lựa chọn: {entry['error']}")
     else:
@@ -1116,7 +1148,8 @@ def entry_text(entry: dict, st: dict | None = None) -> str:
             if pick.get("symbol"):
                 cand = by[pick["symbol"]]
                 if cand.get("source") == "bot":
-                    head = f"🧮 {pick['symbol']} {external._fmt(cand['price'])} (bot ước tính, trang chưa báo)"
+                    head = (f"🧮 {pick['symbol']} {external._fmt(cand['price'])} (bot ước tính"
+                            + (" trong phiên, giá khớp" if cand.get("live") else "") + ", trang chưa báo)")
                 else:
                     signal = {**cand, "side": "BUY", "strength_pct": cand.get("strength")}
                     head = external.signal_line(pick["symbol"], signal, plan=True)
@@ -1212,6 +1245,28 @@ def latest_session(now=None) -> str:
     return vn_rules.prev_session(today)
 
 
+LIVE_FROM = "09:15"         # the price board has today's matches (market_scan.WINDOW)
+
+
+def manual_plan(now=None) -> dict:
+    """What a run by hand (the web button, /chonbong chay) asks about now: ``{day, live, note}``.
+    In the session (LIVE_FROM to the site's final signals): today, with the bot's estimates on
+    the matched prices (``live``); from SITE_FINAL_TIME: today, with the site's final signals;
+    before the open or on a day off: the last session, there is nothing of today yet."""
+    from tradingagents.market import vn_rules
+
+    now = now or vn_rules.now_vn()
+    today, hhmm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+    if vn_rules.is_session_day(today) and hhmm >= external.SITE_FINAL_TIME:
+        return {"day": today, "live": False, "note": f"tín hiệu đã chốt của phiên hôm nay {_ddmm(today)}"}
+    if vn_rules.is_session_day(today) and hhmm >= LIVE_FROM:
+        return {"day": today, "live": True,
+                "note": f"giá khớp trong phiên hôm nay lúc {hhmm} (bot ước tính, trang chốt tín hiệu sau {external.SITE_FINAL_TIME})"}
+    day = vn_rules.prev_session(today)
+    why = "chưa mở cửa" if vn_rules.is_session_day(today) else "không giao dịch"
+    return {"day": day, "live": False, "note": f"phiên gần nhất {_ddmm(day)} (hôm nay {why}, chưa có dữ liệu mới)"}
+
+
 def _load_bars(symbol: str, day: str) -> list[dict]:
     from tradingagents.dataflows.ohlcv import load_ohlcv
 
@@ -1222,12 +1277,13 @@ def _load_bars(symbol: str, day: str) -> list[dict]:
 
 class AiPick:
     """The evening answers, the alert notes, the weekly review and their scoring. ``client``
-    (9Router's, OpenAI-compatible), ``bars`` (symbol, as_of -> bars), ``account``, ``closes``
-    and ``now`` are for the tests; by default the OpenAI SDK on 9Router, the bot's price
-    sources, Tài sản and the market scan's closes."""
+    (9Router's, OpenAI-compatible), ``bars`` (symbol, as_of -> bars), ``account``, ``closes``,
+    ``board`` (symbols -> {symbol: {price}}) and ``now`` are for the tests; by default the
+    OpenAI SDK on 9Router, the bot's price sources, Tài sản, the market scan's closes and the
+    price board."""
 
     def __init__(self, data_dir: Path, *, store=None, client=None, bars: Callable[[str, str], list[dict]] | None = None,
-                 account=None, closes=None, now: Callable | None = None):
+                 account=None, closes=None, board: Callable | None = None, now: Callable | None = None):
         self.data_dir = Path(data_dir)
         self.log = PickLog(self.data_dir)
         self.notes = NoteLog(self.data_dir)
@@ -1236,6 +1292,7 @@ class AiPick:
         self._bars = bars or _load_bars
         self._account = account
         self._closes = closes
+        self._board = board
         self._now = now
 
     def now(self):
@@ -1298,17 +1355,20 @@ class AiPick:
         return entry_text(entry, self.stats())
 
     # ── the evening ──
-    def run(self, day: str | None = None) -> str:
+    def run(self, day: str | None = None, *, force: bool = False, live: bool = False) -> str:
         """Answer for session ``day`` (the latest by default), once: a session already answered
-        is only shown again. Raises ``Retry`` when 9Router or the site's signals cannot be
-        reached; any other failure is recorded and said in the text."""
+        is only shown again, unless ``force`` (a run by hand, ``manual_plan``: asked again with
+        the data of now). ``live``: today in the session, on the bot's estimates from the
+        matched prices, kept as provisional (the evening run asks again with the site's final
+        signals). Raises ``Retry`` when 9Router or the site's signals cannot be reached; any
+        other failure is recorded and said in the text."""
         off = why_off()
         if off:
             raise PickError(f"{NAME} {off}.")
         if not _RUN_LOCK.acquire(blocking=False):
             raise PickError(f"{NAME} đang chạy, đợi một chút.")
         try:
-            return self._run(day or latest_session(self.now()))
+            return self._run(day or latest_session(self.now()), force=force, live=live)
         finally:
             _RUN_LOCK.release()
 
@@ -1319,31 +1379,39 @@ class AiPick:
             logger.warning("%s: Tài sản not read: %s", NAME, exc)
             return []
 
-    def _run(self, day: str) -> str:
+    def _run(self, day: str, *, force: bool = False, live: bool = False) -> str:
         done = self.log.get(day)
         now = self.now()
-        # Once a session; asked again only after a failure, or when a request in flight is
-        # stale (the process died before the answer was recorded).
-        if done is not None and not done.get("error") and not self.log.stale(done, now):
+        # Once a session; asked again after a failure, an answer asked in the session, a request
+        # in flight gone stale (the process died before the answer was recorded), or by hand.
+        if (done is not None and not force and not done.get("error") and not done.get("provisional")
+                and not self.log.stale(done, now)):
             return self.text(day)
         stamp = now.strftime("%Y-%m-%dT%H:%M")
         symbols, held = self.symbols(), self._held()
         final = f"{day}T{external.SITE_FINAL_TIME}"
         try:
-            _, refresh_error = self.store.refresh(list(dict.fromkeys(held + symbols)), fresh_after=final)
+            # in the session the site has nothing of today yet: its states as of yesterday will do
+            _, refresh_error = self.store.refresh(list(dict.fromkeys(held + symbols)), fresh_after=None if live else final)
         except Exception as exc:  # noqa: BLE001 - judged below, like an error the refresh reports
             refresh_error = str(exc)
-        if refresh_error and sum(1 for s in symbols if self.store.fetched_at(s) >= final) < len(symbols) / 2:
+        if (not live and refresh_error
+                and sum(1 for s in symbols if self.store.fetched_at(s) >= final) < len(symbols) / 2):
             # Without the session's signals "no new BUY" would be recorded for good: wait instead.
             raise Retry(f"chưa lấy được tín hiệu của trang phiên {_ddmm(day)}: {refresh_error[:120]}")
         self.settle()
-        cands = candidates(day, self.store, symbols)
+        if live:
+            cands, why = live_candidates(self.closes, external.market_size(), now, board=self._board)
+            if why and not cands:
+                logger.warning("%s: no live candidates: %s", NAME, why)
+        else:
+            cands = candidates(day, self.store, symbols)
         for cand in cands:
             try:
                 cand["features"] = features([b for b in self._bars(cand["symbol"], day) if b["d"] <= day])
             except Exception as exc:  # noqa: BLE001 - the candidate goes without its figures
                 logger.warning("%s: no figures for %s: %s", NAME, cand["symbol"], exc)
-        if bot_candidates_on() and len(cands) < MAX_CANDIDATES:
+        if not live and bot_candidates_on() and len(cands) < MAX_CANDIDATES:
             try:
                 self.closes.update(day, budget=60)
                 cands += bot_candidates(day, self.closes, external.market_size(), [c["symbol"] for c in cands],
@@ -1354,9 +1422,17 @@ class AiPick:
         if held:
             try:
                 holdings = holdings_context(self.account, day, self.store, self._bars)
+                if live:
+                    holdings = self._at_matched_prices(holdings)
             except Exception as exc:  # noqa: BLE001 - the evening goes on without the portfolio
                 logger.warning("%s: holdings not read: %s", NAME, exc)
         entry = {"day": day, "at": stamp, "candidates": cands, "holdings": holdings}
+        if live:
+            entry.update(live=stamp, provisional=True)
+        if done is not None and (done.get("pick") or {}).get("symbol"):
+            # an answer asked again keeps a trace of what it said before
+            entry["earlier"] = ((done.get("earlier") or [])
+                                + [{"at": done.get("at"), "pick": done["pick"]["symbol"], "live": bool(done.get("live"))}])[-5:]
         if not cands and not holdings:
             entry["note"] = f"Không có lệnh MUA mới ({len(symbols)} mã theo dõi) và danh mục trống phiên {_ddmm(day)}."
             self.log.save(entry)
@@ -1367,7 +1443,11 @@ class AiPick:
             index = []
         cutoff = external.next_open_cutoff(day)
         buying = sum(1 for s in symbols if (st := self.store.state(s, day, cutoff)) and st["side"] == "BUY")
-        prompt = build_prompt(day, cands, holdings, market_line(index, buying, len(symbols)), now.strftime("%H:%M %d/%m/%Y"))
+        market = market_line(index, buying, len(symbols))
+        if live:
+            market += (f" · ĐANG TRONG PHIÊN {_ddmm(day)} lúc {stamp[11:16]}: giá là giá khớp hiện tại, chưa chốt; trang "
+                       f"chốt tín hiệu sau {external.SITE_FINAL_TIME}; VNINDEX ở trên là tới phiên trước")
+        prompt = build_prompt(day, cands, holdings, market, now.strftime("%H:%M %d/%m/%Y"))
         codes, codes_held = [c["symbol"] for c in cands], [h["symbol"] for h in holdings]
         self.log.save({**entry, "pending": stamp})       # a run in flight: the scheduler leaves it alone
         try:
@@ -1397,6 +1477,22 @@ class AiPick:
             entry["fallback"] = meta["fallback"]
         self.log.save(entry)
         return entry_text(entry, self.stats())
+
+    def _at_matched_prices(self, holdings: list[dict]) -> list[dict]:
+        """The holdings at the board's matched price now, the rules judged on it."""
+        from vnbot import trend_estimate as te
+
+        board = (self._board or te.board_prices)([h["symbol"] for h in holdings])
+        out = []
+        for h in holdings:
+            price = (board.get(h["symbol"]) or {}).get("price")
+            if not price:
+                out.append(h)
+                continue
+            rule, why = rule_for(price, h.get("stop"), h.get("target"), h.get("site"))
+            out.append({**h, "close": price, "live": True, "rule": rule, "rule_why": why,
+                        "pnl_pct": round((price / h["avg"] - 1) * 100, 2) if h.get("avg") else None})
+        return out
 
     def give_up(self, day: str, error: str) -> str:
         """After the retries of the day: recorded so the scheduler stops, and said once (a
