@@ -35,6 +35,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import date as _date, timedelta
 from pathlib import Path
 
+from vnbot import kyluat
+
 logger = logging.getLogger(__name__)
 
 DIR = "taisan"
@@ -418,6 +420,8 @@ class TaiSan:
         self._live: tuple[float, dict] = (0.0, {})
         self.rebuilding = False
         self._bad_lines: set[str] = set()
+        # (level, symbol, price, day) on a new alert: Claude's look at the news (vnbot.claude_pick), set by main
+        self.on_alert = None
 
     # ── the journal ──
     def entries(self) -> list[Entry]:
@@ -549,7 +553,21 @@ class TaiSan:
         for key in ("levels", "marks", "alerts", "shadow", "events", "notes", "names", "spark"):
             data.setdefault(key, {} if key not in ("shadow",) else [])
         data.setdefault("thresholds", {"warn": WARN_PCT, "danger": DANGER_PCT})
+        # the discipline layer (vnbot.kyluat): cut-loss flags, exit tickets, overrides, checks, buy/sell tags, the floor, the goal
+        for key in ("flags", "exits_log", "overrides", "checks"):
+            data.setdefault(key, [])
+        for key in ("exits", "tags", "guard", "diet", "discipline"):
+            data.setdefault(key, {})
+        data.setdefault("goal", {"date": kyluat.DEFAULT_GOAL_DATE, "set_day": "", "source": "default"})
         return data
+
+    @staticmethod
+    def today() -> str:
+        return today_vn()
+
+    @staticmethod
+    def now():
+        return now_vn()
 
     def _update_state(self, change) -> dict:
         with self._lock:
@@ -573,7 +591,10 @@ class TaiSan:
     def levels(self) -> dict[str, dict]:
         return self.state()["levels"]
 
-    def set_levels(self, symbol: str, stop: float | None, target: float | None, *, source: str = "owner") -> dict:
+    def set_levels(self, symbol: str, stop: float | None, target: float | None, *, source: str = "owner",
+                   record_lower: bool = True) -> dict:
+        """Save the levels. ``record_lower``: an owner's lowering is flagged and scored (off for
+        /tsgiu, whose override row records that one decision)."""
         symbol = symbol.upper()
         book = self.book()
         if symbol not in book.holdings:
@@ -585,9 +606,15 @@ class TaiSan:
             raise LedgerError("Mức mục tiêu không hợp lệ.")
         if stop and target and target <= stop:
             raise LedgerError("Mục tiêu phải cao hơn mức cắt lỗ.")
+        old = float((self.levels().get(symbol) or {}).get("stop") or 0)
         level = {"stop": float(stop) if stop else 0.0, "target": float(target) if target else None,
                  "source": source, "day": today_vn(), "avg": round(avg, 2)}
         self._update_state(lambda s: s["levels"].__setitem__(symbol, level))
+        if record_lower and source == "owner" and old and stop and float(stop) < old:
+            # never silent: a lowered cut-loss is recorded and scored (vnbot.kyluat)
+            prices, _ = self.current_prices([symbol])
+            level = {**level, "lower_text": kyluat.flag_lower(self, symbol, old, float(stop), book.holdings[symbol].qty,
+                                                             prices.get(symbol))}
         return level
 
     def _site_levels_for(self, symbol: str, day: str, price: float) -> None:
@@ -610,7 +637,7 @@ class TaiSan:
         held = set(book.holdings)
 
         def change(s):
-            for key in ("levels", "marks"):
+            for key in ("levels", "marks", "exits"):      # an exit ticket of a stock no longer held says nothing
                 for sym in [k for k in s[key] if k not in held]:
                     s[key].pop(sym, None)
         self._update_state(change)
@@ -980,9 +1007,10 @@ class TaiSan:
         return {s: sig for s in symbols if (sig := store.state(s, day))}
 
     # ── alerts and their shadow results ──
-    def record_alert(self, level: str, symbol: str, price: float | None, day: str, at: str = "") -> bool:
+    def record_alert(self, level: str, symbol: str, price: float | None, day: str, at: str = "", *, hook: bool = True) -> bool:
         """Keep an alert sent for a holding, once per (day, symbol, level), to judge later how
-        the price went after it (``settle_shadow``). True when it is new."""
+        the price went after it (``settle_shadow``). True when it is new. ``hook``: also tell
+        ``on_alert`` (Claude's look at the news); off for an alert the evening report repeats."""
         if level not in ALERT_LEVELS:
             return False
         added = []
@@ -996,6 +1024,11 @@ class TaiSan:
             del rows[:-500]
             added.append(True)
         self._update_state(change)
+        if added and hook and self.on_alert is not None:
+            try:
+                self.on_alert(level, symbol, price, day)
+            except Exception as exc:  # noqa: BLE001 - the alert itself is kept and sent anyway
+                logger.warning("Tài sản: alert hook for %s failed: %s", symbol, exc)
         return bool(added)
 
     def settle_shadow(self, day: str | None = None) -> int:
@@ -1035,6 +1068,54 @@ class TaiSan:
                     r.update(got)
         self._update_state(change)
         return len(results)
+
+    def settle_discipline(self, day: str | None = None) -> int:
+        """The discipline layer's rows (vnbot.kyluat): the overrides and the lowered cut-losses
+        at 5/10/20 sessions from their day's close, the buy and sell tags at 10/20 from the
+        owner's own price. Downloads outside the lock; merged under it."""
+        day = day or today_vn()
+        st = self.state()
+        # rows are matched back by their own keys, never by position: a /tsgiu or a /tsmua recorded while
+        # the closes download would otherwise shift every result onto the wrong row
+        groups = [("overrides", {self._override_key(r): dict(r) for r in st["overrides"]}, (5, 10, 20), None),
+                  ("flags", {self._flag_key(r): dict(r) for r in st["flags"] if r.get("kind") == "lower"}, (5, 10, 20), None),
+                  ("tags", {k: dict(r) for k, r in st["tags"].items() if r.get("kind") in ("buy", "sell") and r.get("day")},
+                   (10, 20), "price")]
+        done = 0
+        filled = {}
+        for name, rows, sessions, base in groups:
+            try:
+                done += kyluat.settle_rows(self, list(rows.values()), sessions, through=day, base_key=base)
+            except Exception as exc:  # noqa: BLE001 - settled on a later day
+                logger.warning("Tài sản: discipline rows (%s) not settled: %s", name, exc)
+            filled[name] = rows
+        if not done:
+            return 0
+        results = ("r5", "r10", "r20")
+
+        def change(s):
+            for row in s["overrides"]:
+                new = filled["overrides"].get(self._override_key(row))
+                if new:
+                    row.update({k: v for k, v in new.items() if k in results})
+            for row in s["flags"]:
+                new = filled["flags"].get(self._flag_key(row)) if row.get("kind") == "lower" else None
+                if new:
+                    row.update({k: v for k, v in new.items() if k in results})
+            for key, row in s["tags"].items():
+                new = filled["tags"].get(key)
+                if new:
+                    row.update({k: v for k, v in new.items() if k in ("r10", "r20")})
+        self._update_state(change)
+        return done
+
+    @staticmethod
+    def _override_key(r: dict) -> tuple:
+        return (r.get("day"), r.get("symbol"), r.get("ticket_opened"), r.get("stop"))
+
+    @staticmethod
+    def _flag_key(r: dict) -> tuple:
+        return (r.get("day"), r.get("symbol"), r.get("old"), r.get("new"))
 
     def shadow_stats(self) -> list[dict]:
         """Per alert level: how many settled, the mean move 5 and 10 sessions later, and how
@@ -1207,11 +1288,24 @@ class TaiSan:
             stop, target = float(lv.get("stop") or 0), lv.get("target")
             sig = site.get(symbol)
             if close and stop and close <= stop:
-                out.append((0, f"⛔ {symbol}: đóng cửa {vnd(close)} ≤ cắt lỗ {vnd(stop)} → BÁN phiên {ddmm(nxt)} ({can})"))
+                who = "anh đặt" if lv.get("source") == "owner" else f"theo trang {ddmm(lv.get('plan_day') or lv.get('day') or '')}"
+                out.append((0, f"⛔ {symbol}: đóng cửa {vnd(close)} ≤ cắt lỗ {vnd(stop)} ({who}) → BÁN phiên {ddmm(nxt)} ({can})"))
+            if not stop and p["weight"] >= kyluat.NO_STOP_WEIGHT_PCT:
+                series = self.closes().get(symbol) or {}
+                recent = sorted(series)[-10:]
+                low = min((series[d] for d in recent), default=None)
+                out.append((2, f"❗ {symbol} chưa có cắt lỗ → rủi ro không giới hạn · đặt: /tscatlo {symbol} GIÁ"
+                               + (f" · tham khảo: thấp nhất 10 phiên {vnd(low)} (chưa đo, chỉ để anh có một mốc)" if low else "")))
             if sig and sig.get("side") == "SELL":
+                from vnbot import external
+
                 when = "hôm nay" if sig.get("day") == day else f"từ {ddmm(sig.get('day', ''))}"
-                out.append((1, f"🔴 {symbol}: Siêu tín hiệu BÁN {when} @ {vnd(sig.get('price'))} → BÁN phiên "
-                               f"{ddmm(nxt)}, ưu tiên ATO/đầu phiên ({can})"))
+                if external.SellAlerts.final(sig):
+                    out.append((1, f"🔴 {symbol}: Siêu tín hiệu BÁN {when} @ {vnd(sig.get('price'))} → BÁN phiên "
+                                   f"{ddmm(nxt)}, ưu tiên ATO/đầu phiên ({can})"))
+                else:          # published in the session, not confirmed at the close: watch, no order
+                    out.append((2, f"🟠 {symbol}: trang đổi sang BÁN trong phiên lúc {str(sig.get('created', ''))[11:16]}, "
+                                   "chưa chốt → giữ theo quy tắc, theo dõi (chỉ 🔴 đã chốt mới là việc bán)"))
             if close and target and close >= float(target):
                 out.append((3, f"🎯 {symbol}: đóng cửa {vnd(close)} ≥ mục tiêu {vnd(target)} → cân nhắc chốt một phần, "
                                "dời cắt lỗ lên giá vốn"))
@@ -1233,7 +1327,7 @@ class TaiSan:
         if s["positions"]:
             lines.append("")
             lines += self._position_lines(s, book)
-        lines += ["", "Lệnh: /tsmua · /tsban · /tsnhatky · /tshuy · /tsbaocao · /tsxuat · trang web /taisan"]
+        lines += ["", "Lệnh: /tsmua · /tsban · /tskiemtra · /tsnhatky · /tshuy · /tsbaocao · /tsxuat · trang web /taisan"]
         return "\n".join(lines)
 
     def _summary_lines(self, s: dict) -> list[str]:
@@ -1244,6 +1338,8 @@ class TaiSan:
                  (f"Đã chốt {signed(s['realized'])} ({s['sells']} lệnh bán, thắng {s['wins']}/{s['sells']})"
                   if s["sells"] else "Chưa bán lệnh nào")
                  + (f" · cổ tức {vnd(s['dividends'])}" if s["dividends"] else "")]
+        if s["positions"]:
+            lines.append(kyluat.risk_line(kyluat.risk_summary(self, s)))
         lines += [f"⚠️ {w}" for w in s["warnings"]]
         return lines
 
@@ -1259,6 +1355,9 @@ class TaiSan:
             parts = []
             if lv.get("stop"):
                 parts.append(f"cắt lỗ {vnd(lv['stop'])}" + (" (anh đặt)" if lv.get("source") == "owner" else " (trang)"))
+                if lv.get("site_now") is not None and float(lv["site_now"]) != float(lv["stop"]):
+                    parts.append(f"trang mới: {vnd(lv['site_now'])} ({'thấp hơn' if lv['site_now'] < lv['stop'] else 'cao hơn'}; "
+                                 "bot giữ mức cũ)")
             if lv.get("target"):
                 parts.append(f"mục tiêu {vnd(lv['target'])}")
             sig = (site or {}).get(p["symbol"])
@@ -1272,8 +1371,16 @@ class TaiSan:
                 lines.append("   " + " · ".join(parts))
         return lines
 
-    def report_text(self, day: str, *, refresh_site: bool = True) -> str:
-        """The evening report of session ``day`` (Telegram and Zoom, 15:30)."""
+    def report_text(self, day: str, *, refresh_site: bool = True, settle: bool = False) -> str:
+        """The evening report of session ``day`` (Telegram and Zoom, 15:30): the figures, the
+        work for the next session (every ⛔/🔴 as a dated ticket, ``vnbot.kyluat``), each
+        holding, the allocation, the planned risk and the floor, the rights; on the week's
+        last session also the alert results, the discipline meter and the recovery goal.
+        ``settle``: the steps that change the state (levels adopted from the site, tickets
+        opened, the floor log, the discipline meter) run - only the scheduled evening run
+        passes it; a report asked during the session (/tsbaocao, the web) reads the state as
+        it is, so a live price never opens a ticket dated the session before.
+        A fault in the discipline layer costs its block, never the report."""
         from tradingagents.market import vn_rules
 
         book = self.book()
@@ -1283,8 +1390,12 @@ class TaiSan:
         if missing:
             live, _ = self.current_prices(missing)
             prices.update(live)
-        s = self.summary({k: v for k, v in prices.items() if v}, book=book)
+        known = {k: v for k, v in prices.items() if v}
         site = self.site_states(list(book.holdings), day, refresh=refresh_site)
+        pins = self._guarded("refresh_levels", lambda: kyluat.refresh_levels(self, day, site, known), []) if settle else []
+        if settle:
+            self._guarded("diet", lambda: self._mark_diet(day))
+        s = self.summary(known, book=book)
         lines = [f"💼 TÀI SẢN · phiên {ddmmyyyy(day)}", ""]
         hist = self.history()
         today_pt = next((p for p in reversed(hist) if p["day"] == day), None)
@@ -1297,9 +1408,17 @@ class TaiSan:
         if hist and hist[0].get("vni_index") is not None and today_pt:
             lines.insert(4 if today_pt and prev_pt else 3,
                          f"Từ {ddmm(hist[0]['day'])}: danh mục {pct(today_pt['nav'] - 100)} · VNINDEX {pct(today_pt['vni_index'] - 100)}")
-        todo = self.actions(day, s, {k: v for k, v in prices.items() if v}, site)
-        lines += ["", f"📋 VIỆC CẦN LÀM PHIÊN {ddmm(vn_rules.add_sessions(day, 1))}"]
-        lines += [line for _, line in todo] or ["Không có việc cần làm: giữ nguyên danh mục."]
+        if pins:
+            lines += ["", "📌 MỨC CẮT LỖ"] + pins
+        nxt = vn_rules.add_sessions(day, 1)
+        todo = self.actions(day, s, known, site)
+        if settle:
+            self._guarded("update_exits", lambda: kyluat.update_exits(self, day, s, known, site))
+        tickets, covered = self._guarded("ticket_lines", lambda: kyluat.ticket_lines(self, day, known), ([], set()))
+        todo = [(rank, line) for rank, line in todo if not (line[:1] in ("⛔", "🔴") and self._line_symbol(line) in covered)]
+        todo += [(2, line) for line in self._guarded("early_lines", lambda: self._early_lines(day, book, site, covered, todo), [])]
+        lines += ["", f"📋 VIỆC CẦN LÀM PHIÊN {ddmm(nxt)}"]
+        lines += (tickets + [line for _, line in sorted(todo, key=lambda r: r[0])]) or ["Không có việc cần làm: giữ nguyên danh mục."]
         if s["positions"]:
             lines += ["", "📈 TỪNG MÃ"] + self._position_lines(s, book, site)
         alloc = self.allocation(s)
@@ -1307,6 +1426,11 @@ class TaiSan:
         if hot:
             lines += ["", "⚖️ PHÂN BỔ"] + [f"{'🔴' if a['level'] == 'danger' else '🟡'} {a['symbol']} {a['pct']:.1f}%".replace(".", ",")
                                          for a in hot]
+        risk = self._guarded("risk_summary", lambda: kyluat.risk_summary(self, s), None)
+        if risk:
+            lines += kyluat.risk_lines(risk)
+            if settle:
+                lines += self._guarded("floor_check", lambda: kyluat.floor_check(self, day, risk), [])
         rights = self.pending_rights()
         upcoming = [u for u in self.upcoming_rights()
                     if u["ex"] <= (_date.fromisoformat(day) + timedelta(days=14)).isoformat()]
@@ -1314,11 +1438,70 @@ class TaiSan:
             lines += ["", "📅 QUYỀN"]
             lines += [self._right_line(r, pending=True) for r in rights]
             lines += [self._right_line(r, pending=False) for r in upcoming]
-        week_end = vn_rules.add_sessions(day, 1)
-        if _date.fromisoformat(week_end).isocalendar()[1] != _date.fromisoformat(day).isocalendar()[1]:
+        disc = (self._guarded("discipline", lambda: self.refresh_discipline(day, known), None) if settle
+                else (self.state().get("discipline") or None))
+        if _date.fromisoformat(nxt).isocalendar()[1] != _date.fromisoformat(day).isocalendar()[1]:
             lines += self._shadow_lines()
+            if disc:
+                lines += [""] + kyluat.discipline_lines(disc)
+            last = ({"buys_block": disc["buys_block"], "sold_fast": disc["sold_fast"], "tickets": disc["tickets"],
+                     "due": disc.get("due", disc["tickets"]), "open_risk": risk["pct"]} if disc and risk else None)
+            goal = self._guarded("goal_text", lambda: kyluat.goal_text(self, day, s, last), "")
+            if goal:
+                lines += ["", goal]
         lines += ["", "Giá theo đúng giá anh nhập (giá mua đã gồm phí, giá bán không trừ phí/thuế). Bot không đặt lệnh."]
         return "\n".join(lines)
+
+    @staticmethod
+    def _guarded(name: str, fn, default=None):
+        """``fn()``, or ``default`` with a warning: the discipline layer never costs the report
+        or the journal entry it decorates."""
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - the block is left out, the rest goes on
+            logger.warning("Tài sản: %s failed: %s: %s", name, type(exc).__name__, exc)
+            return default
+
+    @staticmethod
+    def _line_symbol(line: str) -> str:
+        """The code an action line names: "⛔ FPT: ..." -> FPT."""
+        parts = line.split()
+        return parts[1].rstrip(":") if len(parts) > 1 else ""
+
+    def _mark_diet(self, day: str) -> None:
+        """The first report after the upgrade marks the day the 🟠 pushes stopped (the
+        discipline meter compares before and after it)."""
+        def change(s):
+            if not s["diet"].get("since"):
+                s["diet"]["since"] = day
+        self._update_state(change)
+
+    def _early_lines(self, day: str, book: Book, site: dict, covered: set, todo: list) -> list[str]:
+        """🟠 of ``day`` for the holdings: an early SELL sign in the session (the site's
+        in-session view, or the bot's estimate) the site did not confirm at the close. To
+        watch, not to act on: selling on it beat waiting for the site's SELL in 48% of the
+        measured cases. Not printed when the stock has a 🔴 or a ticket."""
+        red = {self._line_symbol(line) for _, line in todo if line[:1] in ("🔴", "🟠")} | set(covered)
+        out, seen = [], set()
+        for r in self.state()["shadow"]:
+            symbol = r.get("symbol")
+            if r.get("day") != day or r.get("level") != "early" or symbol not in book.holdings or symbol in red or symbol in seen:
+                continue
+            sig = site.get(symbol)
+            if sig and sig.get("side") == "SELL":
+                continue
+            seen.add(symbol)
+            out.append(f"🟠 {symbol}: trong phiên có dấu hiệu đổi sang BÁN lúc {r.get('at', '')} (trang không chốt BÁN → giữ theo "
+                       f"quy tắc; 🟠 chỉ để theo dõi, đo 23/10: đúng {kyluat.MEASURED['early_better']}%)")
+        return out
+
+    def refresh_discipline(self, day: str, prices: dict[str, float]) -> dict:
+        """The discipline meter of ``day`` (``kyluat.discipline``), kept in the state for the
+        web page (the replay reads every closed trade; computed once an evening)."""
+        d = kyluat.discipline(self, day, prices)
+        saved = {k: (list(v) if isinstance(v, tuple) else v) for k, v in d.items()}
+        self._update_state(lambda s: s.__setitem__("discipline", saved))
+        return d
 
     @staticmethod
     def _right_line(r: dict, *, pending: bool) -> str:
@@ -1397,7 +1580,8 @@ class TaiSan:
 
     # ── commands (Telegram and Zoom) ──
     COMMANDS = ("/ts", "/taisan", "/tsmua", "/tsban", "/tsthuong", "/tscotuc", "/tsnap", "/tsrut", "/tstien",
-                "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong")
+                "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong",
+                "/tskiemtra", "/tsgiu", "/tssan", "/tsmuctieu")
     HELP = (
         "💼 Tài sản (danh mục tiền thật của anh, tách khỏi bot):\n"
         "/ts - tổng quan · /tsbaocao - báo cáo ngay · trang web /taisan\n"
@@ -1405,6 +1589,10 @@ class TaiSan:
         "/tsthuong FPT 15 - cổ phiếu thưởng đã về · /tscotuc FPT 2000 [số cp] - cổ tức tiền đã về (đồng/cp)\n"
         "/tsnap 50000000 · /tsrut 10000000 - nạp/rút tiền · /tstien 1268895 - đặt tiền mặt theo số dư CTCK\n"
         "/tscatlo FPT 52000 [60000] - mức cắt lỗ [mục tiêu] của anh · /tscatlo FPT xoa\n"
+        "/tskiemtra FPT [GIÁ] [KL] [CẮTLỖ] - kiểm tra một lệnh mua định làm có nằm trong ngân sách rủi ro (bot không khuyên mua)\n"
+        "/tsgiu FPT 52000 lý do... - giữ một mã dù bot báo ⛔/🔴: bắt buộc có cắt lỗ và lý do, bot chấm sau 5/10/20 phiên\n"
+        "/tssan 6000000 [lý do] - sàn tài sản để bot nhắc (mặc định 60% vốn gốc; không khoá lệnh) · /tssan - xem\n"
+        "/tsmuctieu 2026-12-24 · /tsmuctieu xoa · /tsmuctieu - mốc hoàn vốn; bot đặt số đo cạnh mốc, không dự báo\n"
         "/tsnhatky - 20 dòng gần nhất · /tshuy - huỷ dòng cuối · /tshuy 27 - huỷ dòng số 27\n"
         "/tsxuat - file Excel (Zoom: link tải) · /tsnhap - gửi file .xlsx kèm lệnh này, rồi /tsnhap xacnhan\n"
         "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)"
@@ -1412,30 +1600,72 @@ class TaiSan:
 
     # ── recording (the commands and the web page share these) ──
     def record_buy(self, symbol: str, qty, price, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        """A buy into the journal (never refused for a rule), with the site's levels when the
+        owner set none, and its rule tag (``kyluat.check_buy`` against the portfolio before
+        it, at today's prices): ⛔ averaging down, buying against the site's SELL, no cut-loss;
+        ⚠️ a chase, a far stop, over the risk budget - kept to compare the groups later."""
         from tradingagents.market import vn_rules
 
+        before = self.book()
         entry, book = self.add("BUY", day, symbol=symbol, qty=qty, price=price, note=note, source=source)
         symbol = entry.symbol
         self._site_levels_for(symbol, entry.day, entry.price)
         t2 = vn_rules.add_sessions(entry.day, SETTLEMENT_SESSIONS)
         lv = self.levels().get(symbol) or {}
+        check = self._guarded("check_buy", lambda: kyluat.check_buy(
+            self, symbol, entry.price, entry.qty, float(lv.get("stop") or 0) or None, day=entry.day, book=before), None)
+        self._guarded("tag_buy", lambda: self._tag_buy(entry, check))
         levels = (f" Cắt lỗ theo Siêu tín hiệu {vnd(lv['stop'])}" + (f", mục tiêu {vnd(lv['target'])}" if lv.get("target") else "")
                   + "." if lv.get("stop") else f" Chưa có mức cắt lỗ: đặt bằng /tscatlo {symbol} GIÁ.")
         h = book.holdings[symbol]
         return (f"✅ #{entry.id} MUA {symbol} {vnd(entry.qty)} cp @ {vnd(entry.price)} ngày {ddmmyyyy(entry.day)}. "
                 f"Đang giữ {vnd(h.qty)} cp, giá vốn BQ {vnd(h.avg)}. Bán được từ chiều {ddmm(t2)}. "
-                f"Tiền mặt còn {vnd(book.cash)}.{levels}" + "".join(f"\n⚠️ {w}" for w in book.warnings))
+                f"Tiền mặt còn {vnd(book.cash)}.{levels}"
+                + (f"\n{kyluat.rule_tag_line(check)}" if check else "")
+                + "".join(f"\n⚠️ {w}" for w in book.warnings))
+
+    def _tag_buy(self, entry: Entry, check: dict | None) -> None:
+        tag = {"kind": "buy", "day": entry.day, "symbol": entry.symbol, "price": entry.price, "qty": entry.qty,
+               "verdict": check["verdict"] if check else "unknown", "flags": list(check["flags"]) if check else [],
+               "checked": kyluat.recently_checked(self, entry.symbol, entry.day), "tags": check["tags"] if check else {}}
+        self._update_state(lambda s: s["tags"].__setitem__(str(entry.id), tag))
 
     def record_sell(self, symbol: str, qty, price, day: str | None = None, note: str = "", *, source: str = "") -> str:
+        """A sale into the journal; it closes the stock's exit ticket (``kyluat``) and is tagged
+        "early" when the site still said BUY and no ⛔/🔴 came since the last buy."""
         entry, book = self.add("SELL", day, symbol=symbol, qty=qty, price=price, note=note, source=source)
         row = next(r for r in book.rows if r.entry.id == entry.id)
         left = book.holdings.get(entry.symbol)
+        self._guarded("close_exits", lambda: kyluat.close_exits_on_sell(self, entry.symbol, entry.day, entry.qty,
+                                                                        left.qty if left else 0))
+        early = self._guarded("tag_sell", lambda: self._tag_sell(entry), False)
         self._prune_state(book)
         return (f"✅ #{entry.id} BÁN {entry.symbol} {vnd(entry.qty)} cp @ {vnd(entry.price)} ngày {ddmmyyyy(entry.day)}: "
                 f"lãi/lỗ {signed(row.pnl)} ({pct((entry.price / row.avg_cost - 1) * 100) if row.avg_cost else '-'}) "
                 f"theo giá vốn BQ {vnd(row.avg_cost)}. "
                 + (f"Còn {vnd(left.qty)} cp. " if left else "Đã bán hết. ")
-                + f"Tiền mặt {vnd(book.cash)}.")
+                + f"Tiền mặt {vnd(book.cash)}."
+                + (f"\n📏 Bán trước tín hiệu: trang vẫn MUA {entry.symbol} và chưa có ⛔/🔴 từ lần mua gần nhất; bot ghi lại "
+                   "và chấm sau 10/20 phiên (không phải lỗi, chỉ để đo)." if early else ""))
+
+    def _tag_sell(self, entry: Entry) -> bool:
+        """Tag the sale; True when it came before any rule alert while the site said BUY."""
+        from vnbot import external
+
+        journal = effective(self.entries())
+        last_buy = max((e.day for e in journal if e.kind == "BUY" and e.symbol == entry.symbol and e.day <= entry.day), default="")
+        st = self.state()
+        alerted = any(r.get("symbol") == entry.symbol and r.get("level") in ("stop", "sell")
+                      and last_buy <= str(r.get("day", "")) <= entry.day for r in st["shadow"])
+        ticketed = (str((st["exits"].get(entry.symbol) or {}).get("opened") or "") >= last_buy if st["exits"].get(entry.symbol)
+                    else False) or any(t.get("symbol") == entry.symbol and str(t.get("opened") or "") >= last_buy
+                                       for t in st["exits_log"])
+        sig = external.SignalStore(self.dir.parent).state(entry.symbol, entry.day) if external.enabled() else None
+        early = bool(sig and sig.get("side") == "BUY" and not alerted and not ticketed)
+        tag = {"kind": "sell", "day": entry.day, "symbol": entry.symbol, "price": entry.price, "qty": entry.qty,
+               "early": early, "site_state": sig.get("side") if sig else None}
+        self._update_state(lambda s: s["tags"].__setitem__(str(entry.id), tag))
+        return early
 
     def record_bonus(self, symbol: str, qty, day: str | None = None, note: str = "", *, source: str = "") -> str:
         entry, book = self.add("BONUS", day, symbol=symbol, qty=qty, note=note, source=source)
@@ -1477,12 +1707,15 @@ class TaiSan:
         return f"✅ Đã xoá mức cắt lỗ/mục tiêu của {symbol}."
 
     def levels_text(self, symbol: str, stop, target) -> str:
-        self.set_levels(symbol, stop, target)
+        level = self.set_levels(symbol, stop, target)
         return (f"✅ {symbol.upper()}: cắt lỗ {vnd(stop)}" + (f", mục tiêu {vnd(target)}" if target else "")
-                + ". Bot báo ⛔ khi giá ≤ cắt lỗ" + (" và 🎯 khi chạm mục tiêu." if target else "."))
+                + ". Bot báo ⛔ khi giá ≤ cắt lỗ" + (" và 🎯 khi chạm mục tiêu." if target else ".")
+                + (f"\n{level['lower_text']}" if level.get("lower_text") else ""))
 
     def undo(self, entry_id: int | None = None, *, source: str = "") -> str:
         target = self.void(entry_id, source=source)
+        self._update_state(lambda s: s["tags"].pop(str(target.id), None))   # its rule tag goes with it
+        self._guarded("reopen_on_void", lambda: kyluat.reopen_on_void(self, target))
         self._prune_state(self.book())
         return f"↩️ Đã huỷ #{target.id}: {ddmmyyyy(target.day)} {self.entry_text(target)}."
 
@@ -1494,9 +1727,12 @@ class TaiSan:
             backup = self.backup_journal()
 
             def change(s):
-                for key in ("levels", "marks", "alerts", "events", "notes", "spark"):
+                for key in ("levels", "marks", "alerts", "events", "notes", "spark", "exits", "tags", "guard", "diet",
+                            "discipline"):
                     s[key] = {}
-                s["shadow"] = []
+                for key in ("shadow", "flags", "exits_log", "overrides", "checks"):
+                    s[key] = []
+                s["goal"] = {"date": kyluat.DEFAULT_GOAL_DATE, "set_day": "", "source": "default"}
                 for key in ("rebuilt_until", "analytics", "imported"):
                     s.pop(key, None)
             self._update_state(change)
@@ -1569,13 +1805,36 @@ class TaiSan:
             if rest[1].lower() in ("xoa", "xoá", "xóa"):
                 return self.clear_levels(symbol)
             return self.levels_text(symbol, _amount(rest[1]), _amount(rest[2]) if len(rest) > 2 else None)
+        if command == "/tskiemtra":
+            if not rest:
+                raise LedgerError("Dùng: /tskiemtra FPT [GIÁ] [KL] [CẮTLỖ] - kiểm tra một lệnh mua định làm (bot không khuyên mua)")
+            symbol = code(rest[0])
+            price = _amount(rest[1]) if len(rest) > 1 else None
+            qty = int(_amount(rest[2])) if len(rest) > 2 else None
+            stop = _amount(rest[3]) if len(rest) > 3 else None
+            check = kyluat.check_buy(self, symbol, price, qty, stop, day=day_word)
+            kyluat.record_check(self, check, symbol, qty)
+            return check["text"]
+        if command == "/tsgiu":
+            if len(rest) < 2:
+                raise LedgerError("Dùng: /tsgiu FPT 52000 lý do ít nhất ba từ - giữ một mã dù bot báo ⛔/🔴 (bot ghi lại, chấm sau)")
+            return kyluat.hold_override(self, code(rest[0]), _amount(rest[1]), " ".join(rest[2:]))
+        if command == "/tssan":
+            if not rest:
+                return kyluat.floor_text(self)
+            return kyluat.set_floor(self, _amount(rest[0]), " ".join(rest[1:]))
+        if command == "/tsmuctieu":
+            word = rest[0] if rest else day_word
+            if not word:
+                return kyluat.goal_text(self, self.report_day())
+            return kyluat.set_goal(self, word)
         if command == "/tsnhatky":
             n = int(rest[0]) if rest and rest[0].isdigit() else 20
             return self.journal_text(max(1, min(n, 60)))
         if command == "/tshuy":
             return self.undo(int(rest[0]) if rest and rest[0].isdigit() else None, source=source)
         if command == "/tsbaocao":
-            return self.report_text(self.report_day())
+            return self.report_text(self.report_day())          # reads the state; the 15:30 run settles it
         if command == "/tsnguong":
             if len(rest) != 2:
                 warn, danger = self.thresholds()

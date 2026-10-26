@@ -998,6 +998,12 @@ class TradingBot:
                 lines.append(f"{x.INDENT}⛔ Đóng cửa {_fmt(bar.close)} ≤ cắt lỗ {_fmt(pos.stop)} → " + _advice(pos, day))
             elif bar is not None and bar.tradable and pos.target1 and bar.high >= pos.target1:
                 lines.append(f"{x.INDENT}🎯 Chạm mục tiêu {_fmt(pos.target1)} (cao nhất {_fmt(bar.high)}) → cân nhắc chốt lời")
+        try:
+            from vnbot import kyluat
+
+            lines += kyluat.deadline_lines(self.taisan, day)     # the exit tickets due at this open
+        except Exception as exc:  # noqa: BLE001 - the brief goes out without them
+            logger.warning("Tài sản: deadline lines: %s", exc)
         return lines
 
     def stv_morning(self, session: str | None = None) -> str:
@@ -1059,6 +1065,14 @@ class TradingBot:
         market = _Market(session)
         lines.append("")
         lines += self._stv_real_lines(session, store, market)
+        nxt = vn_rules.add_sessions(session, 1)
+        if _date.fromisoformat(nxt).isocalendar()[1] != _date.fromisoformat(session).isocalendar()[1]:
+            try:                                   # the week's first brief: the recovery goal next to the figures
+                from vnbot import kyluat
+
+                lines += ["", kyluat.goal_text(self.taisan, session)]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Tài sản: goal block: %s", exc)
         lines += ["", "ℹ️ Giá tín hiệu là giá đóng cửa phiên phát.",
                   "Vùng vào, mục tiêu, cắt lỗ là của trang. Không phải khuyến nghị."]
         return "\n".join(lines)
@@ -1287,6 +1301,18 @@ class TradingBot:
                                            "estimate": c["stage"] == "estimate", "level": c.get("level")}
         sells = [(sym, sig) for sym, sig in states.items() if sig and sig["side"] == "SELL"]
         new_sells = alerts.pending(sells)
+        all_new = list(new_sells)
+        early = [(sym, sig) for sym, sig in new_sells
+                 if sig.get("estimate") or sig.get("intraday") or not x.SellAlerts.final(sig)]
+        if early and not report and not getattr(self.settings, "intraday_early", False):
+            # 🟠 (an early SELL sign in the session) is not pushed: selling on it beat waiting for
+            # the site's close in 48% of the measured cases (docs/backtest_2026-10-23). It is kept
+            # for the shadow results and the evening report; remembered under its session key,
+            # so the SELL the close confirms (another key) still goes out as 🔴. INTRADAY_EARLY=1
+            # pushes it as before; /stvquet (report) still shows it.
+            self._keep_early(real, early, today)
+            alerts.remember(early, held)
+            new_sells = [(sym, sig) for sym, sig in new_sells if not any(sig is g for _, g in early)]
 
         # 2. the watchlist: the day's new signals (final), and the changes shown in the session
         items = []
@@ -1300,7 +1326,7 @@ class TradingBot:
                 items.append((c["symbol"], f"{c['side']}:intraday", c))
         seen = x.WatchAlerts(self.settings.data_dir)
         new_watch = seen.pending(today, items)
-        held_moves = [(sym, "SELL:intraday", sig) for sym, sig in new_sells if sig.get("intraday")]
+        held_moves = [(sym, "SELL:intraday", sig) for sym, sig in all_new if sig.get("intraday")]
         if with_watch and hhmm >= x.WATCH_FROM and vn_rules.is_session_day(today):
             new_watch += self._stv_reverted(today, seen, store, followed)
         market_blocks, market_note = [], ""
@@ -1323,7 +1349,7 @@ class TradingBot:
         lines = [f"📡 SIÊU TÍN HIỆU · {now.strftime('%H:%M %d/%m')}"]
         if new_sells:
             lines += ["", "🔻 TÀI SẢN CỦA ANH · tín hiệu BÁN"] + self._stv_sell_lines(real, new_sells, today)
-            lines.append("Anh tự đặt lệnh; bán xong báo /tsban MÃ KL GIÁ.")
+            lines.append("Anh tự đặt lệnh; bán xong báo /tsban MÃ KL GIÁ. Bot im lặng = không có việc cần làm.")
         finals = [(sym, sig) for sym, key, sig in new_watch if "at" not in sig and not key.endswith(":reverted")]
         moves = [(sym, c) for sym, key, c in new_watch if "at" in c and c.get("stage") != "estimate"]   # the site's view
         guesses = [(sym, c) for sym, key, c in new_watch if c.get("stage") == "estimate"]            # the bot's estimate
@@ -1543,6 +1569,21 @@ class TradingBot:
                 if not (sig and sig["day"] == today and sig["side"] == side):
                     out.append((sym, f"{side}:reverted", {"side": side}))
         return out
+
+    def _keep_early(self, real, early, today) -> None:
+        """An early SELL sign on a holding that is not pushed: kept for the shadow results
+        (``TaiSan.record_alert``, level "early", without Claude's note) and the 15:30 report."""
+        try:
+            prices, _ = self._current_prices([real.positions[sym] for sym, _ in early])
+        except Exception as exc:  # noqa: BLE001 - kept without a price
+            logger.warning("Tài sản: prices for the early signs: %s", exc)
+            prices = {}
+        for sym, _ in early:
+            price = (prices.get(sym) or (None, ""))[0]
+            try:
+                self.taisan.record_alert("early", sym, price, today, hook=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Tài sản: alert of %s not kept: %s", sym, exc)
 
     def _stv_sell_lines(self, real, new_sells, today) -> list[str]:
         """The SELL of each Tài sản holding: 🔴 the site's SELL after the close, 🟠 a change in
@@ -2482,12 +2523,12 @@ class TradingBot:
                 self._mark_real(view, day, _Market(day), book="stv")
             except (LedgerLoadError, Exception) as exc:  # noqa: BLE001 - the levels stay as they were
                 logger.warning("Tài sản: not marked on %s: %s", day, exc)
-        for step in (account.refresh_events, account.settle_shadow, account.refresh_analytics):
+        for step in (account.refresh_events, account.settle_shadow, account.settle_discipline, account.refresh_analytics):
             try:
                 step(day)
             except Exception as exc:  # noqa: BLE001 - the report goes out without that part
                 logger.warning("Tài sản: %s on %s failed: %s", step.__name__, day, exc)
-        text = account.report_text(day)
+        text = account.report_text(day, settle=True)
         account.save_report(day, text)
         return text
 

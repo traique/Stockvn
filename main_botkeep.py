@@ -106,15 +106,19 @@ def _start():
     trader = TradingBot(SETTINGS, watchlist, notify=bot.broadcast)
     bot.trader = trader
     bot.taisan = trader.taisan          # the owner's real-money portfolio (/ts, the /taisan tab)
+    from vnbot import claude_pick
+
+    # Claude's look at the news when a rule alert fires on a holding (only with ANTHROPIC_API_KEY)
+    trader.taisan.on_alert = claude_pick.alert_hook(SETTINGS.data_dir, bot.broadcast)
     jobs.start()
     bot.start()
     _announce_version(bot.broadcast)
     DailyScheduler(SETTINGS, jobs, watchlist, bot=trader, notify=bot.broadcast, zoom_notify=bot.zoom_first).start()
-    if SETTINGS.trade_mode != "off":
-        # Always running: the switch on /ai (default INTRADAY_ALERTS) turns the alerts on and off.
-        IntradayMonitor(SETTINGS, trader, bot.broadcast, switches=switches).start()
-        logging.info("Intraday alerts: %s, every %d min during the session (no AI)",
-                     "on" if switches.on("intraday") else "off", SETTINGS.intraday_interval_min)
+    # Always running, whatever TRADE_MODE: the switch on /ai (default INTRADAY_ALERTS) turns the price
+    # alerts on and off; the 14:20 reminder of a Tài sản exit ticket goes out from here regardless.
+    IntradayMonitor(SETTINGS, trader, bot.broadcast, switches=switches).start()
+    logging.info("Intraday alerts: %s, every %d min during the session (no AI); exit-ticket reminders always",
+                 "on" if switches.on("intraday") else "off", SETTINGS.intraday_interval_min)
     logging.info("Trading bot: mode %s, calibration %s, runs daily at %s (Vietnam time); watchlist report at %s",
                  SETTINGS.trade_mode, "on" if SETTINGS.calibrate else "off", SETTINGS.trade_time,
                  SETTINGS.daily_report_time)

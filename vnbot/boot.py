@@ -19,13 +19,14 @@ logger = logging.getLogger(__name__)
 
 _PAGE = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">{refresh}<title>{title} · TradingAgents VN</title>
-<style>:root{{--bg:#E9EBFB;--ink:#0E1226;--mut:#5B6184;--card:rgba(255,255,255,.72);--line:#DDE0F1}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#0B0E1C;--ink:#EEF0FB;--mut:#9AA0C2;--card:#171B30;--line:#2A3050}}}}
-body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
-font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px;box-sizing:border-box}}
-.c{{background:var(--card);border:1px solid var(--line);border-radius:28px;padding:32px 28px;max-width:440px;text-align:center}}
-.m{{display:block;font:700 30px/1 Georgia,serif;letter-spacing:.14em;margin:0 auto 16px}}
-h1{{font:800 22px/1.3 system-ui,sans-serif;text-transform:uppercase;letter-spacing:-.01em;margin:0 0 8px}}p{{color:var(--mut);margin:0}}</style></head>
+<style>:root{{--paper:oklch(97% .006 55);--ink:oklch(21% .012 38);--muted:oklch(47% .013 45);--cotton:oklch(98.8% .0045 80);--shade:32% .03 50;color-scheme:light}}
+@media (prefers-color-scheme:dark){{:root{{--paper:oklch(16% .01 55);--ink:oklch(94% .008 70);--muted:oklch(72% .012 55);--cotton:oklch(19% .011 55);color-scheme:dark}}}}
+html,body{{overflow-x:clip}}
+body{{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--paper);color:var(--ink);
+font:16px/1.6 "Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px;box-sizing:border-box}}
+.c{{background:var(--cotton);border-radius:8px;padding:40px 24px;max-width:440px;box-shadow:0 0 0 .5px oklch(var(--shade) / .22),6px 5px 10px -6px oklch(var(--shade) / .3)}}
+.m{{display:block;font-weight:600;font-size:17px;margin:0 0 16px}}
+h1{{font-weight:600;font-size:24px;line-height:1.2;letter-spacing:-.02em;margin:0 0 8px;text-wrap:balance}}p{{color:var(--muted);margin:0}}</style></head>
 <body><div class="c"><div class="m" aria-hidden="true">LCTA</div><h1>{title}</h1><p>{text}</p></div></body></html>"""
 
 

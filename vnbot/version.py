@@ -24,13 +24,60 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.2.0"
-RELEASED = "2026-10-24"
-RELEASE_BUILD = "4bbabff"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.7.0"
+RELEASED = "2026-10-26"
+RELEASE_BUILD = "1831e44"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.7.0", "2026-10-26", (
+        "Claude chọn bóng: chưa có khoá Claude, Claude lỗi hoặc chạm trần USD thì 9Router trả lời thay",
+        "9Router dùng chung hạn mức ngày với các agent; không tìm tin nên không có nguồn, không tính vào trần USD",
+        "Mỗi tin nhắn, bản ghi và trang web ghi rõ Claude hay 9Router trả lời, và vì sao",
+        "Giao diện Coral: giấy xám ấm, bản ghi như tờ giấy cotton, nút in nổi, chữ Be Vietnam Pro",
+        "Trang Claude chọn bóng mở đầu bằng phiếu chọn của phiên, mã được chọn đóng dấu Đã chọn",
+        "Số thiếu ghi chưa có thay gạch ngang; axe 0 lỗi ở mọi trang, sáng và tối, 390 và 1440 px",
+    )),
+    ("v1.6.0", "2026-10-25", (
+        "Giao diện web mới kiểu sổ cái không màu: nền xanh xám, thẻ trắng viền mỏng, chữ Geist, số dạng bảng",
+        "Thanh bên trái thay cho đầu trang; trên điện thoại gập thành thanh 48 px và menu toàn màn hình",
+        "Màu chỉ ở dữ liệu: đường danh mục xanh, lãi/lỗ xanh lá/đỏ; không bóng đổ, không chuyển màu, không emoji",
+        "Trang Cài đặt /caidat: 49 tham số trong 8 nhóm sửa ngay trên web, lưu data/settings.json, ưu tiên hơn env",
+        "Mỗi mục ghi rõ lấy từ đâu (web / biến môi trường / mặc định) và có hiệu lực ngay hay sau khởi động lại",
+        "Khoá và token chỉ hiện đã đặt / chưa đặt, không sửa trên web; mọi trang axe 0 lỗi ở 390 và 1440 px",
+    )),
+    ("v1.5.1", "2026-10-24", (
+        "Rà soát độc lập lớp kỷ luật: vé giữ có lý do bị thay bằng ⛔ ở mức cắt lỗ đang lưu, kể cả mức nâng sau",
+        "/tshuy lệnh bán mở lại việc treo; vé của mã đã bán hết được dọn; hạn bán theo T+2; /tsgiu giữ mục tiêu",
+        "Chấm điểm ghép theo khoá, không theo vị trí dòng; giá bổ sung cùng cơ sở chưa điều chỉnh quyền",
+        "Chấm lại quy tắc: mua khi trang BÁN = bán ngay phiên sau; cổ phiếu thưởng đi theo lệnh mua",
+        "Claude chọn bóng: phiên lỗi chưa tốn tiền được hỏi lại; lượt đang chạy từ web không bị ghi là xong",
+        "Chữ: mốc VNINDEX so theo cửa sổ hợp với mốc (2/6/12 tháng), số thập phân kiểu Việt, đếm vé đến hạn",
+        "/tsbaocao và bản web chỉ đọc, chỉ bản 15:30 mới mở việc treo; 🔴 chỉ khi trang đã chốt",
+        "Nhắc 14:20 chạy ở mọi TRADE_MODE; trang /taisan hết tràn ngang ở 320px, axe 0 lỗi; số quá dài bị từ chối",
+    )),
+    ("v1.5.0", "2026-10-24", (
+        "Tài sản: mỗi ⛔/🔴 thành việc treo có hạn bán, kèm cái giá của chần chừ; nhắc 14:20 ngày hạn",
+        "Giữ có lý do: /tsgiu MÃ CẮTLỖ lý_do (bắt buộc cắt lỗ), bot chấm sau 5/10/20 phiên",
+        "Kiểm tra trước khi mua /tskiemtra: ngân sách 2% tài sản, ⛔ bình quân giá xuống, mua khi trang BÁN",
+        "Mọi /tsmua gắn thẻ quy tắc; cắt lỗ lấy của trang khi thiếu, không tự hạ, hạ tay thì ghi lại",
+        "Rủi ro đang mở và sàn tài sản (/tssan) trong báo cáo và trang web; chỉ thông tin, không khoá lệnh",
+        "Thứ Sáu: thước kỷ luật đo bằng code và mục tiêu hoàn vốn trên số đo (/tsmuctieu), không dự báo",
+        "🟠 không đẩy trong phiên nữa (INTRADAY_EARLY=1 bật lại); Claude chọn bóng: sửa 18 lỗi theo rà soát",
+    )),
+    ("v1.4.0", "2026-10-24", (
+        "Claude chọn bóng đo nhanh hơn: giá sau 10 phiên, chỉ tính phiên có từ 2 lệnh, cả bảng xếp hạng",
+        "Thêm ứng viên bot ước tính trong 300 mã; kết luận ở mốc 20 (sơ bộ) và 40 phiên có lựa chọn",
+        "Claude xem danh mục mỗi chiều: GIỮ / CÂN NHẮC BÁN từng mã, đo bằng giá 10 phiên sau",
+        "Có cảnh báo ⛔/🔴/🟠 thì Claude tìm tin của mã đó; tổng kết tuần về kỷ luật (/claude tuan)",
+    )),
+    ("v1.3.0", "2026-10-24", (
+        "Claude chọn bóng: mỗi phiên Claude đọc các lệnh MUA mới của trang, tìm tin, chọn 1 mã, nêu mã nên tránh",
+        "Chỉ ghi để đo, không phải lệnh: mọi mã chấm theo ⛔/🔴, so với TB các lệnh cùng ngày (cần 50 phiên)",
+        "Lệnh /claude, /claude chay, /claude lichsu (Telegram và Zoom); trang web Claude chọn bóng trong Tiện ích",
+        "Cần ANTHROPIC_API_KEY và SIEUTINHIEU=1; trần chi phí CLAUDE_PICK_MONTHLY_USD (mặc định 10 USD)",
+    )),
     ("v1.2.0", "2026-10-24", (
         "Giao diện mới cho toàn bộ web theo app LCTA: nền lavender, thẻ bo tròn, sáng/tối, gọn trên điện thoại",
         "Đầu trang: ngày âm lịch, trạng thái thị trường; menu HOME · DANH MỤC · TIỆN ÍCH",

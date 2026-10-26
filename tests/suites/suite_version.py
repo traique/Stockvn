@@ -157,10 +157,11 @@ else:
     page = r.text
     t.ok("/phienban: version, build, release check, every release",
          r.status_code == 200 and f">{ver.VERSION}<" in page and f"<code>{b}</code>" in page
-         and "đúng bản phát hành" in page and all(f"<h3>{v} " in page for v in names), r.status_code)
+         and "đúng bản phát hành" in page and all(f"<h3>{v}</h3>" in page for v in names), r.status_code)
     t.ok("header pill links to /phienban on every page", 'class="ver-pill" href="/phienban"' in page
          and f">{ver.VERSION}</a>" in page)
-    t.ok("footer: version label and the history link", f"TradingAgents VN {ver.label()}" in page
+    t.ok("footer: version, build and the history link", f"TradingAgents VN {ver.VERSION}</span>" in page
+         and f"bản dựng {ver.build()}" in page
          and '<a href="/phienban">lịch sử phiên bản</a>' in page)
     ver.RELEASE_BUILD = "fffffff"
     page2 = c.get("/phienban", auth=auth).text
