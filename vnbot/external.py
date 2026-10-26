@@ -804,6 +804,34 @@ def pct(value: float, digits: int = 1) -> str:
     return f"{value:+.{digits}f}%"
 
 
+def change(price, ref) -> str:
+    """"+1,25%": ``price`` against the reference (the previous close); "" when either is missing."""
+    if not price or not ref:
+        return ""
+    return f"{(price / ref - 1) * 100:+.2f}%".replace(".", ",")
+
+
+def company_names(symbols) -> dict[str, str]:
+    """{symbol: short company name} from the exchange listing (VCI, kept a day; the copy on disk
+    when VCI is down); a code it does not know is left out."""
+    from tradingagents.dataflows import symbols as listing
+    from tradingagents.dataflows.vendors import vci
+
+    try:
+        rows = vci.fetch_listing()
+    except Exception as exc:  # noqa: BLE001 - the message goes out without the names
+        logger.info("Listing unavailable (%s): the saved copy", exc)
+        rows = listing._saved_listing() or []
+    wanted = {s.upper() for s in symbols}
+    out = {}
+    for row in rows:
+        code = str(row.get("symbol") or "").upper() if isinstance(row, dict) else ""
+        name = str(row.get("organShortName") or row.get("organName") or "").strip() if code in wanted else ""
+        if name:
+            out[code] = name[:60]
+    return out
+
+
 def icon(side: str) -> str:
     return "🟢" if side == "BUY" else "🔴"
 
