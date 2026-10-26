@@ -127,6 +127,7 @@ STAMP = """/* Hallmark · shape: app screen · genre: modern-minimal · theme: C
  * nav: kept (labelled sidebar, a 48px bar and a sheet under 60rem) · signature: the session's pick sheet, the code pressed in coral (/claude) · states: empty, error, running, full
  * axes: light/grotesk-sans/warm · posture: restrained · contrast: pass · modes: light+dark · face: Be Vietnam Pro for General Sans (no Vietnamese) · v2.0.0 */
 /* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, an app keeps its shell; the variety is in the pick sheet, not the frame */
+/* Hallmark · finish-review: subagent · 6 findings · 6 resolved (verdict open, run line out of the disclosure, one figure face, ranking a card of its own, status outlines in ink, words in the strip at title size, three buttons on one row) · gap: none */
 /* Hallmark · waive 72 · details.acc measured while closed · a closed disclosure hides its body on purpose; open, the body sits inside var(--pad) */
 /* Hallmark · reworded "Phiên 24/10 · 4 lệnh MUA mới" to the pick sheet (the code as its head, the count in its foot) · 63 names the dotted head */
 /* Hallmark · reworded "v1.6.0 · 25/10/2026 · đang chạy" to the version head over a dated line · 63 names the dotted head */
@@ -187,7 +188,7 @@ td.num,.fig{font-family:var(--mono)}
   border:1px solid var(--border);color:var(--muted);font-size:var(--fs-small)}
 .ver-pill .mono{font-family:var(--mono);color:var(--text)}
 .ver-pill:hover{text-decoration:none;border-color:var(--control)}
-.ver-pill.warn{border-color:var(--negative);color:var(--negative)}
+.ver-pill.warn{border-color:var(--control);color:var(--text)}
 .i-sun{display:none}:root[data-theme=dark] .i-sun{display:block}:root[data-theme=dark] .i-moon{display:none}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .i-sun{display:block}:root:not([data-theme=light]) .i-moon{display:none}}
 .topbar,.sheet-close{display:none}
@@ -240,6 +241,7 @@ h3{font-size:var(--fs-body);line-height:1.4;letter-spacing:0;margin:var(--space-
 .kpi .s,.stat .s,.tile .s{font-variant-numeric:tabular-nums;font-size:var(--fs-small);line-height:1.3;color:var(--muted);margin-top:var(--space-2xs)}
 .kpi .v .muted,.stat .v .muted,.tile .v .muted{font-variant-numeric:tabular-nums;font-size:.875rem}
 .tile .v{font-size:var(--fs-section)}
+.v .vt{display:block;font-size:var(--fs-section);line-height:1.3;letter-spacing:-.01em;padding-top:var(--space-2xs)}
 .meter{height:6px;border-radius:3px;background:var(--active);overflow:hidden;margin-top:var(--space-xs)}
 .meter>span{display:block;height:100%;background:var(--text)}
 .meter.hot>span{background:var(--negative)}
@@ -258,7 +260,7 @@ input[type=checkbox]{width:16px;height:16px;padding:0;accent-color:var(--text)}
 input::placeholder{color:var(--muted)}
 input:disabled,select:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
 /* controls: letterpress cards; the primary is ink pressed the other way */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-xs);min-height:var(--control-h);padding:0 var(--space-md);border-radius:var(--radius-control);
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-xs);min-height:var(--control-h);padding:0 var(--space-sm);border-radius:var(--radius-control);
   border:0;background:var(--surface);color:var(--text);font-weight:500;cursor:pointer;max-width:100%;white-space:nowrap;
   box-shadow:var(--edge-stock),var(--cast-stock);transition:transform var(--dur-micro) var(--ease-out),box-shadow var(--dur-short) var(--ease-out)}
 .btn:hover{text-decoration:none;transform:translateY(-1px);box-shadow:var(--edge-stock),var(--cast-stock-lift)}
@@ -294,10 +296,10 @@ input.switch:checked::after{transform:translateX(12px);box-shadow:none}
   background:none;color:var(--pill-neutral-ink);font-size:var(--fs-tiny);line-height:1.3;font-weight:500;white-space:nowrap}
 .chip{white-space:normal}
 .chip svg{width:14px;height:14px}
-.b-buy,.b-ok,.chip-pos,.step.done{color:var(--pill-positive-ink);border-color:currentColor}
-.b-sell,.b-err,.chip-neg,.step.fail{color:var(--pill-negative-ink);border-color:currentColor}
+.b-buy,.b-ok,.chip-pos,.step.done{color:var(--pill-positive-ink);border-color:var(--control)}
+.b-sell,.b-err,.chip-neg,.step.fail{color:var(--pill-negative-ink);border-color:var(--control)}
 .b-hold,.b-info,.b-run,.chip-info,.step.now{color:var(--pill-info-ink);border-color:var(--control)}
-.b-watch,.chip-amber{color:var(--pill-warning-ink);border-color:currentColor}
+.b-watch,.chip-amber{color:var(--pill-warning-ink);border-color:var(--control)}
 .b-none{color:var(--muted)}
 .chips{display:flex;flex-wrap:wrap;gap:var(--space-xs);align-items:center}
 .steps{display:flex;gap:var(--space-xs);flex-wrap:wrap;margin:0 0 var(--gap)}
@@ -431,9 +433,10 @@ tr.void td{opacity:.55;text-decoration:line-through}
 .sheet-foot{display:flex;flex-wrap:wrap;gap:var(--space-sm) var(--space-xl);margin:0;padding:var(--space-md) var(--pad);border-top:1px solid var(--rule);font-size:var(--fs-small)}
 .sheet-foot dt{color:var(--muted)}
 .sheet-foot dd{margin:var(--space-3xs) 0 0;max-width:60ch}
-.acc .sheet-foot{padding:var(--space-md) 0 0;margin-top:var(--space-md)}
-.sheet-rank{border-top:1px solid var(--rule)}
-.sheet-rank h3{margin:0;padding:var(--space-md) var(--pad) var(--space-xs)}
+.sheet-foot.run{padding:var(--space-sm) 0 0;border-top:0;color:var(--muted)}
+.sheet-meta{display:grid;gap:var(--space-sm);margin:var(--space-lg) 0 0;padding-top:var(--space-md);border-top:1px solid var(--rule);font-size:var(--fs-small)}
+.sheet-meta dt{color:var(--muted)}
+.sheet-meta dd{margin:var(--space-3xs) 0 0}
 .rank{display:inline-block;min-width:24px;color:var(--muted);font:400 var(--fs-small) var(--mono)}
 @media (min-width:900px){.sheet-grid{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--space-xl);padding:var(--space-xl)}
   .sheet-body{padding-top:var(--space-lg)}}
@@ -615,8 +618,15 @@ def title(text: str, lead: str = "", right: str = "") -> str:
             + "</div>" + (f'<div class="actions">{right}</div>' if right else "") + "</div>")
 
 
+def words(text: str) -> str:
+    """A strip value that is words, not a figure ("Khớp lệnh liên tục"): set at title size."""
+    return f'<span class="vt">{e(text)}</span>'
+
+
 def _cell(label: str, value: str, sub: str, cls: str, tag: str = "kpi") -> str:
-    zero = " zero" if value in ("0", NONE, "0đ", "0 đ") else ""
+    if value == NONE:
+        value = f'<span class="vt">{NONE}</span>'
+    zero = " zero" if value in ("0", f'<span class="vt">{NONE}</span>', "0đ", "0 đ") else ""
     return (f'<div class="{tag}"><div class="l">{label}</div><div class="v {cls}{zero}">{value}</div>'
             + (f'<div class="s">{sub}</div>' if sub else "") + "</div>")
 

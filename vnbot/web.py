@@ -662,10 +662,10 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
         ready = sum(1 for p in providers if not p["resting_seconds"])
         stats = ui.strip([
             _ai_stat(usage),
-            ("Thị trường", html.escape(_PHASE_VI.get(phase, phase)), f"{html.escape(today)} · giờ Việt Nam"),
+            ("Thị trường", ui.words(_PHASE_VI.get(phase, phase)), f"{html.escape(today)} · giờ Việt Nam"),
             ("Cảnh báo hôm nay", str(len(alerts)),
              "trong phiên · không dùng AI" if switches.on("intraday") else "cảnh báo trong phiên đang tắt"),
-            ("Sàng lọc 15:30", html.escape(scope + (" + watchlist" if scope != "Watchlist" else "")),
+            ("Sàng lọc 15:30", ui.words(scope + (" + watchlist" if scope != "Watchlist" else "")),
              f"tối đa {settings.daily_ai_max} mã cho AI · {_MODE_VI.get(settings.daily_ai_mode, '')}"),
         ])
         ask = f"""
@@ -677,13 +677,13 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
       <input id="date" name="date" type="date" value="{today}" max="{today}"></div>
   </div>
   <div class="row" style="margin-top:14px">
-    <button class="btn btn-primary" type="submit" formaction="/critic">AI phản biện (1 lượt)</button>
+    <button class="btn btn-primary" type="submit" formaction="/critic">AI phản biện</button>
     <button class="btn btn-ghost" type="submit" formaction="/quick">Quyết định định lượng</button>
-    <button class="btn btn-ghost" type="submit">Phân tích chuyên sâu (~25 lượt)</button>
+    <button class="btn btn-ghost" type="submit">Phân tích chuyên sâu</button>
   </div>
   <p class="muted small" style="margin:12px 0 0">Quyết định định lượng có sau vài giây và không dùng lượt AI.
-  AI phản biện gửi một yêu cầu duy nhất: AI đồng thuận hay phản đối, kèm lý do. Phân tích chuyên sâu huy động
-  toàn bộ chuỗi agent và mất vài phút.</p>
+  AI phản biện gửi một yêu cầu duy nhất (1 lượt): AI đồng thuận hay phản đối, kèm lý do. Phân tích chuyên sâu huy động
+  toàn bộ chuỗi agent (khoảng 25 lượt) và mất vài phút.</p>
 </form>"""
         chips = ('<div class="chips" style="margin-bottom:14px">'
                  + "".join(f'<span class="chip">{html.escape(c)}</span>' for c in codes) + "</div>") if codes else ""
@@ -791,7 +791,8 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             _ai_stat(usage),
             ("AI phản đối đúng", f'{st["veto_right_pct"]}%' if st["veto_right_pct"] is not None else ui.NONE,
              f'trên {reject["n"]} lệnh MUA bị phản đối đã có kết quả'),
-            ("Kết quả theo dõi", f'{r_of(agree)} <span class="muted" style="font-size:.6em">/ {r_of(reject)}</span>',
+            ("Kết quả theo dõi", f'{r_of(agree)} <span class="muted" style="font-size:.6em">/ {r_of(reject)}</span>'
+             if agree["n"] or reject["n"] else ui.NONE,
              "R trung bình: AI đồng ý / phản đối"),
             ("Cảnh báo hôm nay", str(len(alerts)), "trong phiên"),
         ])

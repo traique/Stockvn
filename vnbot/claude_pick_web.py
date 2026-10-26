@@ -37,7 +37,7 @@ def _say(word: str | None) -> str:
 
 
 def _value(pct, *, note: str = "") -> str:
-    out = f'<span class="num {ui.tone(pct)}" style="white-space:nowrap">{ui.pct(pct)}</span>'
+    out = f'<span class="num fig {ui.tone(pct)}" style="white-space:nowrap">{ui.pct(pct)}</span>'
     return out + (f'<div class="muted small" style="white-space:nowrap">{_e(note)}</div>' if note else "")
 
 
@@ -124,7 +124,7 @@ def _views(entry: dict) -> str:
                  else '<span class="badge b-none">chưa có ý kiến</span>')
         rule = f'<span class="badge {"b-err" if h["rule"] == "BÁN" else "b-ok"}">{_e(_say(h["rule"]))}</span>'
         later = (h.get("result") or {}).get("r10")
-        rows.append(f'<tr><td><span class="sym">{_e(h["symbol"])}</span><div class="muted small">{ui.pct(h.get("pnl_pct"))} '
+        rows.append(f'<tr><td><span class="sym">{_e(h["symbol"])}</span><div class="muted small"><span class="fig">{ui.pct(h.get("pnl_pct"))}</span> '
                     f'theo giá vốn</div></td><td data-label="Theo quy tắc">{rule}<div class="muted small">{_e(h["rule_why"])}</div></td>'
                     f'<td data-label="{who}">{badge}<div class="small" style="margin-top:4px">{_e(h.get("reason"))}</div>'
                     f'{_links(h.get("sources") or [])}</td>'
@@ -165,12 +165,12 @@ def _sheet(entry: dict | None, button: str) -> str:
                        "sau khi trang chốt tín hiệu.</p>" + (f'<div class="mt">{button}</div>' if button else ""))
     day = entry["day"]
     cands = entry.get("candidates") or []
-    foot = (f'<dl class="sheet-foot"><div><dt>Chạy lúc</dt><dd>{_e(entry.get("at", "")[11:16])} '
-            f'{_e(cp._ddmm(day))}</dd></div><div><dt>Trả lời</dt><dd>{_who(entry)}</dd></div>')
+    meta = (f'<div><dt>Chạy lúc</dt><dd>{_e(entry.get("at", "")[11:16])} {_e(cp._ddmm(day))}</dd></div>'
+            f'<div><dt>Trả lời</dt><dd>{_who(entry)}</dd></div>')
     if cands:
         site = sum(1 for c in cands if c.get("source") != "bot")
-        foot += f'<div><dt>Ứng viên</dt><dd>{len(cands)} lệnh MUA mới: {site} của trang, {len(cands) - site} bot ước tính</dd></div>'
-    foot += "</dl>"
+        meta += f'<div><dt>Ứng viên</dt><dd>{len(cands)} lệnh MUA mới: {site} của trang, {len(cands) - site} bot ước tính</dd></div>'
+    foot = f'<dl class="sheet-foot">{meta}</dl>'
     if entry.get("error"):
         return ui.card(f"Phiên {_e(cp._ddmm(day))}: không có lựa chọn", ui.alert(entry["error"], "err") + foot)
     market = (f'<h3>Thị trường</h3><p>{_e(entry["market_note"])}</p>' if entry.get("market_note") else "")
@@ -186,11 +186,12 @@ def _sheet(entry: dict | None, button: str) -> str:
         head = (f'<div class="sheet-head"><p class="small muted">Phiên {_e(cp._ddmm(day))}, {source}, '
                 f'độ tin {pick["confidence"]}/100</p>'
                 f'<div class="sheet-title"><h2 class="sheet-code" id="pick">{_e(pick["symbol"])}</h2>'
-                f'<span class="stamp">Đã chọn</span></div>{_figs(cand)}</div>')
+                f'<span class="stamp">Đã chọn</span></div>{_figs(cand)}<dl class="sheet-meta">{meta}</dl></div>')
         why = f'<p class="sheet-why">{_e(pick["reason"])}</p>' + _links(pick.get("sources") or [])
     else:
         head = (f'<div class="sheet-head"><p class="small muted">Phiên {_e(cp._ddmm(day))}</p>'
-                '<div class="sheet-title"><h2 class="sheet-code is-none" id="pick">Không chọn mã nào</h2></div></div>')
+                '<div class="sheet-title"><h2 class="sheet-code is-none" id="pick">Không chọn mã nào</h2></div>'
+                f'<dl class="sheet-meta">{meta}</dl></div>')
         why = f'<p class="sheet-why">{_e(pick.get("reason"))}</p>' if pick.get("reason") else ""
     if avoid:
         why += ('<h3>Nên tránh</h3><ul class="sheet-list">'
@@ -211,8 +212,9 @@ def _sheet(entry: dict | None, button: str) -> str:
     table = ui.table([("Mã theo thứ hạng", ""), (f"Sau {cp.H10} phiên", ""), ("Theo quy tắc", ""), ("Giá", "num"),
                       ("Cắt lỗ", "num")], rows, "", stack=True)
     return (f'<section class="card sheet" aria-labelledby="pick">{_INK}<div class="sheet-grid">{head}'
-            f'<div class="sheet-body">{why}{market}</div></div>{foot}'
-            f'<div class="sheet-rank"><h3>Xếp hạng mọi ứng viên</h3>{table}</div></section>')
+            f'<div class="sheet-body">{why}{market}</div></div></section>'
+            + '<div class="mt">' + ui.card("Xếp hạng mọi ứng viên", table, sub="Thứ tự của " + (
+                "9Router" if entry.get("via") else "Claude") + ", chấm như nhau cho mọi lệnh", flush=True) + "</div>")
 
 
 def _notes(notes: list[dict]) -> str:
@@ -311,11 +313,11 @@ def page_body(pick: cp.ClaudePick, msg: str = "") -> str:
         "chừng ấy phiên đầu tiên: xem hằng ngày không làm may mắn thành kết quả.</li>"
         "<li>Ý kiến về danh mục và về cảnh báo được đo bằng giá 10 phiên sau.</li>"
         "<li>Nguồn tin chỉ được giữ khi đúng là trang Claude tìm thấy; mã chỉ được chọn trong danh sách ứng viên.</li>"
-        "<li>Không chạy lại trên dữ liệu quá khứ: Claude đã đọc tin của quá khứ nên kết quả sẽ không trung thực.</li></ul>"
-        f'<dl class="sheet-foot"><div><dt>Mô hình</dt><dd>{_e(cp.model())}, mức suy nghĩ {_e(cp.effort())}</dd></div>'
-        f"<div><dt>Tìm tin</dt><dd>tối đa {cp.max_searches()} lượt mỗi chiều</dd></div>"
-        f"<div><dt>Chi phí tháng này</dt><dd>{cp._usd(spent)}/{cp._usd(cap)} USD</dd></div>"
-        f"<div><dt>Chạy mỗi phiên</dt><dd>lúc {_e(cp.pick_time())}</dd></div></dl>")
+        "<li>Không chạy lại trên dữ liệu quá khứ: Claude đã đọc tin của quá khứ nên kết quả sẽ không trung thực.</li></ul>")
+    run = (f'<dl class="sheet-foot run"><div><dt>Mô hình</dt><dd>{_e(cp.model())}, mức suy nghĩ {_e(cp.effort())}</dd></div>'
+           f"<div><dt>Tìm tin</dt><dd>tối đa {cp.max_searches()} lượt mỗi chiều</dd></div>"
+           f"<div><dt>Chi phí tháng này</dt><dd>{cp._usd(spent)}/{cp._usd(cap)} USD</dd></div>"
+           f"<div><dt>Chạy mỗi phiên</dt><dd>lúc {_e(cp.pick_time())}</dd></div></dl>")
     latest = days[-1] if days else None
     return (
         ui.title("Claude chọn bóng", _e(lead) + _route(), button)
@@ -323,9 +325,9 @@ def page_body(pick: cp.ClaudePick, msg: str = "") -> str:
         + _sheet(latest, "")
         + ('<div class="mt">' + _views(latest) + "</div>" if latest and latest.get("holdings") else "")
         + '<h2 class="sect">Kết quả đo tới nay</h2>'
-        + _stats_strip(st)
+        + _stats_strip(st) + run
         + '<div class="mt">'
-        + ui.acc("ketluan", "", "Kết luận tới nay", f'<ul style="margin:0;padding-left:20px">{verdict_rows}</ul>')
+        + ui.acc("ketluan", "", "Kết luận tới nay", f'<ul style="margin:0;padding-left:20px">{verdict_rows}</ul>', opened=True)
         + ui.acc("cachcham", "", "Cách chấm điểm", method)
         + "</div>"
         + "".join(f'<div class="mt">{part}</div>' for part in (_notes(notes), _week(notes)) if part)
