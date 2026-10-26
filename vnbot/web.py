@@ -621,9 +621,9 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
                         post_guard=post_guard, show_bot=lambda: trader is not None and settings.trade_mode != "off",
                         notify=getattr(trader, "notify", None))
 
-    from vnbot import claude_pick_web
+    from vnbot import ai_pick_web
 
-    claude_pick_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
+    ai_pick_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
                              show_bot=lambda: trader is not None and settings.trade_mode != "off")
 
     from vnbot import config_web

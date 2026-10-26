@@ -7,14 +7,17 @@ Shadow only: nothing here is an order, or changes the bot's books, the Tài sả
 rule alert. It cannot be backtested either: the AI has read the news of the past, so asking
 it about a 2025 signal is asking with the answer in hand. Only what it says from now on counts.
 
-The AI is a model on 9Router (UniRouter, ``ROUTER9_BASE_URL``, ``ROUTER9_API_KEY``), by
-default ``gmw/gemini-pro``: Gemini web, which searches the web by itself. Gemini web takes no
+The AI is a model on 9Router (UniRouter, ``ROUTER9_BASE_URL``, ``ROUTER9_API_KEY``): Gemini
+web, which searches the web by itself. Two models take turns: the main one (default
+``gmw/gemini-pro``) for the evening choice, the fast one (default ``gmw/gemini-flash``) for the
+alert notes and the weekly review, which come more often (a free account has a daily quota
+on Pro); each stands in for the other when it fails (a quota, an error, a timeout). Gemini web takes no
 tools (UniRouter sends a request with tools to another source, without a search), so the
 question goes as plain text and the answer comes back as one JSON block the bot reads and
 checks (``ask``). The request goes through the agents' provider chain for 9Router alone: the
 daily AI budget, the pacing and the rest after a failure are shared with them.
 
-The evening request (``ClaudePick.run``, once a session after the site's signals ~15:08):
+The evening request (``AiPick.run``, once a session after the site's signals ~15:08):
 
 - candidates: the live BUYs of the session in the site's watchlist (``external``), then the
   stocks the bot's own market scan (``market_scan``, 300 most traded) sees turning BUY with
@@ -37,15 +40,14 @@ so looking every day cannot turn luck into a result. A holding view is scored by
 
 Also: when a rule alert fires on a holding (⛔ 🔴 🟠, ``TaiSan.record_alert``), the AI looks
 for the stock's news and says whether the fall is its own or the market's (``alert_note``,
-at most ``CLAUDE_PICK_ALERTS`` a day); on the week's last session it reviews the week's
+at most ``AI_PICK_ALERTS`` a day); on the week's last session it reviews the week's
 journal against the rules from facts the code computes (``weekly_review``).
 
-Configuration (the ``CLAUDE_PICK_*`` names are kept from when the AI was Claude, so a server's
-settings carry over): ``SIEUTINHIEU=1`` and 9Router, ``CLAUDE_PICK`` (on unless 0),
-``CLAUDE_PICK_MODEL`` (the model on 9Router, default gmw/gemini-pro; an old Anthropic name
-such as claude-opus-5-5 falls back to the default), ``CLAUDE_PICK_TIME`` (15:50),
-``CLAUDE_PICK_BOT`` (1: the scan's candidates too), ``CLAUDE_PICK_ALERTS`` (5 a day, 0 = none),
-``CLAUDE_PICK_WEEKLY`` (1).
+Configuration: ``SIEUTINHIEU=1`` and 9Router, ``AI_PICK`` (on unless 0), ``AI_PICK_MODEL``
+(the main model, default gmw/gemini-pro), ``AI_PICK_MODEL_FAST`` (default gmw/gemini-flash),
+``AI_PICK_TIME`` (15:50),
+``AI_PICK_BOT`` (1: the scan's candidates too), ``AI_PICK_ALERTS`` (5 a day, 0 = none),
+``AI_PICK_WEEKLY`` (1).
 """
 
 from __future__ import annotations
@@ -67,9 +69,10 @@ from vnbot.jobs import write_text_atomic
 logger = logging.getLogger(__name__)
 
 NAME = "AI chọn bóng"
-FILE = "claude_pick.json"
-NOTES_FILE = "claude_notes.json"
-DEFAULT_MODEL = "gmw/gemini-pro"   # Gemini web on UniRouter: searches the web by itself
+FILE = "ai_pick.json"
+NOTES_FILE = "ai_notes.json"
+MAIN_MODEL = "gmw/gemini-pro"      # Gemini web on UniRouter: searches the web by itself
+FAST_MODEL = "gmw/gemini-flash"
 MAX_CANDIDATES = 25        # the site's BUYs first (strongest first), then the scan's
 BOT_CANDIDATES = 15        # of the scan's, the most traded
 MAX_TOKENS = 16000         # output a request (Gemini web sets its own; other models honour it)
@@ -84,14 +87,14 @@ CAUSES = ("tin riêng của mã", "theo thị trường chung", "chưa rõ")
 KEEP_DAYS = 400
 KEEP_NOTES = 2000          # an upper bound; the notes are kept by age (NOTE_DAYS)
 NOTE_DAYS = 70
-PINS_FILE = "claude_checkpoints.json"
+PINS_FILE = "ai_checkpoints.json"
 TOOL = "submit_picks"
 NOTE_TOOL = "submit_note"
 NEWS_DOMAINS = ("cafef.vn", "vietstock.vn", "vnexpress.net", "tinnhanhchungkhoan.vn", "vneconomy.vn",
                 "baodautu.vn", "nguoiquansat.vn", "hsx.vn", "hnx.vn", "ssc.gov.vn")
 
 _LOCK = threading.Lock()        # read-merge-write of the two files
-_RUN_LOCK = threading.Lock()    # one evening run at a time (the scheduler, /claude chay, the web button)
+_RUN_LOCK = threading.Lock()    # one evening run at a time (the scheduler, /chonbong chay, the web button)
 _NOTE_LOCK = threading.Lock()   # one alert note at a time
 
 
@@ -110,24 +113,28 @@ def ready() -> bool:
     return bool((os.environ.get("ROUTER9_BASE_URL") or "").strip() and (os.environ.get("ROUTER9_API_KEY") or "").strip())
 
 
-def model() -> str:
-    """The model on 9Router; a bare Anthropic name left from the Claude days means the default."""
-    name = (os.environ.get("CLAUDE_PICK_MODEL") or "").strip()
-    return DEFAULT_MODEL if not name or name.startswith("claude-") else name
+def main_model() -> str:
+    """The evening choice's model on 9Router."""
+    return (os.environ.get("AI_PICK_MODEL") or "").strip() or MAIN_MODEL
+
+
+def fast_model() -> str:
+    """The alert notes' and the weekly review's model, and the stand-in for the main one."""
+    return (os.environ.get("AI_PICK_MODEL_FAST") or "").strip() or FAST_MODEL
 
 
 def enabled() -> bool:
     from vnbot.settings import _flag
 
-    return _flag("CLAUDE_PICK", True) and ready() and external.enabled()
+    return _flag("AI_PICK", True) and ready() and external.enabled()
 
 
 def why_off() -> str:
     """What is missing, "" when it runs."""
     from vnbot.settings import _flag
 
-    if not _flag("CLAUDE_PICK", True):
-        return "đang tắt bằng CLAUDE_PICK=0"
+    if not _flag("AI_PICK", True):
+        return "đang tắt bằng AI_PICK=0"
     missing = []
     if not ready():
         missing.append("9Router (ROUTER9_BASE_URL và ROUTER9_API_KEY)")
@@ -139,25 +146,25 @@ def why_off() -> str:
 def pick_time() -> str:
     from vnbot.settings import _hhmm
 
-    return max(_hhmm("CLAUDE_PICK_TIME", "15:50"), external.SITE_FINAL_TIME)
+    return max(_hhmm("AI_PICK_TIME", "15:50"), external.SITE_FINAL_TIME)
 
 
 def bot_candidates_on() -> bool:
     from vnbot.settings import _flag
 
-    return _flag("CLAUDE_PICK_BOT", True) and external.market_on()
+    return _flag("AI_PICK_BOT", True) and external.market_on()
 
 
 def alerts_per_day() -> int:
     from vnbot.settings import _int
 
-    return max(0, min(20, _int("CLAUDE_PICK_ALERTS", 5)))
+    return max(0, min(20, _int("AI_PICK_ALERTS", 5)))
 
 
 def weekly_on() -> bool:
     from vnbot.settings import _flag
 
-    return _flag("CLAUDE_PICK_WEEKLY", True)
+    return _flag("AI_PICK_WEEKLY", True)
 
 
 # ─── formatting ──────────────────────────────────────────────────────────────
@@ -514,19 +521,44 @@ def _json_in(text: str) -> dict | None:
     return None
 
 
-def ask(prompt: str, tool: dict | None, *, client=None, system: str = SYSTEM) -> tuple[dict | str, dict]:
+def _create(client, models: list[str], args: dict, used: dict):
+    """A chat completion from the first of ``models`` that answers; ``used`` gets the model
+    that did and why the ones before it did not. 9Router itself unreachable is raised at once
+    (the provider chain rests it); a model that fails behind it (a quota, an error status, a
+    timeout) hands over to the next."""
+    import openai
+
+    errors = []
+    for n, model_id in enumerate(models):
+        try:
+            response = client.chat.completions.create(**args, model=model_id)
+        except (openai.APIStatusError, openai.APITimeoutError) as exc:
+            if n == len(models) - 1:
+                raise
+            status = getattr(exc, "status_code", None)
+            errors.append(f"{model_id} lỗi ({f'HTTP {status}' if status else type(exc).__name__})")
+            logger.warning("%s: %s failed (%s), trying %s", NAME, model_id, exc, models[n + 1])
+            continue
+        used.update(model=model_id, fallback="; ".join(errors))
+        return response
+    raise RuntimeError("no model")
+
+
+def ask(prompt: str, tool: dict | None, *, client=None, system: str = SYSTEM, fast: bool = False) -> tuple[dict | str, dict]:
     """One answer from the AI on 9Router: the JSON object ``tool``'s schema asks for (asked
     once more when the first answer is not one), or, without ``tool``, its text; and meta
-    (model, served_by, usage). No tools are sent: Gemini web would be skipped for a source
-    without its search. Goes through the agents' provider chain for 9Router alone, so its
-    daily caps, pacing and rest after a failure are shared with them. ``Retry`` when 9Router
-    cannot be reached; ``PickError`` (with ``.meta``) when it answered nothing usable."""
+    (model, served_by, fallback, usage). The main model first, the fast one when it fails
+    (``fast``: the other way round). No tools are sent: Gemini web would be skipped for a
+    source without its search. Goes through the agents' provider chain for 9Router alone, so
+    its daily caps, pacing and rest after a failure are shared with them. ``Retry`` when
+    9Router cannot be reached; ``PickError`` (with ``.meta``) when it answered nothing usable."""
     from tradingagents.llm_clients import fallback_client as fc
 
     client = client or _client()
-    model_id = model()
+    models = list(dict.fromkeys([fast_model(), main_model()] if fast else [main_model(), fast_model()]))
     usage = {"input": 0, "output": 0}
-    meta = {"model": model_id, "served_by": model_id, "usage": usage}
+    used = {"model": models[0], "fallback": ""}
+    meta = {"model": models[0], "served_by": models[0], "fallback": "", "usage": usage}
     content = prompt
     if tool:
         content += "\n\n" + ANSWER.format(schema=json.dumps(tool["input_schema"], ensure_ascii=False))
@@ -538,17 +570,21 @@ def ask(prompt: str, tool: dict | None, *, client=None, system: str = SYSTEM) ->
         return error
 
     for attempt in range(2 if tool else 1):
-        args = {"model": model_id, "max_tokens": MAX_TOKENS, "messages": messages}
+        args = {"max_tokens": MAX_TOKENS, "messages": messages}
         try:
-            response = fc.run_chain([("router9", client)], lambda c: c.chat.completions.create(**args))
+            response = fc.run_chain([("router9", client)], lambda c: _create(c, models, args, used))
         except RuntimeError as exc:          # every attempt failed, 9Router resting, or the day's AI budget spent
             raise Retry(f"9Router: {str(exc)[:200]}") from exc
         except Exception as exc:  # noqa: BLE001 - an answer that broke the SDK: recorded
             raise fail(f"9Router báo lỗi: {type(exc).__name__}: {str(exc)[:200]}") from exc
-        used = getattr(response, "usage", None)
-        usage["input"] += int(getattr(used, "prompt_tokens", 0) or 0)
-        usage["output"] += int(getattr(used, "completion_tokens", 0) or 0)
-        meta["served_by"] = getattr(response, "model", None) or model_id
+        models = [used["model"]]             # the nudge goes to the model that answered
+        used_model = used["model"]
+        meta.update(model=used_model, served_by=getattr(response, "model", None) or used_model)
+        if used["fallback"]:
+            meta["fallback"] = used["fallback"]
+        u = getattr(response, "usage", None)
+        usage["input"] += int(getattr(u, "prompt_tokens", 0) or 0)
+        usage["output"] += int(getattr(u, "completion_tokens", 0) or 0)
         choice = (getattr(response, "choices", None) or [None])[0]
         text = (getattr(getattr(choice, "message", None), "content", None) or "").strip()
         if tool is None:
@@ -852,9 +888,9 @@ class _JsonList:
 
 
 class PickLog(_JsonList):
-    """The evening answers on disk (``data/claude_pick.json``), one entry a session, with the
+    """The evening answers on disk (``data/ai_pick.json``), one entry a session, with the
     candidates' and the holdings' shadow results; and the checkpoints pinned to the sessions
-    they were first reached on (``claude_checkpoints.json``), kept whatever is trimmed."""
+    they were first reached on (``ai_checkpoints.json``), kept whatever is trimmed."""
 
     def __init__(self, data_dir: Path):
         super().__init__(Path(data_dir) / FILE, KEEP_DAYS)
@@ -988,7 +1024,7 @@ class PickLog(_JsonList):
 
 
 class NoteLog(_JsonList):
-    """The AI's notes on the rule alerts and the weekly reviews (``data/claude_notes.json``),
+    """The AI's notes on the rule alerts and the weekly reviews (``data/ai_notes.json``),
     kept ``NOTE_DAYS`` days (long enough to score every note), never by count alone."""
 
     def __init__(self, data_dir: Path):
@@ -1054,7 +1090,10 @@ def _views_lines(entry: dict) -> list[str]:
 
 
 def _model_line(item: dict) -> str:
-    return f"Trả lời: {item.get('served_by') or item.get('model')} (qua 9Router)" if item.get("model") else ""
+    """"Trả lời: gmw/gemini-flash qua 9Router (gmw/gemini-pro lỗi (HTTP 429))"."""
+    if not item.get("model"):
+        return ""
+    return f"Trả lời: {item['model']} qua 9Router" + (f" ({item['fallback']})" if item.get("fallback") else "")
 
 
 def entry_text(entry: dict, st: dict | None = None) -> str:
@@ -1143,6 +1182,8 @@ def note_text(note: dict) -> str:
         lines += [f"Nguyên nhân: {note['cause']} · {note['news']}", f"AI: {note['view']} · {note['reason']}"]
         if note.get("sources"):
             lines.append("Nguồn: " + " · ".join(note["sources"][:2]))
+    if _model_line(note):
+        lines.append(_model_line(note))
     return "\n".join(lines)
 
 
@@ -1153,6 +1194,8 @@ def week_text(note: dict) -> str:
         lines += ["", f"⚠️ {note['error']}"]
     elif note.get("text"):
         lines += ["", "Nhận xét của AI:", note["text"]]
+    if _model_line(note):
+        lines += ["", _model_line(note)]
     return "\n".join(lines)
 
 
@@ -1177,7 +1220,7 @@ def _load_bars(symbol: str, day: str) -> list[dict]:
 
 
 
-class ClaudePick:
+class AiPick:
     """The evening answers, the alert notes, the weekly review and their scoring. ``client``
     (9Router's, OpenAI-compatible), ``bars`` (symbol, as_of -> bars), ``account``, ``closes``
     and ``now`` are for the tests; by default the OpenAI SDK on 9Router, the bot's price
@@ -1331,7 +1374,7 @@ class ClaudePick:
             raw, meta = ask(prompt, submit_tool(codes, codes_held), client=self._client)
         except PickError as exc:
             meta = getattr(exc, "meta", {}) or {}
-            entry.update(error=str(exc), model=meta.get("model", model()), served_by=meta.get("served_by"))
+            entry.update(error=str(exc), model=meta.get("model", main_model()), served_by=meta.get("served_by"))
             self.log.save(entry)
             return entry_text(entry)
         except Retry:
@@ -1350,6 +1393,8 @@ class ClaudePick:
             logger.exception("%s: answer not readable", NAME)
             entry["error"] = f"không đọc được câu trả lời của AI ({type(exc).__name__})"
         entry.update(model=meta["model"], served_by=meta["served_by"], usage=meta["usage"])
+        if meta.get("fallback"):
+            entry["fallback"] = meta["fallback"]
         self.log.save(entry)
         return entry_text(entry, self.stats())
 
@@ -1399,13 +1444,13 @@ class ClaudePick:
             note = {"kind": "alert", "day": day, "at": stamp, "symbol": symbol, "level": level, "price": price,
                     "rule": advice}
             try:
-                raw, meta = ask(prompt, note_tool(symbol), client=self._client, system=ALERT_SYSTEM)
+                raw, meta = ask(prompt, note_tool(symbol), client=self._client, system=ALERT_SYSTEM, fast=True)
                 view = str(raw.get("view") or "").upper()
                 cause = str(raw.get("cause") or "").strip().lower()
                 note.update(cause=cause if cause in CAUSES else "chưa rõ",
                             news=str(raw.get("news") or "").strip()[:400], view=view if view in VIEWS else None,
                             reason=str(raw.get("reason") or "").strip()[:500], sources=_sources(raw.get("sources")),
-                            model=meta["model"], served_by=meta["served_by"])
+                            model=meta["model"], served_by=meta["served_by"], fallback=meta.get("fallback") or None)
             except PickError as exc:
                 note["error"] = str(exc)
             except Retry as exc:
@@ -1505,8 +1550,8 @@ class ClaudePick:
         note = {"kind": "week", "week": week, "day": day, "at": self.now().strftime("%Y-%m-%dT%H:%M"),
                 "facts": self.week_facts(day)}
         try:
-            text, meta = ask("\n".join(note["facts"]), None, client=self._client, system=WEEK_SYSTEM)
-            note.update(text=str(text)[:2000], model=meta["model"], served_by=meta["served_by"])
+            text, meta = ask("\n".join(note["facts"]), None, client=self._client, system=WEEK_SYSTEM, fast=True)
+            note.update(text=str(text)[:2000], model=meta["model"], served_by=meta["served_by"], fallback=meta.get("fallback") or None)
         except PickError as exc:
             note["error"] = str(exc)
         self.notes.add(note)
@@ -1526,12 +1571,12 @@ def alert_hook(data_dir: Path, notify: Callable[[str], None]) -> Callable:
 
         def work():
             try:
-                text = ClaudePick(data_dir).alert_note(level, symbol, price, day)
+                text = AiPick(data_dir).alert_note(level, symbol, price, day)
                 if text:
                     notify(text)
             except Exception:  # noqa: BLE001 - the alert went out; only the note is lost
                 logger.exception("%s: alert note on %s failed", NAME, symbol)
 
-        threading.Thread(target=work, name="claude-alert", daemon=True).start()
+        threading.Thread(target=work, name="ai-alert", daemon=True).start()
 
     return hook

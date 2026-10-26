@@ -129,9 +129,45 @@ class Settings:
     extra: dict = field(default_factory=dict)
 
 
+# AI chọn bóng was named after its first model until v1.8.0: its files, its saved settings and
+# its environment variables carry the old prefix on a server that ran it. Renamed once at
+# start so the measured sessions and the owner's settings carry over.
+_OLD_PICK = "CLAUDE_PICK"
+_OLD_PICK_FILES = {"claude_pick.json": "ai_pick.json", "claude_notes.json": "ai_notes.json",
+                   "claude_checkpoints.json": "ai_checkpoints.json"}
+
+
+def _carry_over_pick(data_dir: Path) -> None:
+    import json
+    import logging
+
+    log = logging.getLogger(__name__)
+    for old, new in _OLD_PICK_FILES.items():
+        if (data_dir / old).exists() and not (data_dir / new).exists():
+            (data_dir / old).rename(data_dir / new)
+            log.info("AI chọn bóng: %s -> %s", old, new)
+    saved = data_dir / "settings.json"
+    try:
+        data = json.loads(saved.read_text(encoding="utf-8")) if saved.exists() else {}
+    except (OSError, ValueError):
+        data = {}
+    if isinstance(data, dict) and any(k.startswith(_OLD_PICK) for k in data):
+        renamed = {("AI_PICK" + k[len(_OLD_PICK):] if k.startswith(_OLD_PICK) else k): v for k, v in data.items()}
+        if str(data.get(_OLD_PICK + "_MODEL", "")).startswith("claude-"):
+            renamed.pop("AI_PICK_MODEL", None)
+        from vnbot.jobs import write_text_atomic
+
+        write_text_atomic(saved, json.dumps(renamed, ensure_ascii=False, indent=1, sort_keys=True))
+    for key in [k for k in os.environ if k.startswith(_OLD_PICK)]:
+        value = os.environ[key]
+        if not (key == _OLD_PICK + "_MODEL" and value.startswith("claude-")):   # a paid model of the old setup means nothing on 9Router
+            os.environ.setdefault("AI_PICK" + key[len(_OLD_PICK):], value)
+
+
 def load() -> Settings:
     data_dir = Path(os.environ.get("DATA_DIR") or "data").resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
+    _carry_over_pick(data_dir)
     # The values saved on the web page (/caidat) go into the environment first.
     from vnbot import config
 

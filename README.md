@@ -110,8 +110,8 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/stvquet` · `/stvsang` | Quét ngay danh mục Tài sản + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
 | `/stvthitruong` | Bot quét 300 mã thanh khoản cao nhất thị trường: mã đã qua mức đổi chiều (trong phiên: theo giá khớp; ngoài giờ: theo giá đóng cửa), so với phần trang cho xem miễn phí, và kết quả đối chiếu các phiên trước |
 | `/stvdoichieu` | Đổi chiều trong phiên do bot ước tính cho danh mục + watchlist: mã đã qua mức đổi chiều, rồi mã sát mức (cách ≤ 2%). Ngoài giờ: mức giá đóng cửa sẽ làm từng mã đổi chiều ở phiên tới |
-| `/claude` · `/claude lichsu` · `/claude tuan` | AI chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`) |
-| `/claude chay` | Chạy ngay cho phiên gần nhất (tốn phí API; mỗi phiên chỉ một lần) |
+| `/chonbong` · `/chonbong lichsu` · `/chonbong tuan` | AI chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần 9Router và `SIEUTINHIEU=1`) |
+| `/chonbong chay` | Chạy ngay cho phiên gần nhất (mỗi phiên chỉ một lần) |
 | `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
 | `/id` | Telegram id của bạn |
 
@@ -189,7 +189,7 @@ Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, 
 - **Tổng quan** (`/`): dải số đầu trang (lượt AI, thị trường, cảnh báo, rổ sàng lọc), phân tích một mã (AI phản biện, quyết định định lượng, phân tích chuyên sâu), lượt gần đây, ba tài khoản ảo, watchlist, nhà cung cấp AI.
 - **Danh mục** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
 - **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, AI chọn bóng, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, 9Router, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
-- **AI chọn bóng** (`/claude`): xem mục **AI chọn bóng**.
+- **AI chọn bóng** (`/chonbong`): xem mục **AI chọn bóng**.
 - **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
 
 ### Báo cáo tự động
@@ -206,7 +206,7 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 
    Mã khác muốn AI xem thì gửi `/phanbien MÃ` (1 lượt) hoặc `/phantich MÃ` (đầy đủ).
 3. **Báo cáo Tài sản** (danh mục tiền thật), các ngày giao dịch lúc **15:30**, gửi Telegram và Zoom; chạy riêng, không phụ thuộc `TRADE_MODE` hay `SIEUTINHIEU`. Xem mục **Tài sản**.
-4. **AI chọn bóng** (nếu có 9Router và `SIEUTINHIEU=1`), các ngày giao dịch lúc `CLAUDE_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **AI chọn bóng**.
+4. **AI chọn bóng** (nếu có 9Router và `SIEUTINHIEU=1`), các ngày giao dịch lúc `AI_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **AI chọn bóng**.
 
 - **Ngày lễ:** bot giao dịch chỉ xử lý những phiên VNINDEX thực sự có nến, nên ngày lễ tự bỏ qua; phân tích watchlist cũng bỏ qua ngày lễ khi chạy sau 15:05.
 - **Chạy bù:** mỗi lần chạy (kể cả lúc server khởi động), bot xử lý lần lượt mọi phiên bị lỡ từ phiên cuối đã xử lý, mỗi phiên chỉ dùng dữ liệu tới phiên đó. Bù tối đa 20 phiên; phiên cũ hơn bị bỏ qua và lệnh chờ của chúng bị huỷ (báo cáo có ghi).
@@ -266,26 +266,27 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 
 Câu hỏi: dùng AI đọc các lệnh MUA và danh mục thì có chọn tốt hơn, có giúp quyết định đúng lúc hơn không? Không ai biết trước, và **không backtest được**: AI đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**. **Mọi ý kiến của AI không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào; quy tắc ⛔/🔴 vẫn là quy tắc chính.
 
-- **AI là gì:** một model trên **9Router** ([UniRouter](https://github.com/traique/unirouter)), mặc định `gmw/gemini-pro`: Gemini web (đăng nhập bằng cookie trong trang quản trị UniRouter) **tự tìm tin trên web**, không tốn phí API. Không còn dùng API của Anthropic (Claude).
+- **AI là gì:** model trên **9Router**, tức [UniRouter](https://github.com/traique/unirouter) của anh: Gemini web (đăng nhập bằng cookie trong trang quản trị UniRouter) **tự tìm tin trên web**, không tốn phí API.
 - **Bật:** cần `ROUTER9_BASE_URL`, `ROUTER9_API_KEY` (chuỗi AI của bot đã dùng hai biến này) và `SIEUTINHIEU=1`, rồi khởi động lại. Trong UniRouter, nguồn *Gemini Web (cookie)* phải đang chạy; nếu key `sk-uni-…` của bot bị giới hạn nguồn thì cho phép nguồn này.
-- **Đổi model:** `CLAUDE_PICK_MODEL` (ở trang `/caidat`), ví dụ `gmw/gemini-flash` cho nhanh hơn. Chỉ model của Gemini web mới tìm web; model khác vẫn trả lời nhưng chỉ dựa vào số liệu bot đưa. Tên model Claude cũ (vd `claude-opus-5-5`) còn sót trong cấu hình được bỏ qua.
+- **Hai model, tự chuyển cho nhau:** `AI_PICK_MODEL` (mặc định `gmw/gemini-pro`) chọn mã buổi chiều, 1-2 lượt mỗi ngày nên vừa hạn mức Pro của tài khoản free; `AI_PICK_MODEL_FAST` (mặc định `gmw/gemini-flash`) xem tin khi có cảnh báo và viết tổng kết tuần, những việc xảy ra nhiều lần hơn. Model đang dùng lỗi, hết hạn mức (429) hoặc quá thời gian thì bot hỏi ngay model kia trong cùng lượt; tin nhắn và trang web ghi rõ model nào đã trả lời và vì sao. Đổi cả hai ở trang `/caidat`, có hiệu lực ngay. Tên `gmw/…` là chế độ của web Gemini (Flash, Pro, Thinking), không gắn số phiên bản: Google tự đổi model phía sau. Model không phải Gemini web vẫn trả lời nhưng không tìm tin.
+- **Tên cũ:** trước v1.9.0 tính năng mang tên model trả phí cũ. Khi khởi động, bot tự đổi file dữ liệu, giá trị đã lưu trên `/caidat` và biến môi trường theo tên cũ sang tên mới (`ai_pick.json`, `AI_PICK_*`), nên lịch sử đo không mất. Nên đổi tên biến trên Botkeep cho gọn.
 - **Vì sao không dùng tools:** UniRouter chuyển mọi request có `tools` sang nguồn khác (Gemini web không gọi tool được), nên bot gửi câu hỏi dạng chữ kèm **JSON Schema** của câu trả lời và đọc **một khối JSON** Gemini trả về. Không phải JSON thì bot hỏi lại một lần; vẫn không được thì ghi lỗi và lần chạy sau hỏi lại.
-- **Mỗi phiên lúc `CLAUDE_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08), một lượt hỏi:
-  1. **Ứng viên:** các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), mạnh nhất trước; rồi tới **các mã bot ước tính vừa đổi sang MUA** trong 300 mã thanh khoản cao nhất (cùng cách tính với trang, khớp ~88% ngày đổi chiều; tắt bằng `CLAUDE_PICK_BOT=0`), tối đa 25 mã.
+- **Mỗi phiên lúc `AI_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08), một lượt hỏi:
+  1. **Ứng viên:** các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), mạnh nhất trước; rồi tới **các mã bot ước tính vừa đổi sang MUA** trong 300 mã thanh khoản cao nhất (cùng cách tính với trang, khớp ~88% ngày đổi chiều; tắt bằng `AI_PICK_BOT=0`), tối đa 25 mã.
   2. **Danh mục Tài sản:** từng mã đang giữ với khối lượng, giá vốn đúng như anh nhập (đã gồm phí, bot không trừ gì), giá đóng cửa, lãi/lỗ, tỷ trọng, cắt lỗ/mục tiêu, trạng thái của trang và **quy tắc đang báo gì** (⛔ thủng cắt lỗ hoặc 🔴 trang BÁN → BÁN; còn lại GIỮ).
   3. Kèm số liệu code tính từ giá đóng cửa (thay đổi 1/20/60 phiên, khoảng cách tới TB20/50/200, đỉnh 52 tuần, giá trị giao dịch, khối lượng) và VNINDEX. AI không tự đưa ra giá.
   4. Gemini tìm tin trên web, ưu tiên CafeF, Vietstock, VnExpress, Tin nhanh chứng khoán, VnEconomy, Báo Đầu tư, Người quan sát, HOSE, HNX, UBCKNN: phát hành thêm, cổ đông lớn mua bán, bị cảnh báo/kiểm soát, kết quả kinh doanh, pháp lý, ngày GDKHQ.
   5. Câu trả lời: **một mã chọn** (hoặc không chọn), **các mã nên tránh**, **xếp hạng mọi mã**, và **ý kiến GIỮ / CÂN NHẮC BÁN cho từng mã đang giữ**, kèm lý do và nguồn. Mã ngoài danh sách bị loại. **Nguồn** là link AI tự nêu: bot chỉ giữ link tới các trang tin trên (không xem được AI đã tìm gì), trang web ghi rõ điều đó.
-  6. Bot nhắn Telegram và Zoom, ghi vào `data/claude_pick.json` (giữ tên file cũ để không mất lịch sử). Không có lệnh MUA mới nhưng có danh mục thì AI chỉ xem danh mục; không có cả hai thì không hỏi.
-- **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ**: ngay sau cảnh báo của bot, AI tìm tin của mã đó, cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `CLAUDE_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt). Cảnh báo của bot vẫn gửi ngay, không chờ AI.
-- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi, cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa, tài sản cuối tuần, thước kỷ luật), AI viết vài dòng nhận xét và một việc cho tuần tới. Tắt: `CLAUDE_PICK_WEEKLY=0`. Xem lại: `/claude tuan`.
+  6. Bot nhắn Telegram và Zoom, ghi vào `data/ai_pick.json` (giữ tên file cũ để không mất lịch sử). Không có lệnh MUA mới nhưng có danh mục thì AI chỉ xem danh mục; không có cả hai thì không hỏi.
+- **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ**: ngay sau cảnh báo của bot, AI tìm tin của mã đó, cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `AI_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt). Cảnh báo của bot vẫn gửi ngay, không chờ AI.
+- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi, cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa, tài sản cuối tuần, thước kỷ luật), AI viết vài dòng nhận xét và một việc cho tuần tới. Tắt: `AI_PICK_WEEKLY=0`. Xem lại: `/chonbong tuan`.
 - **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã AI chọn và mã AI bảo tránh), chưa trừ phí và thuế (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh):
   - **Sau 10 phiên** (cách đo chính, có kết quả sau 2 tuần): mua ở giá mở cửa phiên sau, so với giá đóng cửa 10 phiên sau.
   - **Theo quy tắc ⛔/🔴** (chỉ lệnh của trang): bán ở giá mở cửa sau khi trang báo BÁN (đợi đủ T+2), khi giá chạm cắt lỗ của trang (từ T+2; mở cửa dưới cắt lỗ thì bán ở giá mở cửa), hoặc sau 60 phiên.
   - **Ý kiến về danh mục và về cảnh báo:** giá 5 và 10 phiên sau so với giá đóng cửa hôm đó; bot tách riêng những lần AI nói khác quy tắc.
 - **So sánh:** chỉ các phiên có **từ 2 lệnh trở lên** (có lựa chọn thật) và mọi lệnh đã đủ 10 phiên. Lệnh AI chọn được so với **trung bình mọi lệnh cùng ngày** và với **lệnh mạnh nhất của trang**; **nửa trên bảng xếp hạng** của AI so với nửa dưới; lệnh **bảo tránh** so với phần còn lại.
 - **Kết luận ở mốc định sẵn:** bot chỉ kết luận ở **20 phiên có lựa chọn (sơ bộ)** và **40 phiên**, mỗi mốc tính đúng trên chừng ấy phiên đầu tiên, kèm khoảng tin cậy 90%. Xem kết quả mỗi ngày rồi dừng khi thấy đẹp dễ tưởng nhầm may mắn là tài, nên kết luận ở một mốc không đổi theo các phiên sau. Với nhiễu thực tế của lệnh MUA (±5 điểm % sau 10 phiên), mốc 20 phiên chỉ thấy được khi AI hơn trung bình khoảng 2 điểm %/lệnh trở lên. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
-- **Xem:** `/claude` (phiên gần nhất, ý kiến danh mục, thành tích), `/claude lichsu`, `/claude tuan`, trang web **AI chọn bóng** (`/claude`, trong Công cụ): mở đầu bằng **phiếu chọn của phiên** (mã được chọn in lớn, đóng dấu "Đã chọn", giá tín hiệu, cắt lỗ, mục tiêu, lý do, mã nên tránh, model đã trả lời), bảng xếp hạng mọi ứng viên, danh mục, kết quả đo, các lần AI xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay. Lệnh và đường dẫn vẫn là `/claude` để thói quen cũ không đổi.
+- **Xem:** `/chonbong` (phiên gần nhất, ý kiến danh mục, thành tích), `/chonbong lichsu`, `/chonbong tuan`, trang web **AI chọn bóng** (`/chonbong`, trong Công cụ): mở đầu bằng **phiếu chọn của phiên** (mã được chọn in lớn, đóng dấu "Đã chọn", giá tín hiệu, cắt lỗ, mục tiêu, lý do, mã nên tránh, model đã trả lời), bảng xếp hạng mọi ứng viên, danh mục, kết quả đo, các lần AI xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay. Lệnh và đường dẫn vẫn là `/chonbong` để thói quen cũ không đổi.
 - **Hạn mức và lỗi:** mỗi lượt hỏi đi qua chuỗi nhà cung cấp của các agent cho riêng 9Router, nên tính vào hạn mức ngày (`LLM_MAX_CALLS_PER_DAY`, `ROUTER9_MAX_CALLS_PER_DAY`, mặc định 60 lượt/ngày cho mọi việc AI), và 9Router lỗi thì nghỉ `ROUTER9_RETRY_SEC` giây như với các agent. Một phiên thường là 1-2 lượt, mỗi lần cảnh báo 1-2 lượt, tổng kết tuần 1 lượt. 9Router không trả lời được thì bot thử lại sau 15, 30, 45 phút rồi bỏ phiên đó và báo một lần. Gemini web có thể mất 1-3 phút một lượt (bot chờ tối đa 5 phút).
 - **An toàn:** khoá 9Router không bao giờ được in ra trong tin nhắn lỗi; nội dung trang web AI đọc được coi là dữ liệu, không phải chỉ dẫn; trang web chỉ hiện link http(s) tới các trang tin đã định.
 
@@ -436,12 +437,13 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `MAX_TOOL_ROUNDS` | 8 | Số lượt gọi tool tối đa của mỗi analyst |
 | `KEEP_REPORTS` | 60 | Số thư mục báo cáo giữ lại |
 | `CACHE_MAX_AGE_DAYS` | 3 | Xoá cache giá cũ hơn số ngày này |
-| `CLAUDE_PICK` | 1 | 0 = tắt **AI chọn bóng** (cần 9Router và `SIEUTINHIEU=1`) |
-| `CLAUDE_PICK_MODEL` | `gmw/gemini-pro` | Model trên 9Router; Gemini web (`gmw/…`) tự tìm tin trên web |
-| `CLAUDE_PICK_TIME` | `15:50` | Giờ chọn mỗi ngày giao dịch (không sớm hơn 15:10) |
-| `CLAUDE_PICK_BOT` | 1 | Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (300 mã, cần `STV_MARKET=1`) |
-| `CLAUDE_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày AI xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
-| `CLAUDE_PICK_WEEKLY` | 1 | Tổng kết tuần sau phiên cuối tuần (0 = tắt) |
+| `AI_PICK` | 1 | 0 = tắt **AI chọn bóng** (cần 9Router và `SIEUTINHIEU=1`) |
+| `AI_PICK_MODEL` | `gmw/gemini-pro` | Model chính (chọn mã buổi chiều); Gemini web (`gmw/…`) tự tìm tin trên web |
+| `AI_PICK_MODEL_FAST` | `gmw/gemini-flash` | Model nhanh (cảnh báo, tổng kết tuần) và dự phòng khi model kia lỗi |
+| `AI_PICK_TIME` | `15:50` | Giờ chọn mỗi ngày giao dịch (không sớm hơn 15:10) |
+| `AI_PICK_BOT` | 1 | Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (300 mã, cần `STV_MARKET=1`) |
+| `AI_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày AI xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
+| `AI_PICK_WEEKLY` | 1 | Tổng kết tuần sau phiên cuối tuần (0 = tắt) |
 
 ## 10. Giới hạn và xử lý sự cố
 

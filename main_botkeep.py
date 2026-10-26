@@ -106,10 +106,10 @@ def _start():
     trader = TradingBot(SETTINGS, watchlist, notify=bot.broadcast)
     bot.trader = trader
     bot.taisan = trader.taisan          # the owner's real-money portfolio (/ts, the /taisan tab)
-    from vnbot import claude_pick
+    from vnbot import ai_pick
 
     # The AI's look at the news when a rule alert fires on a holding (only with 9Router set)
-    trader.taisan.on_alert = claude_pick.alert_hook(SETTINGS.data_dir, bot.broadcast)
+    trader.taisan.on_alert = ai_pick.alert_hook(SETTINGS.data_dir, bot.broadcast)
     jobs.start()
     bot.start()
     _announce_version(bot.broadcast)

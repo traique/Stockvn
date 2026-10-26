@@ -1,5 +1,6 @@
-"""AI chọn bóng on 9Router (UniRouter, Gemini web with its own web search): what is asked,
-how the JSON answer is read and checked, what is recorded and said (``claude_pick``)."""
+"""AI chọn bóng on 9Router (UniRouter, Gemini web with its own web search): the two models
+and their hand-over, what is asked, how the JSON answer is read and checked, what is recorded
+and said (``ai_pick``)."""
 import json
 import os
 from datetime import datetime
@@ -11,7 +12,7 @@ import httpx  # noqa: E402
 import openai  # noqa: E402
 
 from tradingagents.llm_clients import fallback_client as fc  # noqa: E402
-from vnbot import claude_pick as cp  # noqa: E402
+from vnbot import ai_pick as cp  # noqa: E402
 
 t = _common.Checks()
 DATA = _common.ROOT / "data"
@@ -29,7 +30,7 @@ ROUTER = {"ROUTER9_BASE_URL": "https://router.example/v1", "ROUTER9_API_KEY": "r
 
 
 def env(**values) -> None:
-    for key in ("ROUTER9_BASE_URL", "ROUTER9_API_KEY", "CLAUDE_PICK_MODEL", "SIEUTINHIEU", "CLAUDE_PICK", "CLAUDE_PICK_BOT",
+    for key in ("ROUTER9_BASE_URL", "ROUTER9_API_KEY", "AI_PICK_MODEL", "AI_PICK_MODEL_FAST", "SIEUTINHIEU", "AI_PICK", "AI_PICK_BOT",
                 "LLM_MAX_CALLS_PER_DAY"):
         os.environ.pop(key, None)
     os.environ.update({k: str(v) for k, v in values.items()})
@@ -37,18 +38,21 @@ def env(**values) -> None:
 
 
 class Router:
-    """9Router's OpenAI-compatible client: answers the texts in turn (or raises ``error``)."""
+    """9Router's OpenAI-compatible client: answers the texts in turn, or raises ``error``
+    (for every model) or ``fails[model]`` (for that model)."""
 
-    def __init__(self, *texts, error=None, finish="stop"):
-        self.texts, self.error, self.finish, self.seen = list(texts), error, finish, []
+    def __init__(self, *texts, error=None, fails=None, finish="stop"):
+        self.texts, self.error, self.fails, self.finish, self.seen = list(texts), error, fails or {}, finish, []
         self.chat = NS(completions=NS(create=self.create))
 
     def create(self, **kwargs):
         self.seen.append(json.loads(json.dumps(kwargs)))
         if self.error is not None:
             raise self.error
+        if kwargs["model"] in self.fails:
+            raise self.fails[kwargs["model"]]
         text = self.texts.pop(0) if self.texts else ""
-        return NS(model="gemini-pro", usage=NS(prompt_tokens=900, completion_tokens=300),
+        return NS(model=kwargs["model"].split("/")[-1], usage=NS(prompt_tokens=900, completion_tokens=300),
                   choices=[NS(finish_reason=self.finish, message=NS(content=text, tool_calls=None))])
 
 
@@ -60,13 +64,13 @@ def fenced(obj) -> str:
 env(SIEUTINHIEU=1)
 t.ok("without 9Router: off, and the message says what is missing", not cp.enabled() and "ROUTER9_BASE_URL" in cp.why_off())
 env(SIEUTINHIEU=1, **ROUTER)
-t.ok("with 9Router: on, Gemini web by default", cp.enabled() and cp.why_off() == "" and cp.model() == "gmw/gemini-pro")
-env(**ROUTER, CLAUDE_PICK_MODEL="gmw/gemini-flash")
-t.ok("CLAUDE_PICK_MODEL picks the model", cp.model() == "gmw/gemini-flash")
-env(**ROUTER, CLAUDE_PICK_MODEL="claude-opus-5-5")
-t.ok("an old Anthropic name left in the settings falls back to the default", cp.model() == "gmw/gemini-pro")
-t.ok("no Anthropic SDK is imported any more", "anthropic" not in open(cp.__file__, encoding="utf-8").read().lower().replace(
-    "anthropic name", ""))
+t.ok("with 9Router: on, Gemini Pro and Flash by default", cp.enabled() and cp.why_off() == ""
+     and cp.main_model() == "gmw/gemini-pro" and cp.fast_model() == "gmw/gemini-flash")
+env(**ROUTER, AI_PICK_MODEL="gmw/gemini-thinking", AI_PICK_MODEL_FAST="gmw/gemini-flash-lite")
+t.ok("AI_PICK_MODEL and AI_PICK_MODEL_FAST pick them", cp.main_model() == "gmw/gemini-thinking"
+     and cp.fast_model() == "gmw/gemini-flash-lite")
+t.ok("no Anthropic SDK, no trace of the old name", all(x not in open(path, encoding="utf-8").read().lower()
+                                                       for x in ("anthropic", "claude") for path in (cp.__file__,)))
 
 # ───────────── 2. the request ─────────────
 env(**ROUTER)
@@ -74,11 +78,11 @@ r = Router(fenced(ANSWER))
 raw, meta = cp.ask("đề bài", TOOL, client=r)
 sent = r.seen[0]
 t.ok("no tools are sent (Gemini web would be skipped, and its search with it)", "tools" not in sent and "tool_choice" not in sent)
-t.ok("the model, the system, the question and the JSON Schema", sent["model"] == "gmw/gemini-pro"
+t.ok("the main model, the system, the question and the JSON Schema", sent["model"] == "gmw/gemini-pro"
      and sent["messages"][0]["role"] == "system" and "Tìm trên web" in sent["messages"][0]["content"]
      and sent["messages"][1]["content"].startswith("đề bài")
      and json.dumps(TOOL["input_schema"], ensure_ascii=False) in sent["messages"][1]["content"])
-t.ok("the JSON read from a fenced block, the meta", raw == ANSWER and meta["served_by"] == "gemini-pro"
+t.ok("the JSON read from a fenced block, the meta", raw == ANSWER and meta["served_by"] == "gemini-pro" and not meta["fallback"]
      and meta["usage"] == {"input": 900, "output": 300})
 r = Router("Tôi sẽ tìm tin trước.", json.dumps({"market_note": "x"}))
 raw, _ = cp.ask("đề", TOOL, client=r)
@@ -91,6 +95,38 @@ except cp.PickError as exc:
     t.ok("never JSON: PickError after two answers", "JSON" in str(exc) and exc.meta["model"] == "gmw/gemini-pro")
 text, _ = cp.ask("dữ kiện", None, client=Router("  • giữ kỷ luật  "))
 t.ok("the weekly review: plain text, no schema", text == "• giữ kỷ luật")
+
+QUOTA = openai.RateLimitError("quota", response=httpx.Response(429, request=REQ), body=None)
+r = Router(fenced(ANSWER), fails={"gmw/gemini-pro": QUOTA})
+raw, meta = cp.ask("đề", TOOL, client=r)
+t.ok("Pro out of quota: Flash answers in the same call, the reason kept", raw == ANSWER
+     and [x["model"] for x in r.seen] == ["gmw/gemini-pro", "gmw/gemini-flash"]
+     and meta["model"] == "gmw/gemini-flash" and meta["fallback"] == "gmw/gemini-pro lỗi (HTTP 429)", meta)
+t.ok("...and 9Router is not rested for the agents (it answered)", not fc.is_resting("router9"))
+r = Router(fenced(ANSWER), fails={"gmw/gemini-pro": openai.APITimeoutError(request=REQ)})
+raw, meta = cp.ask("đề", TOOL, client=r)
+t.ok("Pro too slow: Flash answers", meta["model"] == "gmw/gemini-flash" and "APITimeoutError" in meta["fallback"])
+r = Router("không phải JSON", fenced(ANSWER), fails={"gmw/gemini-pro": QUOTA})
+raw, meta = cp.ask("đề", TOOL, client=r)
+t.ok("the nudge goes to the model that answered", raw == ANSWER and r.seen[-1]["model"] == "gmw/gemini-flash"
+     and [x["model"] for x in r.seen] == ["gmw/gemini-pro", "gmw/gemini-flash", "gmw/gemini-flash"])
+r = Router("• ổn", fails={"gmw/gemini-flash": QUOTA})
+text, meta = cp.ask("dữ kiện", None, client=r, fast=True)
+t.ok("fast=True: Flash first, Pro when it fails", [x["model"] for x in r.seen] == ["gmw/gemini-flash", "gmw/gemini-pro"]
+     and meta["model"] == "gmw/gemini-pro" and text == "• ổn")
+try:
+    cp.ask("đề", TOOL, client=Router(fails={"gmw/gemini-pro": QUOTA, "gmw/gemini-flash": QUOTA}))
+    t.ok("both out of quota: Retry (asked again later)", False)
+except cp.Retry as exc:
+    t.ok("both out of quota: Retry (asked again later)", "429" in str(exc) or "rate" in str(exc).lower(), str(exc))
+env(**ROUTER, AI_PICK_MODEL="gmw/gemini-pro", AI_PICK_MODEL_FAST="gmw/gemini-pro")
+r = Router(fails={"gmw/gemini-pro": QUOTA})
+try:
+    cp.ask("đề", TOOL, client=r)
+except cp.Retry:
+    pass
+t.ok("the same model twice: asked once", len(r.seen) == 1)
+env(**ROUTER)
 try:
     cp.ask("x", TOOL, client=Router(error=openai.APIConnectionError(request=REQ)))
     t.ok("9Router unreachable: Retry", False)
@@ -140,7 +176,7 @@ class Store:
         return {"side": "BUY", "day": DAY, "live": True, "price": 20000, "sl": 18500, "tp1": 23000, "strength_pct": 70}
 
 
-class Evening(cp.ClaudePick):
+class Evening(cp.AiPick):
     def symbols(self):
         return ["AAA", "BBB"]
 
@@ -153,7 +189,7 @@ def bars(symbol, day):
             for d in range(1, 24)]
 
 
-env(**ROUTER, SIEUTINHIEU=1, CLAUDE_PICK_BOT=0)
+env(**ROUTER, SIEUTINHIEU=1, AI_PICK_BOT=0)
 evening_dir = DATA / "evening"
 evening_dir.mkdir()
 answer = {k: v for k, v in ANSWER.items() if k != "holdings"}
@@ -161,15 +197,16 @@ text = Evening(evening_dir, store=Store(), client=Router(fenced(answer)), bars=b
 entry = cp.PickLog(evening_dir).get(DAY)
 t.ok("the evening: recorded with the model that answered, no cost", entry["pick"]["symbol"] == "AAA"
      and entry["model"] == "gmw/gemini-pro" and entry["served_by"] == "gemini-pro" and not entry.get("pending")
+     and "fallback" not in entry
      and "cost_usd" not in entry and entry["pick"]["sources"] == ["https://cafef.vn/aaa-tang-von.chn"], entry)
-t.ok("...the message: the AI's pick and who answered", "⭐ AI chọn: " in text and "Trả lời: gemini-pro (qua 9Router)" in text
-     and "Claude" not in text and "USD" not in text, text)
+t.ok("...the message: the AI's pick and who answered", "⭐ AI chọn: " in text and "Trả lời: gmw/gemini-pro qua 9Router" in text
+     and "claude" not in text.lower() and "USD" not in text, text)
 t.ok("...the session is done (not asked again)", cp.PickLog(evening_dir).status(DAY, NOW) == "done")
 r = Router(fenced(answer))
 Evening(evening_dir, store=Store(), client=r, bars=bars, now=lambda: NOW).run(DAY)
 t.ok("...a second run only shows it", r.seen == [])
 
-env(**ROUTER, SIEUTINHIEU=1, CLAUDE_PICK_BOT=0)
+env(**ROUTER, SIEUTINHIEU=1, AI_PICK_BOT=0)
 bad_dir = DATA / "bad"
 bad_dir.mkdir()
 text = Evening(bad_dir, store=Store(), client=Router("xin lỗi", "không"), bars=bars, now=lambda: NOW).run(DAY)
@@ -178,7 +215,7 @@ t.ok("an answer that is never JSON: recorded as a failure, asked again on the ne
 text = Evening(bad_dir, store=Store(), client=Router(fenced(answer)), bars=bars, now=lambda: NOW).run(DAY)
 t.ok("...and the next run answers it", cp.PickLog(bad_dir).get(DAY)["pick"]["symbol"] == "AAA")
 
-env(**ROUTER, SIEUTINHIEU=1, CLAUDE_PICK_BOT=0)
+env(**ROUTER, SIEUTINHIEU=1, AI_PICK_BOT=0)
 retry_dir = DATA / "retry"
 retry_dir.mkdir()
 try:
@@ -196,24 +233,52 @@ t.ok("given up after the day's tries: said once, the candidates kept", "không g
 # ───────────── 5. the texts ─────────────
 note = {"level": "stop", "symbol": "HPG", "at": f"{DAY}T10:30", "rule": "⛔", "cause": "chưa rõ", "news": "chưa có tin",
         "view": "GIỮ", "reason": "r"}
-t.ok("an alert note says AI, not Claude", "AI xem cảnh báo" in cp.note_text(note) and "AI: GIỮ" in cp.note_text(note))
+t.ok("an alert note says AI", "AI xem cảnh báo" in cp.note_text(note) and "AI: GIỮ" in cp.note_text(note))
+t.ok("...and which model answered, with the hand-over", "Trả lời: gmw/gemini-pro qua 9Router (gmw/gemini-flash lỗi (HTTP 429))"
+     in cp.note_text({**note, "model": "gmw/gemini-pro", "fallback": "gmw/gemini-flash lỗi (HTTP 429)"}))
 week = {"week": "2026-W43", "day": DAY, "facts": ["f"], "text": "• ổn"}
-t.ok("a weekly review says AI", "Nhận xét của AI:" in cp.week_text(week) and "Claude" not in cp.week_text(week))
+t.ok("a weekly review says AI", "Nhận xét của AI:" in cp.week_text(week))
 
 # ───────────── 6. the page ─────────────
-from vnbot import claude_pick_web as cpw  # noqa: E402
+from vnbot import ai_pick_web as cpw  # noqa: E402
 
 env(**ROUTER, SIEUTINHIEU=1)
-body = cpw.page_body(cp.ClaudePick(evening_dir, now=lambda: NOW))
+body = cpw.page_body(cp.AiPick(evening_dir, now=lambda: NOW))
 t.ok("the page leads with the pick sheet: the code pressed as chosen", '<section class="card sheet"' in body
      and 'id="pick">AAA</h2><span class="stamp">Đã chọn</span>' in body
      and body.index("sheet") < body.index("Kết quả đo tới nay"))
-t.ok("...says the model that answers now and the one that answered", "Trả lời: gmw/gemini-pro qua 9Router" in body
-     and "gemini-pro qua 9Router" in body and "Claude" not in body and "USD" not in body)
+t.ok("...says the models that answer now and the one that answered",
+     "Trả lời: gmw/gemini-pro, khi lỗi chuyển sang gmw/gemini-flash (qua 9Router)" in body
+     and "<dd>gmw/gemini-pro qua 9Router</dd>" in body and "claude" not in body.lower() and "USD" not in body)
 t.ok("...the candidates restack on a phone, every cell labelled", '<table class="stack">' in body and 'data-label="Giá"' in body)
 t.ok("...no dotted meta strings or dash placeholders", " · " not in body and "—" not in body)
 t.ok("...the cited source links to the news site", 'href="https://cafef.vn/aaa-tang-von.chn"' in body)
-body = cpw.page_body(cp.ClaudePick(retry_dir, now=lambda: NOW))
+body = cpw.page_body(cp.AiPick(retry_dir, now=lambda: NOW))
 t.ok("a failed session: the error on the sheet, no stamp", "không có lựa chọn" in body and 'class="stamp"' not in body)
+
+# ───────────── 7. a server that ran it under its old name ─────────────
+from vnbot import settings as settings_module  # noqa: E402
+
+old_dir = DATA / "old"
+old_dir.mkdir()
+OLD = "CLAUDE" + "_PICK"
+(old_dir / ("claude" + "_pick.json")).write_text(json.dumps([{"day": DAY, "candidates": []}]), encoding="utf-8")
+(old_dir / ("claude" + "_notes.json")).write_text("[]", encoding="utf-8")
+(old_dir / "settings.json").write_text(json.dumps({OLD + "_TIME": "16:00", OLD + "_MODEL": "claude-opus-5-5",
+                                                   OLD + "_EFFORT": "high", "WATCHLIST": "FPT"}), encoding="utf-8")
+env(**{OLD + "_ALERTS": "3", OLD + "_MODEL": "claude-opus-5-5"})
+settings_module._carry_over_pick(old_dir)
+saved = json.loads((old_dir / "settings.json").read_text(encoding="utf-8"))
+t.ok("the measured sessions and notes are kept under the new names", cp.PickLog(old_dir).get(DAY) is not None
+     and (old_dir / "ai_notes.json").exists() and not (old_dir / ("claude" + "_pick.json")).exists())
+t.ok("saved settings renamed; an Anthropic model dropped; the rest untouched", saved.get("AI_PICK_TIME") == "16:00"
+     and "AI_PICK_MODEL" not in saved and saved.get("WATCHLIST") == "FPT" and not any(k.startswith(OLD) for k in saved), saved)
+t.ok("environment variables carried over, an Anthropic model not", os.environ.get("AI_PICK_ALERTS") == "3"
+     and "AI_PICK_MODEL" not in os.environ and cp.alerts_per_day() == 3 and cp.main_model() == "gmw/gemini-pro")
+os.environ.pop(OLD + "_ALERTS")
+os.environ.pop("AI_PICK_ALERTS")
+os.environ.pop(OLD + "_MODEL")
+settings_module._carry_over_pick(old_dir)
+t.ok("a second start changes nothing", json.loads((old_dir / "settings.json").read_text(encoding="utf-8")) == saved)
 
 t.done()
