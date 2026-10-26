@@ -1118,11 +1118,21 @@ def _views_lines(entry: dict) -> list[str]:
     return out
 
 
+# A record of v1.7.0 (``via`` set) was answered through a stand-in, without a web search; its
+# ``fallback`` names the setup of then and is not shown.
+OLD_RECORD = "bản cũ trước v1.8, không tìm tin trên web"
+
+
+def why_model(item: dict) -> str:
+    """Why the model that answered did (the other failed), "" when it was the first asked."""
+    return OLD_RECORD if item.get("via") else str(item.get("fallback") or "")
+
+
 def _model_line(item: dict) -> str:
     """"Trả lời: gmw/gemini-flash qua 9Router (gmw/gemini-pro lỗi (HTTP 429))"."""
     if not item.get("model"):
         return ""
-    return f"Trả lời: {item['model']} qua 9Router" + (f" ({item['fallback']})" if item.get("fallback") else "")
+    return f"Trả lời: {item['model']} qua 9Router" + (f" ({why_model(item)})" if why_model(item) else "")
 
 
 def entry_text(entry: dict, st: dict | None = None) -> str:

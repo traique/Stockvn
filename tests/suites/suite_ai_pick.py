@@ -239,6 +239,12 @@ t.ok("...and which model answered, with the hand-over", "Trả lời: gmw/gemini
 week = {"week": "2026-W43", "day": DAY, "facts": ["f"], "text": "• ổn"}
 t.ok("a weekly review says AI", "Nhận xét của AI:" in cp.week_text(week))
 
+OLD_ENTRY = {"day": DAY, "at": f"{DAY}T15:52", "candidates": [], "note": "x", "model": "auto", "served_by": "9Router · auto",
+             "via": "router9", "fallback": "chưa có " + "ANTHROPIC" + "_API_KEY"}
+t.ok("a record of the old version: no word of its old setup, said as old",
+     "Trả lời: auto qua 9Router (bản cũ trước v1.8, không tìm tin trên web)" in cp.entry_text(OLD_ENTRY)
+     and "ANTHROPIC" not in cp.entry_text(OLD_ENTRY) and "_" not in cp.entry_text(OLD_ENTRY).split("Trả lời:")[1])
+
 # ───────────── 6. the page ─────────────
 from vnbot import ai_pick_web as cpw  # noqa: E402
 

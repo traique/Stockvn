@@ -83,7 +83,7 @@ def _who(entry: dict) -> str:
     """The model that answered a record, on 9Router, and why the other did not."""
     if not entry.get("model"):
         return "Chưa gọi AI"
-    return f'{_e(entry["model"])} qua 9Router' + (f' ({_e(entry["fallback"])})' if entry.get("fallback") else "")
+    return f'{_e(entry["model"])} qua 9Router' + (f' ({_e(cp.why_model(entry))})' if cp.why_model(entry) else "")
 
 
 def _route() -> str:

@@ -24,13 +24,16 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.10.0"
+VERSION = "v1.10.1"
 RELEASED = "2026-10-26"
-RELEASE_BUILD = "f0a1ff6"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "cf53298"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.10.1", "2026-10-26", (
+        "AI chọn bóng: bản ghi của bản cũ (trước v1.8) ghi rõ là bản cũ, không tìm tin, thay cho lý do cũ dễ hiểu nhầm",
+    )),
     ("v1.10.0", "2026-10-26", (
         "Chạy tay AI chọn bóng (nút trên web, /chonbong chay hoặc ngay) luôn hỏi lại với dữ liệu mới nhất",
         "Trong phiên: giá khớp hôm nay, mã bot ước tính vừa qua mức MUA; kết quả tạm, 15:50 hỏi lại",
