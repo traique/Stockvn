@@ -56,6 +56,9 @@ PUBLIC_URL=https://<ten-server>.botkeep...   # địa chỉ Botkeep cấp
 # Telegram
 TELEGRAM_TOKEN=123456:ABC...
 TELEGRAM_ALLOWED_IDS=        # để trống lúc đầu, xem bước 4
+
+# Tuỳ chọn: Claude chọn bóng (cần thêm SIEUTINHIEU=1), xem mục "Claude chọn bóng"
+# ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 5. Bấm **Start**. Log khởi động cần có:
@@ -108,6 +111,8 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/stvquet` · `/stvsang` | Quét ngay danh mục Tài sản + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
 | `/stvthitruong` | Bot quét 300 mã thanh khoản cao nhất thị trường: mã đã qua mức đổi chiều (trong phiên: theo giá khớp; ngoài giờ: theo giá đóng cửa), so với phần trang cho xem miễn phí, và kết quả đối chiếu các phiên trước |
 | `/stvdoichieu` | Đổi chiều trong phiên do bot ước tính cho danh mục + watchlist: mã đã qua mức đổi chiều, rồi mã sát mức (cách ≤ 2%). Ngoài giờ: mức giá đóng cửa sẽ làm từng mã đổi chiều ở phiên tới |
+| `/claude` · `/claude lichsu` · `/claude tuan` | Claude chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`) |
+| `/claude chay` | Chạy ngay cho phiên gần nhất (tốn phí API; mỗi phiên chỉ một lần) |
 | `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
 | `/id` | Telegram id của bạn |
 
@@ -129,7 +134,11 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 | `/tsthuong FPT 15` · `/tscotuc FPT 2000 [số cp]` | Cổ phiếu thưởng đã về · cổ tức tiền đã về (đồng/cp; số cp mặc định lấy từ quyền chờ về hoặc số đang giữ) |
 | `/tsnap 50000000` · `/tsrut 10000000` | Nạp, rút tiền (thay đổi vốn gốc) |
 | `/tstien 1268895` | Đặt tiền mặt bằng số dư thật trên app CTCK (một dòng điều chỉnh) |
-| `/tscatlo FPT 52000 [60000]` · `/tscatlo FPT xoa` | Mức cắt lỗ [và mục tiêu] của anh · xoá |
+| `/tscatlo FPT 52000 [60000]` · `/tscatlo FPT xoa` | Mức cắt lỗ [và mục tiêu] của anh · xoá. Hạ mức cắt lỗ thì bot ghi lại và chấm sau 5/10/20 phiên (không bao giờ hạ im lặng) |
+| `/tskiemtra FPT [GIÁ] [KL] [CẮTLỖ]` | **Kiểm tra trước khi mua**: lệnh có nằm trong ngân sách rủi ro không (2% tài sản một lệnh, mọi cắt lỗ cộng lại ≤ 6%, một mã ≤ 30%); ⛔ bình quân giá xuống, mua khi trang BÁN, chưa có cắt lỗ; ⚠️ mua đuổi > 5% giá tín hiệu, cắt lỗ xa hơn 16,4% (lệnh lỗ nặng nhất của quy tắc). Bot không khuyên mua, chỉ tính |
+| `/tsgiu FPT 52000 lý do ít nhất ba từ` | Giữ một mã dù bot báo ⛔/🔴: bắt buộc có cắt lỗ dưới giá hiện tại và lý do; bot ghi lại, báo ⛔ khi thủng mức đó, chấm sau 5/10/20 phiên |
+| `/tssan 60000000 [lý do]` · `/tssan` | Sàn tài sản để bot nhắc khi tài sản 15:30 xuống dưới (mặc định 60% vốn gốc); chỉ nhắc một lần mỗi đợt, không khoá lệnh · xem |
+| `/tsmuctieu 2026-12-24` · `/tsmuctieu xoa` · `/tsmuctieu` | Mốc hoàn vốn anh đặt; bot đặt số đo cạnh mốc (không dự báo) ở báo cáo thứ Sáu, bản tin sáng thứ Hai, trang web · về mặc định · xem |
 | `/tsnhatky [n]` · `/tshuy [số]` | Nhật ký (20 dòng) · huỷ dòng cuối hoặc dòng số đó |
 | `/tsbaocao` | Báo cáo ngay (như bản 15:30) |
 | `/tsnguong 25 40` | Ngưỡng tỷ trọng một mã: theo dõi, nguy hiểm (%) |
@@ -139,13 +148,15 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 **Tab DANH MỤC (`/taisan`, cần mật khẩu web)**, bố cục như trang Danh mục của app cũ, từ trên xuống:
 - **Lời chào** và biến động phiên gần nhất (không tính nạp/rút), số phiên tăng/giảm liên tiếp, số việc cần làm.
 - **Cảnh báo tỷ trọng**: mã vượt ngưỡng, bấm × để ẩn trong phiên; nút xuất **XLSX** và **CSV**.
-- **Tổng tài sản**: lãi/lỗ so với vốn gốc, các ô tiền mặt, giá trị thị trường, lãi/lỗ đã chốt và đang mở, cổ tức, quyền chờ về, VN-Index.
-- **Việc cần làm phiên tới** (chỉ hiện khi có).
+- **Tổng tài sản**: lãi/lỗ so với vốn gốc, các ô tiền mặt, giá trị thị trường, lãi/lỗ đã chốt và đang mở, cổ tức, quyền chờ về, **Rủi ro đang mở** (mọi cắt lỗ chạm thì mất bao nhiêu, % tài sản so với trần 6%, mã chưa có cắt lỗ), VN-Index.
+- **Mục tiêu hoàn vốn**: số học trên số đo (cần bao nhiêu %, VNINDEX phải lên đâu, quy tắc đo được cho bao nhiêu mỗi lệnh), đặt mốc ngay trên thẻ. Không dự báo.
+- **Việc cần làm phiên tới** (chỉ hiện khi có): các việc treo ⏳ (⛔/🔴 chưa xử lý, số phiên treo, cái giá của chần chừ), ❗ mã thiếu cắt lỗ, 🎯, ⚠️.
+- **Thước kỷ luật**: tài sản thực và nếu bán đúng ⛔/🔴, cảnh báo xử lý trong 1 phiên, lệnh mua theo/ngoài quy tắc, bảng kết quả theo nhóm (giá 10 phiên sau). Tính ở báo cáo 15:30, đo bằng code.
 - **Tỷ trọng vị thế** và **Tối ưu danh mục**: điểm đa dạng hoá, biến động năm, các thẻ Tỷ trọng (vạch cân bằng rủi ro), Ngành, Tương quan.
 - **Hiệu suất danh mục**: 7N/1T/3T/6T/1N/Tất cả; bật **So sánh VN-Index** để xem % theo đơn vị quỹ, tắt để xem tổng tài sản và vốn gốc theo đồng; chạm, di chuột hoặc dùng phím mũi tên để xem từng ngày.
-- **Mã đang nắm giữ**, mỗi mã một thẻ: tên công ty, số lô và số lượng, biểu đồ giá 3 tháng, giá hiện tại và thay đổi so với phiên trước, PnL, vốn trung bình, cắt lỗ/mục tiêu, cổ phiếu chờ T+2, tín hiệu Siêu tín hiệu, tổng mua và giá trị hiện tại, nút **Đọc tin tức** và **Xem lệnh** (nhật ký lọc theo mã). Nút **Làm mới giá** lấy lại giá khớp và biểu đồ nhỏ.
+- **Mã đang nắm giữ**, mỗi mã một thẻ: tên công ty, số lô và số lượng, biểu đồ giá 3 tháng, giá hiện tại và thay đổi so với phiên trước, PnL, vốn trung bình, cắt lỗ/mục tiêu, **nếu chạm cắt lỗ mất bao nhiêu** (hoặc «chưa có cắt lỗ: không giới hạn»), việc treo ⛔/🔴 hay «giữ có lý do», 🟠 trong ngày, cổ phiếu chờ T+2, tín hiệu Siêu tín hiệu, tổng mua và giá trị hiện tại, nút **Đọc tin tức** và **Xem lệnh** (nhật ký lọc theo mã). Nút **Làm mới giá** lấy lại giá khớp và biểu đồ nhỏ.
 - **Quyền chờ về** (nút ghi nhận khi về) và quyền sắp tới.
-- Các mục thu gọn: Chi tiết danh mục, Thêm giao dịch, Nhật ký giao dịch (lọc theo loại và mã, có nút huỷ), Nạp/rút/cổ tức/điều chỉnh, Cắt lỗ & mục tiêu, Nhận xét & chiến lược, Báo cáo cuối ngày, Nhập file Excel, Ngưỡng cảnh báo tỷ trọng.
+- Các mục thu gọn: Chi tiết danh mục, Thêm giao dịch (nút **Kiểm tra lệnh mua** = `/tskiemtra`, không ghi gì vào sổ), Nhật ký giao dịch (lọc theo loại và mã, có nút huỷ), Nạp/rút/cổ tức/điều chỉnh, Cắt lỗ & mục tiêu, Nhận xét & chiến lược, Báo cáo cuối ngày, Nhập file Excel, Ngưỡng cảnh báo tỷ trọng.
   - **Nhận xét & chiến lược**: tín hiệu Siêu tín hiệu của từng mã, nút Quant Engine và AI phản biện, kết quả cảnh báo bán.
   - **Báo cáo cuối ngày**: bản gửi lúc 15:30, xem bản mới nhất, nút gửi ngay qua Telegram và Zoom.
   - **Nhập file Excel**: xem trước rồi xác nhận, tối đa 1 MB.
@@ -155,9 +166,17 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 
 **Quyền chờ về:** bot đọc lịch sự kiện (VCI) của các mã đã giữ trong 120 ngày. Cổ tức tiền và cổ phiếu thưởng đã qua ngày GDKHQ mà anh chưa ghi được tính vào tổng tài sản thành dòng riêng (cổ tức ước tính sau thuế 5%); ghi `/tsthuong` hoặc `/tscotuc` khi về thì dòng chờ tự chuyển thành tài sản thật. Quyền mua phát hành thêm không tính.
 
-**Báo cáo 15:30** (Telegram và Zoom, các ngày giao dịch; nguồn giá chưa có phiên thì chờ tới 18:00): tổng tài sản, hôm nay và từ đầu so với VNINDEX; **việc cần làm phiên tới** (⛔ đóng cửa dưới cắt lỗ, 🔴 Siêu tín hiệu BÁN, 🎯 chạm mục tiêu, ⚠️ tỷ trọng quá ngưỡng, kèm số cổ phiếu bán được từ sáng/chiều); từng mã; phân bổ; quyền chờ về và sắp tới (14 ngày); thứ Sáu thêm kết quả cảnh báo. Trước khi gửi bot hỏi lại tín hiệu ngày của các mã đang giữ.
+**Báo cáo 15:30** (Telegram và Zoom, các ngày giao dịch; nguồn giá chưa có phiên thì chờ tới 18:00): tổng tài sản, hôm nay và từ đầu so với VNINDEX, dòng **rủi ro đang mở**; 📌 mức cắt lỗ vừa lấy theo kế hoạch của trang (mã chưa có); **việc cần làm phiên tới**: mỗi ⛔ (đóng cửa dưới cắt lỗ) và 🔴 (trang đã chốt BÁN) là một **việc treo có hạn** (bán phiên sau, ưu tiên ATO; số phiên đã treo; từ phiên thứ hai: cái giá của chần chừ bằng đồng so với giá phiên sau cảnh báo; hai lối ra: `/tsban` hoặc `/tsgiu`), ❗ mã nặng chưa có cắt lỗ, 🟠 dấu hiệu sớm trong phiên mà trang không chốt (chỉ theo dõi), 🎯, ⚠️; từng mã; phân bổ; 🛡️ **rủi ro kế hoạch** (từng cắt lỗ chạm thì mất bao nhiêu, tổng, tài sản còn lại và % cần hoàn vốn khi đó, sàn); quyền chờ về và sắp tới (14 ngày). **Thứ Sáu** thêm kết quả cảnh báo, 📏 **thước kỷ luật** và 🎯 **mục tiêu hoàn vốn**. Trước khi gửi bot hỏi lại tín hiệu ngày của các mã đang giữ. Báo cáo không bao giờ nói đến phí hay thuế: giá đúng như anh nhập. Chỉ bản chạy đúng lịch 15:30 mới ghi trạng thái (mức cắt lỗ lấy theo trang, việc treo, sàn, thước kỷ luật); `/tsbaocao` và bản trên web trong phiên chỉ đọc lại, không mở việc treo bằng giá đang khớp.
 
-**Cảnh báo bán trong phiên** (lượt quét Siêu tín hiệu và cảnh báo trong phiên, ghi rõ "Tài sản"): ⛔ Khẩn giá thủng cắt lỗ · 🔴 Mạnh trang đã chốt BÁN · 🟠 Sớm đổi chiều trong phiên (chưa chốt) · 🎯 Chốt lời chạm mục tiêu. Mỗi cảnh báo được ghi lại và chấm **giá sau 5 và 10 phiên** (trang web và báo cáo thứ Sáu): giá thấp hơn nghĩa là bán theo cảnh báo là đúng.
+**Cảnh báo bán trong phiên** (lượt quét Siêu tín hiệu và cảnh báo trong phiên, ghi rõ "Tài sản"): ⛔ Khẩn giá thủng cắt lỗ · 🔴 Mạnh trang đã chốt BÁN · 🎯 Chốt lời chạm mục tiêu. 🟠 Sớm (đổi chiều trong phiên, chưa chốt; của trang hoặc bot ước tính) **không đẩy nữa** từ v1.5.0 (đo được: bán sớm theo 🟠 không hơn chờ trang chốt, đúng 48%): vẫn ghi lại, hiện ở báo cáo 15:30, trang web và `/stvquet`; `INTRADAY_EARLY=1` bật lại. Ngày hạn của một việc treo, **14:20** bot nhắc một lần nếu sổ chưa có lệnh bán (không phụ thuộc công tắc cảnh báo trong phiên). Mỗi cảnh báo được ghi lại và chấm **giá sau 5 và 10 phiên** (trang web và báo cáo thứ Sáu): giá thấp hơn nghĩa là bán theo cảnh báo là đúng. Chân mọi bản đẩy trong phiên: *Bot im lặng = không có việc cần làm.*
+
+**Kỷ luật (v1.5.0, `vnbot/kyluat.py`)** - khoản lỗ đo được (24/10/2026) đến từ mua ngược tín hiệu BÁN hoặc cao hơn giá tín hiệu, giữ qua 🔴 của trang và dồn một mã quá nặng, không phải từ việc chọn mã (12 lệnh đã đóng thắng 8). Lớp này bịt đúng các lỗ đó quanh sổ tiền thật, **mọi quy tắc đều có số đo, không quy tắc nào là lệnh**:
+- Cắt lỗ: mã chưa có thì lấy mức kế hoạch của trang (khi trang MUA và mức dưới giá đóng cửa); mức đã lưu không bao giờ tự hạ hay nâng (mức mới của trang chỉ ghi bên cạnh); anh hạ tay thì bot ghi lại, nói khoản lỗ-nếu-chạm tăng bao nhiêu và chấm sau 5/10/20 phiên.
+- Rủi ro đang mở = tổng (giá − cắt lỗ) × khối lượng; 🟢 ≤ 5%, 🟡 đến 8%, 🔴 trên 8% hoặc có mã nặng (≥ 5% tài sản) chưa có cắt lỗ. Sàn tài sản `/tssan` chỉ nhắc và ghi (quy tắc sàn chưa được đo).
+- Kiểm tra trước khi mua `/tskiemtra` và thẻ 📏 trên mọi `/tsmua`: sổ không bao giờ từ chối một lệnh, chỉ gắn nhãn (✅ trong ngân sách / ⚠️ có lưu ý / ⛔ ngoài quy tắc) để sau này so kết quả các nhóm bằng giá 10 và 20 phiên sau. Bán khi trang vẫn MUA và chưa có ⛔/🔴 được gắn «bán trước tín hiệu», cũng để đo.
+- Việc treo: mỗi ⛔/🔴 có hạn bán là phiên sau (hoặc phiên đầu tiên bán được theo T+2 với cổ phiếu mới mua); đóng khi anh bán, khi anh giữ có lý do (`/tsgiu`, bắt buộc cắt lỗ), hoặc tự rút khi trang MUA lại; huỷ lệnh bán bằng `/tshuy` thì việc treo mở lại. Thước kỷ luật thứ Sáu đếm: bán trong 1 phiên / giữ có lý do / bỏ qua, và tài sản sẽ ra sao nếu mọi ⛔/🔴 được bán ở phiên sau (giá đóng cửa phiên sau, gần đúng).
+- Mục tiêu hoàn vốn: số học trên số đo. Ví dụ 24/10/2026: cần +38%; VNINDEX 2022-10/2026 **chưa có cửa sổ 2 tháng nào** đạt mức đó (1.152 cửa sổ, tốt nhất +23,5%), 6 tháng 1,0% số cửa sổ, 12 tháng 9,6%; quy tắc ⛔/🔴 đo được +1,14%/lệnh (582 lệnh) nên mục tiêu 2 tháng đòi gấp ~10 lần mức đo được, hoàn vốn với mức đo được là việc ~20 tháng. Bot nói thẳng điều đó mỗi tuần thay vì «cần +x%/phiên». Chi tiết: `docs/backtest_2026-10-24/README.md`.
+- **Bot không đặt lệnh; không khuyên margin hay bình quân giá xuống; không trừ phí/thuế vào giá anh nhập.** Mọi ý kiến của Claude vẫn chỉ là bóng để đo (xem *Claude chọn bóng*).
 
 **Backtest các quy tắc bán** (23/10/2026, `docs/backtest_2026-10-23/thoat_tai_san.md`; 39 mã: 13 mã anh từng giao dịch và VN30, 582 lần MUA của trang): bán khi ⛔ **hoặc** 🔴 (cách bot đang báo) cho lãi trung bình như chỉ chờ trang BÁN (+1,1% so với +1,2% mỗi lệnh) nhưng số lệnh lỗ quá 10% giảm từ 31 xuống 5; trên 13 mã của anh đây là quy tắc tốt nhất (+0,6%/lệnh). Bán sớm theo 🟠 không tốt hơn chờ trang chốt (đúng 48% số lần), nên cảnh báo 🟠 khuyên theo dõi, chỉ bán sớm khi sát mức cắt lỗ. Giữ tới khi thủng cắt lỗ bắt được vài xu hướng rất lớn (VIC, VHM) nhưng thắng 23%, lỗ trung bình −7%, và thua trên 13 mã của anh.
 
@@ -165,16 +184,14 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 
 ### Trang web
 
-Giao diện theo app danh mục LCTA của anh: nền lavender, thẻ trắng bo tròn, tiêu đề chữ đậm in hoa, có giao diện sáng và tối. Trang dựng sẵn cho điện thoại (từ màn 320 px), lên máy tính thì chia hai cột. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở cả hai giao diện.
+Giao diện sổ cái không màu (v1.6.0, thiết kế theo bộ quy tắc ui-craft): nền xanh xám nhạt, thẻ trắng viền mỏng, không bóng đổ hay chuyển màu; tiền và số đếm in bằng mực đen, một màu xanh duy nhất cho đường danh mục trên biểu đồ, màu xanh lá/đỏ chỉ dùng ở con số lãi/lỗ. Một kiểu chữ (Geist, có bộ tiếng Việt), số dạng bảng. Thanh bên trái liệt kê mọi trang; trên điện thoại thanh này gập thành thanh 48 px với nút menu mở trang chọn toàn màn hình (hoạt động cả khi tắt JavaScript). Có giao diện sáng và tối. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở mọi trang, cả hai giao diện, từ màn 390 px.
 
-- **Thanh đầu trang:** ngày (thứ, dương lịch, âm lịch) và trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành). Menu gồm **HOME** (phân tích), **DANH MỤC** (tài sản tiền thật) và **TIỆN ÍCH** (AI & cảnh báo, Bot giao dịch, Phiên bản, Cấu hình Zoom).
-- **HOME** (`/`):
-  - **Phân tích đầy đủ**: xếp hàng như `/phantich`; trang tự tải lại đến khi xong.
-  - **Chỉ quyết định hệ thống**: như `/nhanh`.
-  - **Theo dõi hằng ngày**: sửa danh sách watchlist.
-  - Bảng **Nhà cung cấp AI**: thứ tự dự phòng và ai đang nghỉ vì lỗi/quota.
-- **DANH MỤC** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
-- **Bot giao dịch** (`/bot`, trong Tiện ích): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
+- **Thanh bên:** **Tổng quan** (`/`), **Danh mục** (`/taisan`); nhóm *Công cụ*: AI & cảnh báo, Claude chọn bóng, Bot giao dịch; nhóm *Hệ thống*: **Cài đặt** (`/caidat`), Cấu hình Zoom, Phiên bản. Dưới cùng: ngày (thứ, dương lịch, âm lịch), trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành).
+- **Tổng quan** (`/`): dải số đầu trang (lượt AI, thị trường, cảnh báo, rổ sàng lọc), phân tích một mã (AI phản biện, quyết định định lượng, phân tích chuyên sâu), lượt gần đây, ba tài khoản ảo, watchlist, nhà cung cấp AI.
+- **Danh mục** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
+- **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, Claude chọn bóng, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, Anthropic, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
+- **Claude chọn bóng** (`/claude`): xem mục **Claude chọn bóng**.
+- **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
 
 ### Báo cáo tự động
 
@@ -190,6 +207,7 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 
    Mã khác muốn AI xem thì gửi `/phanbien MÃ` (1 lượt) hoặc `/phantich MÃ` (đầy đủ).
 3. **Báo cáo Tài sản** (danh mục tiền thật), các ngày giao dịch lúc **15:30**, gửi Telegram và Zoom; chạy riêng, không phụ thuộc `TRADE_MODE` hay `SIEUTINHIEU`. Xem mục **Tài sản**.
+4. **Claude chọn bóng** (nếu có `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`), các ngày giao dịch lúc `CLAUDE_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **Claude chọn bóng**.
 
 - **Ngày lễ:** bot giao dịch chỉ xử lý những phiên VNINDEX thực sự có nến, nên ngày lễ tự bỏ qua; phân tích watchlist cũng bỏ qua ngày lễ khi chạy sau 15:05.
 - **Chạy bù:** mỗi lần chạy (kể cả lúc server khởi động), bot xử lý lần lượt mọi phiên bị lỡ từ phiên cuối đã xử lý, mỗi phiên chỉ dùng dữ liệu tới phiên đó. Bù tối đa 20 phiên; phiên cũ hơn bị bỏ qua và lệnh chờ của chúng bị huỷ (báo cáo có ghi).
@@ -240,10 +258,34 @@ Ba lịch chạy độc lập (giờ Việt Nam):
     - **Sau 15:15**, khi trang đã chốt: nhắn bản đối chiếu. Bot (300 mã) và trang (toàn thị trường, tính cả mã đổi chiều trong phiên rồi quay lại) không cùng phạm vi, nên chỉ so được đúng-sai trên các mã anh theo dõi (trang có tín hiệu từng mã): bot đúng bao nhiêu tín hiệu của trang, báo thừa, báo sót, trạng thái khớp bao nhiêu mã. Kết quả cộng dồn qua các phiên (lưu `data/external/market_compare.json`).
     - Thử thật ngày 22/10: bot thấy 13 mã sang MUA, 2 mã sang BÁN trong 300 mã. Trên 60 mã watchlist, trang chốt 4 MUA và bot đúng cả 4, không báo thừa; trạng thái khớp 60/60.
     - Xem: `/stvthitruong`. Tắt: `STV_MARKET=0`. Đổi số mã: `STV_MARKET_SIZE` (50-500).
-- **Báo bán cho danh mục Tài sản:** từng lượt quét ở trên. Khi trang có tín hiệu **BÁN** cho một mã anh đang giữ, bot nhắn Zoom (Telegram dự phòng): 🔴 Mạnh khi trang đã chốt, 🟠 Sớm khi mới đổi chiều trong phiên (của trang hoặc bot ước tính), giá hiện tại, lãi/lỗ theo giá vốn, khối lượng bán được (tính T+2); tín hiệu trong phiên được ghi rõ "có thể đổi khi đóng cửa". Mỗi tín hiệu chỉ báo một lần (tín hiệu trong phiên được báo lại một lần khi chốt lúc đóng cửa); không lấy được tín hiệu thì bot báo một lần trong ngày. Quét ngay: `/stvquet`. Cảnh báo cắt lỗ/mục tiêu trong phiên vẫn như trước.
+- **Báo bán cho danh mục Tài sản:** từng lượt quét ở trên. Khi trang có tín hiệu **BÁN** cho một mã anh đang giữ, bot nhắn Zoom (Telegram dự phòng): 🔴 Mạnh khi trang đã chốt, giá hiện tại, lãi/lỗ theo giá vốn, khối lượng bán được (tính T+2). 🟠 Sớm (mới đổi chiều trong phiên, của trang hoặc bot ước tính) từ v1.5.0 chỉ được ghi lại, không đẩy (`INTRADAY_EARLY=1` để đẩy như cũ, kèm "có thể đổi khi đóng cửa"); tín hiệu được trang chốt lúc đóng cửa vẫn đẩy 🔴. Mỗi tín hiệu chỉ báo một lần; không lấy được tín hiệu thì bot báo một lần trong ngày. Quét ngay: `/stvquet` (vẫn hiện 🟠). Cảnh báo cắt lỗ/mục tiêu trong phiên vẫn như trước.
 - **Lãi/lỗ của danh mục Tài sản** (`/ts`, `/stv`, bản tin sáng): trong giờ giao dịch theo giá khớp mới nhất, ngoài giờ theo giá đóng cửa; tính theo đúng giá anh nhập (giá mua đã gồm phí do anh cộng vào, giá bán không trừ phí/thuế). Sổ ảo so sánh vẫn tính phí và thuế như các sổ của bot.
 - **Tin nhắn dễ đọc trên điện thoại:** chia mục có biểu tượng (📊 toàn thị trường, 👀 watchlist, 💼 tài khoản thật), mỗi mã một dòng, chi tiết (vùng vào, mục tiêu, cắt lỗ) ở dòng thụt vào bên dưới.
 - **`/stv`**: tổng quan - dòng Tài sản của anh, sổ ảo, lợi nhuận của từng sổ so với các sổ của bot. **`/stvdanhmuc`**: từng mã của sổ ảo so sánh. **`/stv MÃ`**: tín hiệu của một mã và lịch sử của nó tính lại hai cách - theo giá tín hiệu (giá đóng cửa ngày phát, chưa phí) và làm được thật (mở cửa phiên sau, có phí). Lịch sử cũ của trang được tạo lại hàng loạt (backtest), nên chỉ sổ ảo chạy từ hôm bật mới là phép so sánh công bằng.
+
+### Claude chọn bóng (tuỳ chọn, cần API của Claude)
+
+Câu hỏi: dùng Claude đọc các lệnh MUA và danh mục thì có chọn tốt hơn, có giúp quyết định đúng lúc hơn không? Không ai biết trước, và **không backtest được**: Claude đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**. **Mọi ý kiến của Claude không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào; quy tắc ⛔/🔴 vẫn là quy tắc chính.
+
+- **Bật:** đặt `ANTHROPIC_API_KEY` (tạo tại platform.claude.com, nên đặt luôn hạn mức chi tiêu ở đó) và `SIEUTINHIEU=1`, rồi khởi động lại.
+- **Mỗi phiên lúc `CLAUDE_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08), một lượt gọi Claude:
+  1. **Ứng viên:** các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), mạnh nhất trước; rồi tới **các mã bot ước tính vừa đổi sang MUA** trong 300 mã thanh khoản cao nhất (cùng cách tính với trang, khớp ~88% ngày đổi chiều; tắt bằng `CLAUDE_PICK_BOT=0`), tối đa 25 mã. Nhờ vậy gần như phiên nào cũng có nhiều lệnh để chọn.
+  2. **Danh mục Tài sản:** từng mã đang giữ với khối lượng, giá vốn đúng như anh nhập (đã gồm phí, bot không trừ gì), giá đóng cửa, lãi/lỗ, tỷ trọng, cắt lỗ/mục tiêu, trạng thái của trang và **quy tắc đang báo gì** (⛔ thủng cắt lỗ hoặc 🔴 trang BÁN → BÁN; còn lại GIỮ).
+  3. Kèm số liệu code tính từ giá đóng cửa (thay đổi 1/20/60 phiên, khoảng cách tới TB20/50/200, đỉnh 52 tuần, giá trị giao dịch, khối lượng) và VNINDEX. Claude không tự đưa ra giá.
+  4. Claude tìm tin (tối đa `CLAUDE_PICK_SEARCHES` lượt, chỉ trên CafeF, Vietstock, VnExpress, Tin nhanh chứng khoán, VnEconomy, Báo Đầu tư, Người quan sát, HOSE, HNX, UBCKNN): phát hành thêm, cổ đông lớn mua bán, bị cảnh báo/kiểm soát, kết quả kinh doanh, pháp lý, ngày GDKHQ.
+  5. Claude trả lời qua một biểu mẫu cố định: **một mã chọn** (hoặc không chọn), **các mã nên tránh**, **xếp hạng mọi mã**, và **ý kiến GIỮ / CÂN NHẮC BÁN cho từng mã đang giữ**, kèm lý do và nguồn. Mã ngoài danh sách bị loại; nguồn chỉ được giữ khi đúng là trang Claude đã tìm thấy. Claude được dặn không khuyên mua thêm mã đang lỗ để bình quân giá.
+  6. Bot nhắn Telegram và Zoom, ghi vào `data/claude_pick.json`. Không có lệnh MUA mới nhưng có danh mục thì Claude chỉ xem danh mục; không có cả hai thì không gọi Claude.
+- **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ** (trong phiên hoặc sau giờ đóng cửa): ngay sau cảnh báo của bot, Claude tìm tin của mã đó (tối đa 3 lượt), cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `CLAUDE_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt), mỗi cảnh báo một lần. Cảnh báo của bot vẫn gửi ngay, không chờ Claude.
+- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi và lúc đó trang đang MUA hay BÁN, mua cao hơn giá tín hiệu bao nhiêu; các cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa; tài sản cuối tuần), Claude viết vài dòng nhận xét về kỷ luật và một việc cho tuần tới. Tắt: `CLAUDE_PICK_WEEKLY=0`. Xem lại: `/claude tuan`.
+- **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã Claude chọn và mã Claude bảo tránh), chưa trừ phí và thuế (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh):
+  - **Sau 10 phiên** (cách đo chính, có kết quả sau 2 tuần): mua ở giá mở cửa phiên sau, so với giá đóng cửa 10 phiên sau.
+  - **Theo quy tắc ⛔/🔴** (chỉ lệnh của trang): bán ở giá mở cửa sau khi trang báo BÁN (đợi đủ T+2), khi giá chạm cắt lỗ của trang (từ T+2; mở cửa dưới cắt lỗ thì bán ở giá mở cửa), hoặc sau 60 phiên.
+  - **Ý kiến về danh mục và về cảnh báo:** giá 5 và 10 phiên sau so với giá đóng cửa hôm đó; bot tách riêng những lần Claude nói khác quy tắc.
+- **So sánh:** chỉ các phiên có **từ 2 lệnh trở lên** (có lựa chọn thật) và mọi lệnh đã đủ 10 phiên. Lệnh Claude chọn được so với **trung bình mọi lệnh cùng ngày** và với **lệnh mạnh nhất của trang**; **nửa trên bảng xếp hạng** của Claude so với nửa dưới; lệnh **bảo tránh** so với phần còn lại.
+- **Kết luận ở mốc định sẵn:** bot chỉ kết luận ở **20 phiên có lựa chọn (sơ bộ)** và **40 phiên**, mỗi mốc tính đúng trên chừng ấy phiên đầu tiên, kèm khoảng tin cậy 90%. Xem kết quả mỗi ngày rồi dừng khi thấy đẹp dễ tưởng nhầm may mắn là tài, nên kết luận ở một mốc không đổi theo các phiên sau. Với nhiễu thực tế của lệnh MUA (±5 điểm % sau 10 phiên), mốc 20 phiên chỉ thấy được khi Claude hơn trung bình khoảng 2 điểm %/lệnh trở lên. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
+- **Xem:** `/claude` (phiên gần nhất, ý kiến danh mục, thành tích), `/claude lichsu`, `/claude tuan`, trang web **Claude chọn bóng** (`/claude`, trong Tiện ích): bảng ứng viên với hai cách chấm, danh mục, các lần Claude xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay.
+- **Chi phí:** mặc định Claude Opus 5.5, mức suy nghĩ `medium`: khoảng 0,2-0,5 USD một phiên (10 lượt tìm tin là 0,1 USD), 0,03-0,08 USD một lần xem cảnh báo, khoảng 0,01 USD một bản tổng kết tuần; tổng khoảng 6-12 USD một tháng. Trần `CLAUDE_PICK_MONTHLY_USD` (mặc định 15 USD) tính trên số token và lượt tìm thực tế của mọi lượt gọi, theo giá của **model thực sự trả lời** (một lượt máy chủ chuyển sang model khác tính theo model đó; model lạ tính giá đắt nhất); các lượt gọi xếp hàng sau một khoá chung nên hai lượt không bao giờ cùng tiêu đồng cuối. Một lượt được ghi trước khi trả tiền với chi phí ước tính, nên bot chết giữa chừng vẫn không làm trần hụt; một lượt quá giờ (timeout) cũng tính theo ước tính và không gọi lại (SDK không tự thử lại để khỏi trả hai lần). Chạm trần thì bot ngừng gọi tới tháng sau và báo lý do. Mỗi phiên chỉ gọi một lần; Claude không trả lời được (mạng, quá tải) thì bot thử lại sau 15, 30, 45 phút rồi bỏ phiên đó và báo một lần (bỏ rồi thì không hỏi lại trong ngày dù có lỗi gì); ngày không có nến VNINDEX tới 18:00 (nghỉ lễ lịch không biết) thì bỏ qua, không ghi "không có lệnh"; chưa lấy được tín hiệu của trang thì bot chờ. Mốc kết luận 20/40 phiên được **ghim** vào đúng các phiên đạt mốc lần đầu (xoá dữ liệu cũ không làm mốc trôi). `/claude chay` chạy nền và nhắn khi xong.
+- **An toàn:** key không bao giờ được in ra trong tin nhắn lỗi; nội dung trang web Claude đọc được coi là dữ liệu, không phải chỉ dẫn; trang web chỉ hiện link http(s). Nếu bộ lọc an toàn của Claude từ chối một yêu cầu, API tự chạy lại trên model dự phòng Anthropic khuyến nghị (tham số `fallbacks`).
 
 ### Cảnh báo trong phiên (không gọi AI)
 
@@ -253,7 +295,7 @@ Các tài khoản ảo vẫn khớp lệnh theo nến ngày sau 15:05 (đúng nh
 - 🛒 lệnh mua giới hạn hôm nay của Quant Engine đang trong vùng mua, hoặc ⚠️ giá đã dưới stop dự kiến (nên bỏ lệnh);
 - 📉 VNINDEX giảm `INTRADAY_VNI_DROP_PCT` % (mặc định 2) và gấp đôi mức đó so với phiên trước.
 
-Mỗi cảnh báo gửi một lần mỗi ngày, kể cả khi khởi động lại (`data/intraday_alerts.json`). Giá đọc cách nhau vài phút nên có thể bỏ lỡ một cú xuyên stop rất ngắn. Bật/tắt bằng công tắc trên trang **AI & cảnh báo** (`INTRADAY_ALERTS` chỉ là giá trị mặc định).
+Mỗi cảnh báo gửi một lần mỗi ngày, kể cả khi khởi động lại (`data/intraday_alerts.json`). Giá đọc cách nhau vài phút nên có thể bỏ lỡ một cú xuyên stop rất ngắn. Bật/tắt bằng công tắc trên trang **AI & cảnh báo** (`INTRADAY_ALERTS` chỉ là giá trị mặc định). Bộ theo dõi này chạy ở mọi `TRADE_MODE` (kể cả `off`) vì lời nhắc 14:20 của việc treo Tài sản đi ra từ đây, không phụ thuộc công tắc.
 
 ### Bật/tắt kênh thông báo và đổi vốn tài khoản ảo trên web
 
@@ -337,6 +379,8 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 
 ## 9. Toàn bộ biến môi trường
 
+Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) sửa được ngay trên trang **Cài đặt** (`/caidat`); giá trị đặt trên web được ưu tiên hơn biến môi trường.
+
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `PROVIDER_ORDER` | `router9,groq,openrouter,xai` | Thứ tự dự phòng AI |
@@ -364,6 +408,10 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 | `INTRADAY_ALERTS` | 1 | Cảnh báo trong phiên (không gọi AI) |
 | `INTRADAY_INTERVAL_MIN` | 15 | Số phút giữa hai lần kiểm tra trong phiên (tối thiểu 5) |
 | `INTRADAY_VNI_DROP_PCT` | 2 | VNINDEX giảm bao nhiêu % thì báo (báo thêm khi giảm gấp đôi) |
+| `INTRADAY_EARLY` | 0 | 1 = đẩy lại 🟠 (đổi chiều sớm trong phiên) cho mã đang giữ; mặc định chỉ ghi và hiện ở báo cáo 15:30 |
+| `TAISAN_RISK_PCT` | 2 | Một lệnh mua được lỗ tối đa bao nhiêu % tài sản nếu chạm cắt lỗ (`/tskiemtra`) |
+| `TAISAN_OPEN_RISK_PCT` | 6 | Trần của mọi cắt lỗ cộng lại (% tài sản) |
+| `TAISAN_MAX_WEIGHT_NEW` | 30 | Một mã tối đa bao nhiêu % tài sản sau khi mua (không quá ngưỡng nguy hiểm `/tsnguong`) |
 | `ZOOM_WEBHOOK_URL`, `ZOOM_WEBHOOK_TOKEN` | - | Gửi thông báo vào một kênh Zoom (Incoming Webhook) |
 | `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_BOT_JID`, `ZOOM_ACCOUNT_ID` | - | Chatbot Zoom (thông báo tới JID đã ghép đôi, nhận lệnh) |
 | `ZOOM_TO_JID` | - | Gửi thông báo tới JID này thay cho JID đã ghép đôi (mượn app của bot OKX) |
@@ -386,6 +434,16 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 | `MAX_TOOL_ROUNDS` | 8 | Số lượt gọi tool tối đa của mỗi analyst |
 | `KEEP_REPORTS` | 60 | Số thư mục báo cáo giữ lại |
 | `CACHE_MAX_AGE_DAYS` | 3 | Xoá cache giá cũ hơn số ngày này |
+| `ANTHROPIC_API_KEY` | - | Bật **Claude chọn bóng** (cần thêm `SIEUTINHIEU=1`) |
+| `CLAUDE_PICK` | 1 | 0 = tắt Claude chọn bóng dù đã có key |
+| `CLAUDE_PICK_MODEL` | `claude-opus-5-5` | Model Claude |
+| `CLAUDE_PICK_EFFORT` | `medium` | Mức suy nghĩ: `low` / `medium` / `high` (`high` được 20.000 token trả lời, hai mức kia 16.000) |
+| `CLAUDE_PICK_MONTHLY_USD` | 15 | Trần chi phí mỗi tháng (USD), mọi lượt gọi Claude cộng lại |
+| `CLAUDE_PICK_SEARCHES` | 10 | Số lượt tìm tin tối đa mỗi phiên (1-20) |
+| `CLAUDE_PICK_TIME` | `15:50` | Giờ chọn mỗi ngày giao dịch (không sớm hơn 15:10) |
+| `CLAUDE_PICK_BOT` | 1 | Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (300 mã, cần `STV_MARKET=1`) |
+| `CLAUDE_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày Claude xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
+| `CLAUDE_PICK_WEEKLY` | 1 | Tổng kết tuần sau phiên cuối tuần (0 = tắt) |
 
 ## 10. Giới hạn và xử lý sự cố
 
@@ -411,7 +469,7 @@ Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 
 
 Bot ghi số phiên bản ở một chỗ (`vnbot/version.py`) và hiện ở:
 
-- **Web:** nút nhỏ `v1.1.0` cạnh logo ở mọi trang (chuyển đỏ `v1.1.0 ⚠` nếu code khác bản phát hành), dòng cuối trang, trang **`/phienban`** (bản đang chạy, mã bản dựng, thời gian chạy, lịch sử phiên bản, cách cập nhật), và `/health`.
+- **Web:** nhãn nhỏ `v1.1.0` cuối thanh bên ở mọi trang (chuyển đỏ kèm chữ “khác bản phát hành” nếu code khác bản phát hành), dòng cuối trang, trang **`/phienban`** (bản đang chạy, mã bản dựng, thời gian chạy, lịch sử phiên bản, cách cập nhật), và `/health`.
 - **Telegram / Zoom:** lệnh **`/phienban`**, dòng đầu của `/trogiup` và `/trangthai`.
 - **Tự báo khi cập nhật:** lần khởi động đầu tiên sau khi upload bản mới, bot nhắn vào Telegram/Zoom “🆕 Bot đã cập nhật: v1.0.0 → v1.1.0” kèm những gì mới; khởi động lại bình thường thì không nhắn.
 

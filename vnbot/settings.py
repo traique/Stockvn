@@ -120,6 +120,7 @@ class Settings:
     intraday_alerts: bool = True    # alerts during the session (no AI): stops, targets, buy zones, VNINDEX
     intraday_interval_min: int = 15
     intraday_vni_drop_pct: float = 2.0
+    intraday_early: bool = False    # push 🟠 (an early SELL sign in the session) - measured no better than waiting
     scan_universe: str = "vn100"    # the daily screen: vn100 | vn30 | watchlist (always plus the watchlist)
     daily_ai_mode: str = "critic"   # critic (1 AI request a code) | full (the agents, ~25) | off
     daily_ai_max: int = 5           # watchlist codes sent to the AI each day (0 = none)
@@ -131,6 +132,10 @@ class Settings:
 def load() -> Settings:
     data_dir = Path(os.environ.get("DATA_DIR") or "data").resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
+    # The values saved on the web page (/caidat) go into the environment first.
+    from vnbot import config
+
+    config.apply(data_dir)
     # The framework's own paths, unless the operator set them.
     os.environ.setdefault("TRADINGAGENTS_RESULTS_DIR", str(data_dir / "results"))
     os.environ.setdefault("TRADINGAGENTS_CACHE_DIR", str(data_dir / "cache"))
@@ -169,6 +174,7 @@ def load() -> Settings:
         intraday_alerts=_flag("INTRADAY_ALERTS", True),
         intraday_interval_min=max(5, _int("INTRADAY_INTERVAL_MIN", 15)),
         intraday_vni_drop_pct=_float("INTRADAY_VNI_DROP_PCT", 2.0),
+        intraday_early=_flag("INTRADAY_EARLY", False),
         scan_universe=_choice("SCAN_UNIVERSE", ("vn100", "vn30", "watchlist"), "vn100"),
         support_email=(os.environ.get("SUPPORT_EMAIL") or "").strip(),
         daily_ai_mode=_choice("DAILY_AI_MODE", ("critic", "full", "off"), "critic"),

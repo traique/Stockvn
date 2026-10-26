@@ -2,9 +2,11 @@
 
 The same journal as the /ts commands (``vnbot.taisan``), laid out like the owner's
 portfolio app: a greeting with today's change, the allocation alerts, the total and its
-parts, the position weights, the risk and a risk-parity split, the performance chart
-against VNINDEX, one card per stock (company, three months of prices, price and change,
-P&L, cost, levels, the site's signal, news, its orders), then sections that open: the
+parts (with the open risk of the cut-losses), the recovery goal next to the measured
+figures, the work for the next session (the exit tickets), the discipline meter, the
+position weights, the risk and a risk-parity split, the performance chart against
+VNINDEX, one card per stock (company, three months of prices, price and change, P&L,
+cost, levels, planned loss, ticket, the site's signal, news), then sections that open: the
 details, the forms that record, the journal (filtered), the cash, the cut-loss levels,
 the assistant, the evening report, the Excel import and the thresholds; last, the reset.
 
@@ -22,6 +24,7 @@ from urllib.parse import quote
 from fastapi import File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
+from vnbot import kyluat
 from vnbot import taisan as ts
 from vnbot import ui
 
@@ -39,75 +42,68 @@ _FILTERS = (("", "Tất cả"), ("mua", "Mua"), ("ban", "Bán"), ("thuong", "Th�
 _FILTER_KINDS = {"mua": ("BUY",), "ban": ("SELL",), "thuong": ("BONUS",), "tien": ts.CASH_KINDS}
 
 CSS = """
-.ts-top{display:grid;gap:16px}
+.ts-top{display:grid;gap:var(--gap)}
 .ts-top>*{min-width:0}
-@media (min-width:1024px){.ts-top.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
-.greet{display:flex;gap:16px;align-items:flex-start;padding:22px 24px}
-.greet .gi{flex:none;width:44px;height:44px;color:var(--accent)}
-.greet .gh{font:800 24px/1.2 "Be Vietnam Pro",sans-serif;margin:0}
-.greet .gs{color:var(--ink-2);margin:6px 0 14px}
-.greet>div{min-width:0}.greet .chip{white-space:normal;line-height:1.3;padding:6px 14px}
-.warn-card{background:color-mix(in srgb,var(--down-soft) 70%,var(--card));border-color:var(--down-line)}
-.warn-card .wh{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 24px 12px}
-.warn-card .wh h2{display:flex;align-items:center;gap:10px;color:var(--down);font-size:20px}
-.warn-card .wh h2 svg{width:24px;height:24px}
-.ar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:14px 16px;margin:0 24px 12px;
-  border-radius:22px;background:var(--tile);border:1px solid var(--down-line)}
-.ar .s{display:flex;align-items:center;gap:8px;color:var(--down);font-weight:800;font-size:18px}
-.ar .s svg{width:20px;height:20px}
-.ar .p{text-align:right;font-weight:800;color:var(--down);font-size:18px;line-height:1.2}
-.ar .p small{display:block;color:var(--ink-2);font-weight:600;font-size:13px}
-.ar .x{width:44px;height:44px;border:0;background:none;color:var(--ink-2);cursor:pointer;border-radius:12px}
-.ar .x svg{width:20px;height:20px}
+@media (min-width:1100px){.ts-top.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.greet{padding:var(--pad)}
+.greet .gh{font-size:var(--fs-section);font-weight:600;margin:0}
+.greet .gs{color:var(--muted);margin:4px 0 10px}
+.greet .chip{white-space:normal}
+.warn-card .wh{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:var(--pad) var(--pad) 8px}
+.warn-card .wh h2{display:flex;align-items:center;gap:8px}
+.warn-card .wh h2 svg{width:16px;height:16px;color:var(--negative)}
+.ar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px 12px;padding:10px 0;margin:0 var(--pad);
+  border-top:1px solid var(--rule)}
+.ar .s{display:flex;align-items:center;gap:6px;font-weight:500}
+.ar .s svg{width:14px;height:14px;color:var(--negative)}
+.ar .p{text-align:right;font-weight:500;color:var(--negative);font-variant-numeric:tabular-nums}
+.ar .p small{display:block;color:var(--muted);font-weight:400;font-size:var(--fs-small)}
+.ar .x{width:32px;height:32px;border:0;background:none;color:var(--muted);cursor:pointer;border-radius:var(--radius-control);display:grid;place-items:center}
+.ar .x:hover{background:var(--raised);color:var(--text)}
+.ar .x svg{width:16px;height:16px}
 .ar .track{grid-column:1/-1}
 .ar .chip{justify-self:start}
-@media (max-width:620px){.warn-card .wh{padding:18px 18px 12px}.warn-card .wh h2{font-size:17px}.ar{margin:0 18px 12px}.warn-card .wf{padding:0 18px 18px}
-  .greet{padding:20px 18px}.greet .gh{font-size:22px}}
 @media (min-width:620px){.ar{grid-template-columns:auto minmax(80px,1fr) auto auto auto}.ar .track{grid-column:auto}}
-.warn-card .wf{padding:0 24px 20px;color:var(--ink-2);font-size:14px}
-.ts-export{display:flex;justify-content:flex-end;gap:8px;margin:16px 0}
-.total{font:800 44px/1.05 "Be Vietnam Pro",sans-serif;letter-spacing:-.02em;margin:4px 0 14px;overflow-wrap:anywhere}
-@media (max-width:420px){.total{font-size:36px}}
-.vni-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;padding:14px 18px;
-  border-radius:22px;background:var(--tile);border:1px solid var(--tile-line)}
-.vni-row .v{font-weight:800;font-size:20px}
+.warn-card .wf{padding:8px var(--pad) var(--pad);color:var(--muted);font-size:var(--fs-small);line-height:16px}
+.ts-export{display:flex;justify-content:flex-end;gap:8px}
+.total{font-size:32px;line-height:1.15;font-weight:500;letter-spacing:-.01em;margin:2px 0 10px;overflow-wrap:anywhere}
+.vni-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:var(--gap);padding-top:var(--gap);
+  border-top:1px solid var(--rule)}
+.vni-row .v{font-weight:500}
 .todo li{align-items:flex-start}
-.stats2{display:flex;flex-wrap:wrap;gap:12px 32px;margin-bottom:16px}
-.stats2 .l{font:700 13px/1.2 "Be Vietnam Pro",sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--label)}
-.stats2 .v{font:800 30px/1.1 "Be Vietnam Pro",sans-serif;margin-top:6px}
-.stocks{display:grid;gap:16px}
+.stats2{display:flex;flex-wrap:wrap;gap:12px 32px;margin-bottom:var(--gap)}
+.stats2 .l{color:var(--muted);font-size:var(--fs-small)}
+.stats2 .v{font-size:var(--fs-kpi);line-height:1.15;font-weight:500;margin-top:4px;font-variant-numeric:tabular-nums}
+.stocks{display:grid;gap:var(--gap)}
 @media (min-width:900px){.stocks{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.stock{background:var(--tile);border:1px solid var(--tile-line);border-radius:26px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
-@media (max-width:620px){#danhmuc .card-b{padding:0 10px 12px}.stock{padding:16px}.stock .tile{padding:12px}
-  .stock .tile .v{font-size:clamp(15px,4.4vw,22px)}}
+.stock{border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .sk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.sk-top>div{min-width:0}.sk-top .btn{flex:none;white-space:nowrap}
-.ts-export .btn,.chips .btn{white-space:nowrap}
-.sk-sym{font:800 clamp(28px,8vw,34px)/1 "Be Vietnam Pro",sans-serif;letter-spacing:-.01em;color:var(--ink);margin:0;text-transform:none}
-.sk-name{color:var(--ink-2);margin-top:6px}
-.sk-meta{font:800 13px/1.2 "Be Vietnam Pro",sans-serif;letter-spacing:.06em;color:var(--label);margin-top:8px;text-transform:uppercase}
-.sk-spark{display:flex;align-items:center;gap:12px}
+.sk-top>div{min-width:0}.sk-top .btn{flex:none}
+.sk-sym{font-size:20px;line-height:1.2;font-weight:600;margin:0}
+.sk-name{color:var(--muted);font-size:var(--fs-small);line-height:16px;margin-top:2px}
+.sk-meta{color:var(--muted);font-size:var(--fs-small);line-height:16px;margin-top:4px}
+.sk-spark{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:var(--fs-small)}
 .sk-mid{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
-.sk-price{font:800 clamp(28px,8vw,38px)/1.05 "Be Vietnam Pro",sans-serif;letter-spacing:-.02em;margin-top:6px}
-.sk-chg{font-weight:800;margin-top:4px}
-.pnl{min-width:136px;text-align:right;padding:12px 16px;border-radius:22px;border:1px solid var(--line)}
-.pnl.neg{background:var(--down-soft);border-color:var(--down-line)}.pnl.pos{background:var(--up-soft);border-color:var(--up-line)}
-.pnl .l{font:800 13px/1.2 "Be Vietnam Pro",sans-serif;letter-spacing:.06em}
-.pnl .v{font:800 clamp(18px,5vw,26px)/1.15 "Be Vietnam Pro",sans-serif;margin-top:6px;white-space:nowrap}
-.jfilter{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px}
+.sk-price{font-size:var(--fs-kpi);line-height:1.15;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums}
+.sk-chg{font-size:var(--fs-small);margin-top:2px;font-variant-numeric:tabular-nums}
+.pnl{min-width:120px;text-align:right}
+.pnl .l{color:var(--muted);font-size:var(--fs-small)}
+.pnl .v{font-size:20px;line-height:1.2;font-weight:500;margin-top:2px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pnl .pc{font-size:var(--fs-small);font-variant-numeric:tabular-nums}
+.jfilter{display:flex;flex-wrap:wrap;gap:var(--gap);align-items:flex-end;margin-bottom:var(--gap)}
 .jfilter .fld{flex:1 1 140px}
 .jl{list-style:none;margin:0;padding:0}
-.jr{display:flex;justify-content:space-between;gap:12px;padding:14px 0;border-top:1px solid var(--line)}
-.jr:first-child{border-top:0}
-.jr.void{opacity:.55}.jr.void .jr-t{text-decoration:line-through}
-.jr-t{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-weight:700}
-.jr-s{font-size:14px;color:var(--muted);margin-top:4px}
-.jr-r{text-align:right;flex:none;font-weight:800}
-.jr-r .small{font-weight:600}
-.sig-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-top:1px solid var(--line)}
-.sig-row:first-child{border-top:0}
+.jr{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--rule)}
+.jr:first-child{border-top:0;padding-top:0}
+.jr.void{opacity:.5}.jr.void .jr-t{text-decoration:line-through}
+.jr-t{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.jr-s{font-size:var(--fs-small);line-height:16px;color:var(--muted);margin-top:2px}
+.jr-r{text-align:right;flex:none;font-variant-numeric:tabular-nums}
+.sig-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px;padding:10px 0;border-top:1px solid var(--rule)}
+.sig-row:first-child{border-top:0;padding-top:0}
 .sig-row .acts{display:flex;flex-wrap:wrap;gap:8px}
-.danger-card .card-b p{color:var(--ink-2);margin:0 0 16px}
+.goal-line{margin:0 0 4px}
+.danger-card .card-b p{color:var(--muted);margin:0 0 12px}
 """
 
 _DISMISS_JS = """<script>
@@ -175,7 +171,8 @@ def _alert(msg: str) -> str:
     if not msg:
         return ""
     kind = "err" if msg[:1] in ("⚠", "❌") else "ok" if msg[:1] in ("✅", "↩", "📥", "🗑", "📤", "🔄") else "info"
-    return ui.alert(msg, kind)
+    role = "alert" if kind == "err" else "status"
+    return f'<div class="alert alert-{kind}" role="{role}">{e(msg).replace(chr(10), "<br>")}</div>'
 
 
 def _vnd(value) -> str:
@@ -248,12 +245,11 @@ def _greeting(s: dict, hist: list[dict], todo: list, nxt: str) -> str:
         line = f"{title} danh mục {_svnd(change)} ({ui.pct(change_pct)}) · {what}."
     chips = []
     if change is not None:
-        chips.append(ui.chip(ui.icon("up" if change >= 0 else "fall") + f"{_svnd(change)} {title.lower()}",
-                             "pos" if change >= 0 else "neg"))
+        chips.append(ui.chip(f"{_svnd(change)} {title.lower()}", "pos" if change >= 0 else "neg"))
     if n >= 2:
-        chips.append(ui.chip(ui.icon("flame") + f"{n} phiên {'tăng' if sign > 0 else 'giảm'} liên tiếp", "amber"))
-    return (f'<section class="card greet">{ui.icon(ic, "gi")}<div><p class="gh">{hi} 👋</p>'
-            f'<p class="gs">{e(line)}</p><div class="chips">{"".join(chips)}</div></div></section>')
+        chips.append(ui.chip(f"{n} phiên {'tăng' if sign > 0 else 'giảm'} liên tiếp"))
+    return (f'<section class="card greet"><p class="gh">{hi}</p>'
+            f'<p class="gs">{e(line)}</p><div class="chips">{"".join(chips)}</div></section>')
 
 
 def _alloc_alert(s: dict, alloc: dict) -> str:
@@ -268,10 +264,10 @@ def _alloc_alert(s: dict, alloc: dict) -> str:
             f'<div class="ar {a["level"]}" data-sym="{e(a["symbol"])}"><span class="s">{ui.icon("up")}{e(a["symbol"])}</span>'
             f'<div class="track" role="img" aria-label="{_p1(a["pct"])} tổng tài sản"><span style="width:{min(100, a["pct"]):.1f}%"></span></div>'
             f'<span class="p">{_p1(a["pct"])}<small>{ui.money_short(value)}</small></span>'
-            f'<span class="chip chip-neg">≥ {_p1(limit)}</span>'
+            f'<span class="chip chip-neg">từ {_p1(limit)}</span>'
             f'<button class="x" type="button" aria-label="Ẩn cảnh báo {e(a["symbol"])} trong phiên này">{ui.icon("x")}</button></div>')
-    head = (f'<div class="wh"><h2>{ui.icon("warn")}Cảnh báo tỷ trọng — {len(hot)} mã</h2>'
-            f'<a class="icon-btn" href="#nguong" aria-label="Đổi ngưỡng cảnh báo">{ui.icon("sliders")}</a></div>')
+    head = (f'<div class="wh"><h2>{ui.icon("warn")}Cảnh báo tỷ trọng · {len(hot)} mã</h2>'
+            f'<a class="btn" href="#nguong">Đổi ngưỡng</a></div>')
     foot = (f'<p class="wf">Tỷ trọng tính trên tổng tài sản {ui.money_short(s["total"])} · theo dõi từ {_p1(alloc["warn"])}, '
             f'nguy hiểm từ {_p1(alloc["danger"])} · bấm × để ẩn trong phiên này</p>')
     return (f'<section class="card warn-card" data-day="{e(ts.today_vn())}" aria-label="Cảnh báo tỷ trọng">'
@@ -295,28 +291,96 @@ def _overview(account: ts.TaiSan, s: dict, book: ts.Book, hist: list[dict]) -> s
         ui.tile("Lãi/lỗ đang mở", _svnd(s["unrealized"]), "Theo giá vốn (đã gồm phí mua)", cls=ui.tone(s["unrealized"])),
         ui.tile("Cổ tức đã nhận", _vnd(s["dividends"]), "Cổ tức tiền mặt"),
         ui.tile("Quyền chờ về", _vnd(s["pending"]), f"{len(rights)} quyền đã qua GDKHQ" if rights else "Không có quyền đang chờ"),
+        _risk_tile(account, s),
     ])
     vni, vni_chg, vni_day = _vnindex(account.closes())
     vni_row = ""
     if vni:
         value = f"{vni:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        vni_row = (f'<div class="vni-row"><span class="kicker" style="margin:0">VN-Index · {ts.ddmm(vni_day)}</span>'
+        vni_row = (f'<div class="vni-row"><span class="muted">VN-Index · {ts.ddmm(vni_day)}</span>'
                    f'<span><span class="v num">{value}</span> '
                    + (ui.chip(ui.pct(vni_chg), "pos" if vni_chg >= 0 else "neg") if vni_chg is not None else "")
                    + "</span></div>")
     warnings = "".join(ui.alert(w, "err") for w in book.warnings)
-    return (f'<section class="card" id="tongquan"><div class="card-b" style="padding-top:24px">'
-            f'<h2 class="kicker">Tổng tài sản</h2><div class="total num">{_vnd(s["total"])}</div>'
-            f'<div class="chips" style="margin-bottom:16px">{"".join(chips)}</div>{warnings}'
-            f'<div class="tiles t3">{tiles}</div>{vni_row}</div></section>')
+    return (f'<section class="card" id="tongquan"><div class="card-b">'
+            f'<h2 class="lbl" style="font-weight:400">Tổng tài sản</h2><div class="total num">{_vnd(s["total"])}</div>'
+            f'<div class="chips" style="margin-bottom:12px">{"".join(chips)}</div>{warnings}'
+            f'<div class="tiles t4">{tiles}</div>{vni_row}</div></section>')
 
 
-def _todo(todo: list, nxt: str) -> str:
-    if not todo:
+def _risk_tile(account: ts.TaiSan, s: dict) -> str:
+    """The open risk: what every cut-loss would cost if hit (``kyluat.risk_summary``)."""
+    try:
+        r = kyluat.risk_summary(account, s)
+    except Exception as exc:  # noqa: BLE001 - the tile says so
+        logger.warning("Tài sản web: risk tile: %s", exc)
+        return ui.tile("Rủi ro đang mở", "—", "chưa tính được")
+    share = min(1.0, r["pct"] / r["cap"]) if r["cap"] else 0.0
+    meter = (f'<div class="meter{" hot" if share >= 0.85 else ""}" role="img" '
+             f'aria-label="Rủi ro đang mở {_p1(r["pct"])} trên trần {r["cap"]:g}%"><span style="width:{share * 100:.1f}%"></span></div>')
+    sub = f'{_p1(r["pct"])} tài sản · trần {r["cap"]:g}%'
+    if r["unlimited"]:
+        sub += f' · {e(", ".join(r["unlimited"]))} chưa có cắt lỗ: không giới hạn'
+    word = {"🔴": "vượt trần", "🟡": "gần trần"}.get(r["level"], "trong trần")
+    return ui.tile("Rủi ro đang mở", _vnd(r["planned"]), f"{word} · {sub}" + meter, cls="neg" if r["level"] == "🔴" else "")
+
+
+def _todo(todo: list, nxt: str, tickets: list[str] | None = None) -> str:
+    if not todo and not tickets:
         return ""
-    items = "".join(f"<li>{e(line)}</li>" for _, line in todo)
+    items = "".join(f"<li>{e(line)}</li>" for line in (tickets or [])) + "".join(f"<li>{e(line)}</li>" for _, line in todo)
     return ui.card(f"Việc cần làm phiên {ts.ddmm(nxt)}", f'<ul class="feed todo">{items}</ul>', kicker="Hành động",
-                   sub="⛔ thủng cắt lỗ · 🔴 Siêu tín hiệu BÁN · 🎯 chạm mục tiêu · ⚠️ tỷ trọng quá ngưỡng", id="viec")
+                   sub="Như trong tin nhắn của bot: thủng cắt lỗ, Siêu tín hiệu BÁN, việc treo có hạn, thiếu cắt lỗ, chạm mục tiêu, "
+                       "tỷ trọng quá ngưỡng", id="viec")
+
+
+def _discipline(state: dict) -> str:
+    """The discipline meter of the last evening report (``kyluat.discipline``, kept in the state)."""
+    d = state.get("discipline") or {}
+    if not d.get("day"):
+        body = ('<p class="muted" style="margin:0">Chưa có số đo: thước kỷ luật được tính ở báo cáo 15:30 đầu tiên '
+                "(hoặc /tsbaocao).</p>")
+        return ui.card("Thước kỷ luật", body, kicker="Đo bằng code", id="kyluat")
+    try:
+        lines = kyluat.discipline_lines(d)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tài sản web: discipline lines: %s", exc)
+        lines = ["Chưa hiển thị được số đo."]
+    feed = '<ul class="feed">' + "".join(f"<li>{e(line)}</li>" for line in lines[1:]) + "</ul>"
+    groups = d.get("groups") or {}
+    names = (("buy_ok", "Lệnh mua trong ngân sách", 20), ("buy_warn", "Lệnh mua có lưu ý", 20),
+             ("buy_block", "Lệnh mua ngoài quy tắc", 20), ("override", "Ghi đè /tsgiu", 10),
+             ("early", "Bán trước tín hiệu", 10))
+    rows = []
+    for key, name, need in names:
+        g = groups.get(key) or {}
+        note = "đang đo" if (g.get("settled") or 0) < need else ""
+        rows.append(f'<tr><td>{e(name)}</td><td class="num">{g.get("n", 0)}</td><td class="num">{g.get("settled", 0)}</td>'
+                    f'<td class="num {ui.tone(g.get("r10"))}">{ui.pct(g.get("r10"))}</td><td class="muted">{note}</td></tr>')
+    table = ui.table([("Nhóm", ""), ("Số lệnh", "num"), ("Đã chấm", "num"), ("Giá 10 phiên sau TB", "num"), ("", "")], rows, "")
+    body = (feed + "<h3>Kết quả theo nhóm (giá 10 phiên sau so với giá anh ghi)</h3>" + table
+            + '<p class="muted small" style="margin:12px 0 0">Dưới 20 lệnh mua / 10 lần ghi đè hay bán sớm: chưa đủ để nói gì. '
+              "Số đo để học, không để tiếc.</p>")
+    return ui.card("Thước kỷ luật", body, kicker="Đo bằng code", sub=e(lines[0].replace("📏 KỶ LUẬT ", "")), id="kyluat")
+
+
+def _goal(account: ts.TaiSan, day: str, s: dict) -> str:
+    """The recovery goal next to the measured figures (``kyluat.goal_text``), and the form for its date."""
+    try:
+        text = kyluat.goal_text(account, day, s)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tài sản web: goal: %s", exc)
+        text = "🎯 Chưa tính được mục tiêu."
+    lines = text.split("\n")
+    head = lines[0].replace("🎯 MỤC TIÊU HOÀN VỐN · ", "").replace("🎯 ", "")
+    body = "".join(f'<p class="goal-line">{e(line)}</p>' for line in lines[1:])
+    g = account.state().get("goal") or {}
+    form = (f'<form method="post" action="/taisan/muctieu" class="row mt" style="align-items:flex-end">'
+            f'<div class="fld"><label class="f" for="ts-goal">Mốc hoàn vốn</label>'
+            f'<input id="ts-goal" type="date" name="date" value="{e(g.get("date") or kyluat.DEFAULT_GOAL_DATE)}" required></div>'
+            '<button class="btn btn-ghost" type="submit">Đặt mốc</button>'
+            '<button class="btn btn-ghost" type="submit" name="action" value="clear">Về mặc định</button></form>')
+    return ui.card("Mục tiêu hoàn vốn", body + form, kicker="Số học, không dự báo", sub=e(head), id="muctieu")
 
 
 def _bars(rows: list[tuple[str, float, str, str, float | None, str]]) -> str:
@@ -360,7 +424,7 @@ def _optimize(state: dict, alloc: dict) -> str:
                      else ' <span class="badge b-watch">Theo dõi</span>' if lv == "watch" else "")
             rows.append((e(w["symbol"]) + badge, w["current"], _p1(w["current"]) + arrow, lv, sug,
                          f"Biến động {_p1(w['vol_pct'])}/năm · cân bằng rủi ro {_p1(sug)}"))
-        weights = (_bars(rows) + '<p class="muted small" style="margin:16px 0 0">💡 Vạch đứng = tỷ trọng cân bằng rủi ro '
+        weights = (_bars(rows) + '<p class="muted small" style="margin:16px 0 0">Vạch đứng = tỷ trọng cân bằng rủi ro '
                    "(mã ít biến động được tỷ trọng cao hơn); chỉ để tham khảo.</p>")
     else:
         weights = '<p class="muted" style="margin:0">Bot tính sau báo cáo 15:30 hoặc khi bấm “Làm mới giá” (cần từ 20 phiên giá).</p>'
@@ -394,7 +458,8 @@ def _change_today(spark: dict, price: float | None, live: bool) -> tuple[float |
     return price - ref, (price / ref - 1) * 100
 
 
-def _stock_card(p: dict, h: ts.Holding, name: str, spark: dict, level: dict, sig: dict | None, live: bool) -> str:
+def _stock_card(p: dict, h: ts.Holding, name: str, spark: dict, level: dict, sig: dict | None, live: bool,
+                extra: dict | None = None) -> str:
     sym = e(p["symbol"])
     price = p["price"]
     chg, chg_pct = _change_today(spark, price, live)
@@ -404,11 +469,11 @@ def _stock_card(p: dict, h: ts.Holding, name: str, spark: dict, level: dict, sig
     who = "của anh" if level.get("source") == "owner" else "Siêu tín hiệu"
     if stop:
         hit = price and price <= stop
-        chips.append(ui.chip(f"{'⛔ ' if hit else ''}Cắt lỗ {ui.money(stop)}", "neg" if hit else "")
+        chips.append(ui.chip(f"{'Thủng cắt lỗ' if hit else 'Cắt lỗ'} {ui.money(stop)}", "neg" if hit else "")
                      .replace("<span ", f'<span title="Mức {who}" ', 1))
     if target:
         hit = price and price >= float(target)
-        chips.append(ui.chip(f"{'🎯 ' if hit else ''}Mục tiêu {ui.money(target)}", "pos" if hit else "")
+        chips.append(ui.chip(f"{'Chạm mục tiêu' if hit else 'Mục tiêu'} {ui.money(target)}", "pos" if hit else "")
                      .replace("<span ", f'<span title="Mức {who}" ', 1))
     today = ts.today_vn()
     for day, qty in h.pending_lots(today):
@@ -416,36 +481,78 @@ def _stock_card(p: dict, h: ts.Holding, name: str, spark: dict, level: dict, sig
     if sig:
         chips.append(f'<span class="badge {"b-buy" if sig.get("side") == "BUY" else "b-sell"}">Siêu tín hiệu '
                      f'{"MUA" if sig.get("side") == "BUY" else "BÁN"} {ts.ddmm(sig.get("day", ""))}</span>')
+    chips += _discipline_chips(extra or {})
     spark_label = f"Giá {sym} khoảng 3 tháng"
     news = f"https://news.google.com/search?q={quote(p['symbol'] + ' cổ phiếu')}&hl=vi&gl=VN&ceid=VN:vi"
     change = (f'<div class="sk-chg {ui.tone(chg)}">{_signed(chg)} · {ui.pct(chg_pct)}</div>' if chg is not None
               else '<div class="sk-chg muted">—</div>')
+    closes = [c for c in (spark.get("c") or []) if c]
+    three = f"3 tháng {ui.pct((closes[-1] / closes[0] - 1) * 100)}" if len(closes) > 1 and closes[0] else "3 tháng · chưa đủ giá"
     return (
         f'<article class="stock" aria-labelledby="sk-{sym}"><div class="sk-top"><div>'
         f'<h3 class="sk-sym" id="sk-{sym}">{sym}</h3>' + (f'<div class="sk-name">{e(name)}</div>' if name else "")
         + f'<div class="sk-meta">{len(h.lots)} lot · SL {ui.money(p["qty"])} · mua từ {ts.ddmm(p["first_day"])}</div></div>'
         f'<a class="btn btn-ghost" href="/taisan?ma={sym}#nhatky">Xem lệnh</a></div>'
-        f'<div class="sk-spark">{ui.sparkline(spark.get("c") or [], label=spark_label)}<span class="muted small">3 tháng</span></div>'
-        f'<div class="sk-mid"><div><div class="kicker" style="margin:0">Giá hiện tại</div>'
+        f'<div class="sk-spark">{ui.sparkline(closes, label=spark_label)}<span>{three}</span></div>'
+        f'<div class="sk-mid"><div><div class="muted small">Giá hiện tại</div>'
         f'<div class="sk-price num">{ui.money(price)}</div>{change}</div>'
-        f'<div class="pnl {pnl_cls}"><div class="l {pnl_cls}">PnL</div><div class="v {pnl_cls} num">{_svnd(p["pnl"])}</div>'
-        f'<div class="{pnl_cls}" style="font-weight:800">{ui.pct(p["pnl_pct"])}</div></div></div>'
+        f'<div class="pnl"><div class="l">Lãi/lỗ</div><div class="v {pnl_cls} num">{_svnd(p["pnl"])}</div>'
+        f'<div class="pc {pnl_cls}">{ui.pct(p["pnl_pct"])}</div></div></div>'
         f'<div class="chips">{"".join(chips)}</div>'
         f'<div class="tiles">{ui.tile("Tổng mua", _vnd(p["cost"]))}{ui.tile("Hiện tại", _vnd(p["value"]))}</div>'
-        f'<a class="btn btn-ghost btn-block" href="{e(news)}" target="_blank" rel="noopener noreferrer">{ui.icon("news")}Đọc tin tức'
+        f'<a class="btn btn-ghost btn-block" href="{e(news)}" target="_blank" rel="noopener noreferrer">Đọc tin tức'
         f'<span class="sr-only"> về {sym} (mở tab mới)</span></a></article>')
 
 
-def _holdings(account: ts.TaiSan, s: dict, book: ts.Book, state: dict, site: dict) -> str:
+def _discipline_chips(extra: dict) -> list[str]:
+    """The planned loss or the missing cut-loss, the exit ticket, today's early sign."""
+    chips = []
+    row = extra.get("risk")
+    if row and row.get("stop") is None:
+        chips.append(ui.chip("Chưa cắt lỗ → không giới hạn", "neg"))
+    elif row and row.get("loss") is not None and not row.get("waiting"):
+        chips.append(ui.chip(f"Nếu chạm cắt lỗ −{ui.money(row['loss'])} đ · {_p1(row['loss_pct'])}"))
+    t = extra.get("ticket")
+    if t and t.get("status") == "open":
+        chips.append(ui.chip(f"{'Trang BÁN' if t.get('level') == 'sell' else 'Thủng cắt lỗ'} · treo {extra.get('hanging', 0)} phiên chưa bán", "neg"))
+    elif t and t.get("status") == "held":
+        chips.append(f'<span class="badge b-info">Giữ có lý do từ {ts.ddmm(t.get("held_day") or t.get("opened") or "")}</span>')
+    if extra.get("early"):
+        chips.append(ui.chip(f"Dấu hiệu bán sớm {e(extra['early'])} · theo dõi", "amber"))
+    return chips
+
+
+def _card_extras(account: ts.TaiSan, s: dict, state: dict, day: str) -> dict[str, dict]:
+    """Per symbol, what the discipline layer adds to a stock card."""
+    try:
+        rows = {r["symbol"]: r for r in kyluat.risk_summary(account, s)["rows"]}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tài sản web: risk rows: %s", exc)
+        rows = {}
+    exits = state.get("exits") or {}
+    today = ts.today_vn()
+    early = {r.get("symbol"): r.get("at", "") for r in state.get("shadow") or []
+             if r.get("day") == today and r.get("level") == "early"}
+    out = {}
+    for p in s["positions"]:
+        sym = p["symbol"]
+        t = exits.get(sym)
+        hanging = max(0, kyluat._sessions_until(t["opened"], day) - 1) if t and t.get("opened") else 0
+        out[sym] = {"risk": rows.get(sym), "ticket": t, "hanging": hanging, "early": early.get(sym)}
+    return out
+
+
+def _holdings(account: ts.TaiSan, s: dict, book: ts.Book, state: dict, site: dict, day: str | None = None) -> str:
     names = account.names([p["symbol"] for p in s["positions"]])
     levels, spark = state.get("levels") or {}, state.get("spark") or {}
     live = bool(s["label"]) and s["label"] != "giá đóng cửa gần nhất"
+    extras = _card_extras(account, s, state, day or account.report_day())
     cards = "".join(_stock_card(p, book.holdings[p["symbol"]], names.get(p["symbol"], ""), spark.get(p["symbol"]) or {},
-                                levels.get(p["symbol"]) or {}, site.get(p["symbol"]), live)
+                                levels.get(p["symbol"]) or {}, site.get(p["symbol"]), live, extras.get(p["symbol"]))
                     for p in sorted(s["positions"], key=lambda p: -(p["value"] or p["cost"])))
     action = (f'<div class="chips">{ui.chip(f"{len(s["positions"])} mã")}'
               f'<form method="post" action="/taisan/lammoi" class="inline"><button class="btn btn-ghost" type="submit">'
-              f'{ui.icon("refresh")}Làm mới giá</button></form></div>')
+              f'Làm mới giá</button></form></div>')
     return ui.card("Mã đang nắm giữ", f'<div class="stocks">{cards}</div>' if cards
                    else '<p class="muted" style="margin:0">Chưa nắm giữ cổ phiếu nào.</p>',
                    kicker="Danh mục hiện tại", sub=f"{_price_label(s['label'])} · giá vốn đã gồm phí mua", action=action, id="danhmuc")
@@ -474,7 +581,7 @@ def _rights(account: ts.TaiSan) -> str:
                     f'<input id="r-{sym}-a" name="amount" inputmode="numeric" value="{ui.money(r["value"])}"></div>'
                     f'<input type="hidden" name="day" value="{today}"><input type="hidden" name="note" value="quyền GDKHQ {ts.ddmm(r["ex"])}">'
                     '<button class="btn btn-primary" type="submit">Ghi đã về</button></form>')
-        parts.append(f'<li style="display:block"><b>⏳ {sym}</b>: {what}, GDKHQ {ts.ddmmyyyy(r["ex"])} · đang tính vào tổng tài sản{form}</li>')
+        parts.append(f'<li style="display:block"><b>{sym}</b>: {what}, GDKHQ {ts.ddmmyyyy(r["ex"])} · đang tính vào tổng tài sản{form}</li>')
     parts += [f"<li>{e(account._right_line(r, pending=False))}</li>" for r in upcoming]
     return ui.card("Chờ về và sắp tới", f'<ul class="feed">{"".join(parts)}</ul>', kicker="Quyền", id="quyen",
                    sub="Đã qua ngày GDKHQ mà chưa ghi thì tính vào tổng tài sản; số thật về có thể lệch, sửa trước khi ghi")
@@ -484,10 +591,10 @@ def _rights(account: ts.TaiSan) -> str:
 
 def _details(s: dict, book: ts.Book) -> str:
     tiles = "".join([
-        ui.tile("Tổng vốn", _vnd(book.capital), "Nạp trừ rút", ic="bank"),
-        ui.tile("Tiền mặt hệ thống", _vnd(book.cash), "Từ dòng tiền và giao dịch", ic="wallet"),
-        ui.tile("Cổ tức đã nhận", _vnd(book.dividends), "Cổ tức tiền mặt", ic="arrow-in"),
-        ui.tile("Điều chỉnh thủ công", _svnd(book.adjustments), "Cân bằng sổ sách", ic="pie"),
+        ui.tile("Tổng vốn", _vnd(book.capital), "Nạp trừ rút"),
+        ui.tile("Tiền mặt hệ thống", _vnd(book.cash), "Từ dòng tiền và giao dịch"),
+        ui.tile("Cổ tức đã nhận", _vnd(book.dividends), "Cổ tức tiền mặt"),
+        ui.tile("Điều chỉnh thủ công", _svnd(book.adjustments), "Cân bằng sổ sách"),
         ui.tile("Đã nạp", _vnd(book.deposits), ""), ui.tile("Đã rút", _vnd(book.withdrawals), ""),
         ui.tile("Lệnh bán", str(book.sells), f"thắng {book.wins} · thua {book.losses}"),
         ui.tile("Bắt đầu theo dõi", ts.ddmmyyyy(book.first_day) or "—", f"dòng cuối {ts.ddmmyyyy(book.last_day)}"),
@@ -516,10 +623,16 @@ def _trade_form(book: ts.Book) -> str:
   </div>
   <div class="row mt">
     <div class="fld" style="flex:3 1 220px"><label class="f" for="ts-note">Ghi chú</label><input id="ts-note" name="note" maxlength="200"></div>
+    <div class="fld"><label class="f" for="ts-stop">Cắt lỗ (để kiểm tra)</label>
+      <input id="ts-stop" name="stop" inputmode="numeric" placeholder="tuỳ chọn"></div>
+  </div>
+  <div class="row mt">
+    <button class="btn btn-ghost" type="submit" formaction="/taisan/kiemtra" formnovalidate>Kiểm tra lệnh mua</button>
     <button class="btn btn-primary" type="submit">Ghi vào sổ</button>
   </div>
   <p class="muted small" style="margin:12px 0 0">Giá bán ghi đúng giá khớp; bot không trừ phí hay thuế. Mua mới tự lấy cắt lỗ/mục tiêu
-  của Siêu tín hiệu nếu anh chưa đặt.</p>
+  của Siêu tín hiệu nếu anh chưa đặt. «Kiểm tra lệnh mua» chỉ xem lệnh có nằm trong ngân sách rủi ro (2% tài sản) không,
+  không ghi gì vào sổ và không khuyên mua.</p>
 </form>"""
     return ui.acc("ghi", "Giao dịch", "Thêm giao dịch", form)
 
@@ -627,7 +740,7 @@ def _levels_form(book: ts.Book, levels: dict) -> str:
     <button class="btn btn-ghost" type="submit" name="action" value="clear">Xoá mức của mã</button>
   </div>
 </form>""" + (f'<ul class="feed" style="margin-top:16px">{current}</ul>' if current else "")
-            + '<p class="muted small" style="margin:12px 0 0">Bot báo ⛔ khi giá ≤ cắt lỗ và 🎯 khi chạm mục tiêu (trong phiên và báo cáo 15:30).</p>')
+            + '<p class="muted small" style="margin:12px 0 0">Bot báo khi giá ≤ cắt lỗ và khi chạm mục tiêu (trong phiên và báo cáo 15:30).</p>')
     return ui.acc("catlo", "Kỷ luật", "Cắt lỗ & mục tiêu", body)
 
 
@@ -663,7 +776,7 @@ def _assistant(account: ts.TaiSan, book: ts.Book, site: dict) -> str:
             + ("".join(rows) or '<p class="muted" style="margin:0">Chưa nắm giữ mã nào.</p>')
             + "<h3>Kết quả cảnh báo bán</h3>" + shadow
             + '<p class="muted small" style="margin:12px 0 0">Giá 5 và 10 phiên sau cảnh báo so với đóng cửa ngày cảnh báo: giá thấp hơn = '
-            "bán theo cảnh báo là đúng. Backtest: bán khi ⛔ hoặc 🔴; 🟠 chỉ để theo dõi.</p>")
+            "bán theo cảnh báo là đúng. Backtest: bán khi thủng cắt lỗ hoặc trang BÁN; dấu hiệu sớm chỉ để theo dõi.</p>")
     return ui.acc("nhanxet", "Trợ lý", "Nhận xét & chiến lược", body)
 
 
@@ -748,7 +861,7 @@ def _reset(has_entries: bool) -> str:
 ngưỡng cảnh báo giữ nguyên.</p>
 <form method="post" action="/taisan/reset"><div class="row">
   <div class="fld"><label class="f" for="ts-word">Gõ XOA để xác nhận</label><input id="ts-word" name="word" autocomplete="off" required></div>
-  <button class="btn btn-danger" type="submit">""" + ui.icon("trash") + """Xoá toàn bộ</button></div></form>"""
+  <button class="btn btn-danger" type="submit">Xoá toàn bộ</button></div></form>"""
     return '<div class="mt">' + ui.card("Reset danh mục", body, kicker="Quản trị hệ thống", cls="danger-card", id="reset") + "</div>"
 
 
@@ -758,7 +871,9 @@ def page_body(account: ts.TaiSan, msg: str = "", *, ma: str = "", loai: str = ""
 
     entries = account.entries()
     has_entries = bool(ts.effective(entries))
-    parts = [f"<style>{CSS}</style>", '<h1 class="sr-only">Danh mục tài sản</h1>', _alert(msg)]
+    parts = [f"<style>{CSS}</style>", ui.title("Danh mục", "Sổ tiền thật của anh: tổng tài sản, việc cần làm, thước kỷ luật và từng mã.",
+                                               '<a class="btn" href="/taisan/xuat.xlsx">Xuất XLSX</a><a class="btn" href="/taisan/xuat.csv">Xuất CSV</a>'),
+             _alert(msg)]
     if account.rebuilding:
         parts.append(ui.alert("Bot đang dựng lại biểu đồ từ ngày đầu tiên trong sổ (vài phút) · trang tự cập nhật.", "info"))
     try:
@@ -768,8 +883,6 @@ def page_body(account: ts.TaiSan, msg: str = "", *, ma: str = "", loai: str = ""
         parts.append(_journal(entries, "", ""))
         return "".join(parts)
     parts.append(_preview(account, has_entries))
-    export = ('<div class="ts-export"><a class="btn btn-ghost" href="/taisan/xuat.xlsx">' + ui.icon("down") + "XLSX</a>"
-              '<a class="btn btn-ghost" href="/taisan/xuat.csv">' + ui.icon("down") + "CSV</a></div>")
     if not has_entries:
         start = ('<p style="margin:0 0 16px;color:var(--ink-2)">Sổ tiền thật của anh, tách riêng khỏi các tài khoản ảo của bot. '
                  "Bắt đầu bằng một trong ba cách:</p><div class=\"row\">"
@@ -785,18 +898,27 @@ def page_body(account: ts.TaiSan, msg: str = "", *, ma: str = "", loai: str = ""
     site = account.site_states(sorted(book.holdings), ts.today_vn())
     day = account.report_day()
     nxt = vn_rules.add_sessions(day, 1)
-    todo = account.actions(day, s, {p["symbol"]: p["price"] for p in s["positions"] if p["price"]}, site)
+    prices = {p["symbol"]: p["price"] for p in s["positions"] if p["price"]}
+    todo = account.actions(day, s, prices, site)
+    try:
+        tickets, covered = kyluat.ticket_lines(account, day, prices)
+    except Exception as exc:  # noqa: BLE001 - the plain lines stand
+        logger.warning("Tài sản web: tickets: %s", exc)
+        tickets, covered = [], set()
+    todo = [(rank, line) for rank, line in todo if not (line[:1] in ("⛔", "🔴") and ts.TaiSan._line_symbol(line) in covered)]
     alloc = account.allocation(s)
     warn = _alloc_alert(s, alloc)
-    parts.append(f'<div class="ts-top{" two" if warn else ""}">' + _greeting(s, hist, todo, nxt) + warn + "</div>")
-    parts.append(export)
+    parts.append(f'<div class="ts-top{" two" if warn else ""}">' + _greeting(s, hist, todo + [(0, sym) for sym in sorted(covered)], nxt)
+                 + warn + "</div>")
     parts.append(_overview(account, s, book, hist))
-    if todo:
-        parts.append('<div class="mt">' + _todo(todo, nxt) + "</div>")
+    parts.append('<div class="mt">' + _goal(account, day, s) + "</div>")
+    if todo or tickets:
+        parts.append('<div class="mt">' + _todo(todo, nxt, tickets) + "</div>")
+    parts.append('<div class="mt">' + _discipline(state) + "</div>")
     parts.append('<div class="grid g2 mt">' + _weights(s) + _optimize(state, alloc) + "</div>")
     parts.append('<div class="mt">' + ui.card("Hiệu suất danh mục", ui.asset_chart(hist, total=s["total"], capital=s["capital"]),
                                               kicker="Lịch sử", id="hieusuat") + "</div>")
-    parts.append('<div class="mt">' + _holdings(account, s, book, state, site) + "</div>")
+    parts.append('<div class="mt">' + _holdings(account, s, book, state, site, day) + "</div>")
     rights = _rights(account)
     if rights:
         parts.append('<div class="mt">' + rights + "</div>")
@@ -829,7 +951,7 @@ def register(app, account: ts.TaiSan, *, guard, post_guard, show_bot=lambda: Tru
     def run(action, anchor: str = "") -> RedirectResponse:
         try:
             reply = action()
-        except ValueError as exc:            # LedgerError, the Excel and the number parsers' errors
+        except (ValueError, OverflowError) as exc:   # LedgerError, the Excel and the number parsers' errors
             reply = f"⚠️ {exc}"
         return _back(reply, anchor)
 
@@ -846,6 +968,23 @@ def register(app, account: ts.TaiSan, *, guard, post_guard, show_bot=lambda: Tru
             record = account.record_buy if kind == "BUY" else account.record_sell
             return record(sym, count, _number(price, "Giá"), when, note, source="web")
         return run(act, "ghi")
+
+    @app.post("/taisan/kiemtra", dependencies=post_guard)
+    def taisan_check(symbol: str = Form(""), qty: str = Form(""), price: str = Form(""), stop: str = Form(""),
+                     day: str = Form("")):
+        def act():
+            sym = _code(symbol)
+            count = _optional(qty, "Số cổ phiếu")
+            n = int(count) if count else None
+            check = kyluat.check_buy(account, sym, _optional(price, "Giá"), n, _optional(stop, "Cắt lỗ"),
+                                     day=day.strip() or None)
+            kyluat.record_check(account, check, sym, n)
+            return check["text"]
+        return run(act, "ghi")
+
+    @app.post("/taisan/muctieu", dependencies=post_guard)
+    def taisan_goal(date: str = Form(""), action: str = Form("")):
+        return run(lambda: kyluat.set_goal(account, "xoa" if action == "clear" else date), "muctieu")
 
     @app.post("/taisan/tien", dependencies=post_guard)
     def taisan_cash(kind: str = Form(...), amount: str = Form(""), symbol: str = Form(""), day: str = Form(""),

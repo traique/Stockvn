@@ -41,30 +41,22 @@ PUBLIC_NAV = (("/docs", "Hướng dẫn"), ("/support", "Hỗ trợ"), ("/privac
               ("/terms", "Điều khoản"), ("/data-deletion", "Xoá dữ liệu"))
 
 PUBLIC_CSS = """
-.doc{max-width:860px;margin:0 auto}
-.doc .card-b{padding:28px 32px 32px}
-@media (max-width:620px){.doc .card-b{padding:20px 18px 24px}}
+.doc{max-width:860px}
+.doc .card-b{padding:24px 28px 28px}
+@media (max-width:860px){.doc .card-b{padding:16px}}
 .doc h1{margin:0 0 8px}
-.doc h2{font-size:18px;margin:28px 0 8px}
-.doc p,.doc li{color:var(--ink-2)}
-.doc code,.url{font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--surface-2);
-  border:1px solid var(--line);border-radius:8px;padding:2px 7px;word-break:break-all}
-.lang{border-top:1px solid var(--line);margin-top:34px;padding-top:6px}
-.box{background:var(--tile);border:1px solid var(--tile-line);border-radius:20px;padding:14px 16px;margin:14px 0;font-size:15px}
-.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
-.kv:first-child{border-top:0}
-.kv b{display:block;font-size:14px}.kv .url{display:inline-block;margin-top:5px}
-.ok{color:var(--up);font-weight:800}.no{color:var(--down);font-weight:800}
-.pubnav{display:flex;flex-wrap:wrap;gap:4px}
-.pubnav a{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:999px;color:var(--ink-2);font-weight:700;font-size:14px}
-.pubnav a:hover{text-decoration:none;color:var(--ink)}
-.pubnav a[aria-current]{background:var(--pill-on);color:var(--ink);box-shadow:var(--shadow-sm)}
-.pubhead{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.pubhead .tools{margin-left:auto;display:flex;align-items:center;gap:8px;order:2}
+.doc h2{font-size:16px;margin:24px 0 8px}
+.doc p,.doc li{margin:8px 0}
+.doc code,.url{font:12px/16px var(--mono);background:var(--raised);border-radius:4px;padding:2px 6px;word-break:break-all}
+.lang{border-top:1px solid var(--border);margin-top:28px;padding-top:8px}
+.box{background:var(--raised);border-radius:var(--radius);padding:12px 14px;margin:12px 0}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--rule)}
+.kv:first-child{border-top:0;padding-top:0}
+.kv b{display:block;font-weight:500}.kv .url{display:inline-block;margin-top:4px}
+.ok{color:var(--positive);font-weight:500}.no{color:var(--negative);font-weight:500}
 .doc td.cmd code{white-space:nowrap}
-@media (max-width:899px){.pubnav{order:3;flex-basis:100%}}
 @media (max-width:620px){.doc td.en{display:none}.doc table,.doc tbody,.doc tr,.doc td{display:block}
-  .doc tr{padding:10px 0;border-top:1px solid var(--line)}.doc td{border:0;padding:2px 0}}
+  .doc tr{padding:8px 0;border-top:1px solid var(--rule)}.doc td{border:0;padding:2px 0}}
 """
 
 
@@ -85,23 +77,14 @@ def _contact(email: str, en: bool) -> str:
 
 
 def public_page(title: str, body: str, current: str = "") -> str:
-    nav = "".join(f'<a href="{h}"{" aria-current=page" if h == current else ""}>{t}</a>' for h, t in PUBLIC_NAV)
-    return (
-        '<!doctype html><html lang="vi"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
-        f"<title>{html.escape(title)} · {APP_NAME}</title>{ui.FAVICON}{ui.THEME_BOOT}{ui.FONTS}"
-        f"<style>{ui.STYLE}{PUBLIC_CSS}</style></head><body>"
-        '<a class="skip" href="#main">Bỏ qua tới nội dung</a>'
-        '<header class="top"><div class="top-in"><div class="head pubhead">'
-        f'<a class="wordmark" href="/docs" aria-label="{APP_NAME}, hướng dẫn">LCTA</a>'
-        f'<nav class="pubnav" aria-label="Trang thông tin">{nav}</nav>'
-        f'<div class="tools"><button class="icon-btn" id="theme-toggle" type="button" aria-label="Đổi giao diện sáng/tối">'
-        f'{ui.MOON}{ui.SUN}</button></div>'
-        f'</div></div></header><main id="main" tabindex="-1"><div class="doc"><section class="card"><div class="card-b">{body}</div></section></div></main>'
-        f"<footer><span>{APP_NAME} · Trang này không đặt cookie theo dõi và không thu thập dữ liệu người xem.</span>"
-        "<span>This page sets no tracking cookie.</span></footer>"
-        f"{ui.THEME_TOGGLE}</body></html>"
-    )
+    nav = "".join(f'<a href="{h}" class="nav-item{" on" if h == current else ""}"{" aria-current=page" if h == current else ""}>'
+                  f"{ui.icon(i)}<span>{t}</span></a>" for (h, t), i in zip(PUBLIC_NAV, ("book", "life", "shield", "file", "eraser")))
+    nav = f'<nav aria-label="Trang thông tin">{nav}</nav>'
+    foot = (f"<span>{APP_NAME} · Trang này không đặt cookie theo dõi và không thu thập dữ liệu người xem.</span>"
+            "<span>This page sets no tracking cookie.</span>")
+    return ui.shell(title, f'<div class="doc"><section class="card"><div class="card-b">{body}</div></section></div>',
+                    nav=nav, bottom=ui.theme_button(), foot=foot, brand_href="/docs", brand_sub="Trang thông tin",
+                    head=f"<style>{PUBLIC_CSS}</style>")
 
 
 # ─── Page bodies ─────────────────────────────────────────────────────────────
@@ -281,7 +264,7 @@ def exchange_code(zoom, code: str, redirect_uri: str, post=None) -> tuple[int, d
 
 
 def _installed_page() -> str:
-    return public_page("Đã cài thành công", f"""<h1>✅ Đã cài {APP_NAME} vào Zoom</h1>
+    return public_page("Đã cài thành công", f"""<h1>Đã cài {APP_NAME} vào Zoom</h1>
 <p>Mở Zoom → <b>Team Chat</b> → mục <b>Apps</b> → chọn <b>{APP_NAME}</b>, nhắn <code>trangthai</code>.</p>
 <p>Lần đầu bot sẽ báo JID của bạn cho chủ ứng dụng qua Telegram; chủ ứng dụng gõ <code>/zoompair &lt;JID&gt;</code> để cấp quyền.</p>
 <p><a class="btn btn-primary" href="zoommtg://zoom.us/">Mở Zoom</a> &nbsp; <a class="btn btn-ghost" href="/docs">Xem hướng dẫn</a></p>
@@ -409,7 +392,7 @@ def register(app, settings, zoom, *, guard, post_guard, notify=None, post=None) 
         pend = zoom.pending() if zoom else {}
 
         def chk(v) -> str:
-            return '<span class="ok">✓</span>' if v else '<span class="no">✗</span>'
+            return '<span class="badge b-ok">có</span>' if v else '<span class="badge b-none">chưa</span>'
 
         def copy_btn(u: str) -> str:
             return (f'<button class="btn btn-ghost" type="button" style="padding:7px 12px;font-size:12px" '
@@ -479,14 +462,14 @@ hoặc chọn “Ghép đôi tài khoản này” ở trên.</li></ol>
         script = """<script>document.querySelectorAll('[data-copy]').forEach(function(b){b.addEventListener('click',function(){
 try{navigator.clipboard.writeText(b.getAttribute('data-copy'));b.textContent='Đã sao chép';}catch(e){}});});</script>"""
         body = (
-            ui.hero("Cấu hình Zoom",
+            ui.title("Cấu hình Zoom",
                     'Sao chép các địa chỉ dưới đây vào ứng dụng trên <a href="https://marketplace.zoom.us/user/build" target="_blank" '
                     'rel="noopener">Zoom Marketplace</a>, rồi thực hiện lần lượt các bước cài đặt. <a href="/zoom">Làm mới</a>',
-                    '<a class="btn btn-primary" href="/zoom/install">Thêm vào Zoom (Local Test)</a>', eyebrow="Zoom Team Chat")
+                    '<a class="btn btn-primary" href="/zoom/install">Thêm vào Zoom (Local Test)</a>')
             + pend_html
             + '<div class="grid g2">'
             + ui.card("Trạng thái", state_rows)
-            + ui.card("Biến môi trường", check_rows, sub="✓ đã thiết lập · giá trị được ẩn")
+            + ui.card("Biến môi trường", check_rows, sub="giá trị được ẩn; đặt trên Botkeep")
             + "</div>"
             + '<div class="grid g2 mt">'
             + ui.card("Địa chỉ khai báo trên Marketplace", url_rows)

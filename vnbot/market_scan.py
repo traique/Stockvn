@@ -118,6 +118,10 @@ class MarketCloses:
     def days(self) -> list[str]:
         return sorted(self._read()["days"])
 
+    def codes_on(self, day: str) -> set[str]:
+        """The stocks with a close saved for session ``day``."""
+        return set(self._read()["days"].get(day) or {})
+
     def progress(self, through: str) -> tuple[int, int]:
         """(sessions saved, sessions wanted) of the history up to ``through``."""
         data = self._read()

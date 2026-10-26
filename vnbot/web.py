@@ -283,7 +283,7 @@ def _book_card(title: str, book, *, accent: str, sub: str = "") -> str:
         f'<td class="num {ui.tone(f.pnl)}">{ui.money(f.pnl)}</td><td class="muted small">{html.escape(f.reason)}</td></tr>'
         for f in reversed(book.fills[-12:])]
     body = (
-        f'<div class="grid g4">{kpis}</div>'
+        f'<div class="kpis">{kpis}</div>'
         '<h3>Danh mục nắm giữ</h3>'
         + ui.table([("Mã", ""), ("KL", "num"), ("Giá vốn", "num"), ("Thị giá", "num"), ("Lãi/lỗ", "num"),
                     ("Cắt lỗ", "num"), ("", "")], positions, "Chưa nắm giữ cổ phiếu nào.")
@@ -364,13 +364,13 @@ def _bot_page(trader, msg: str = "") -> str:
     run_btn = (
         '<form method="post" action="/bot/run" style="margin:0">'
         f'<button class="btn btn-primary" type="submit"{" disabled" if running else ""}>'
-        f'{"Đang xử lý phiên…" if running else "▶ Chạy phiên ngay"}</button></form>'
+        f'{"Đang xử lý phiên…" if running else "Chạy phiên ngay"}</button></form>'
     )
     mode = {"paper": "Tài khoản ảo", "signal": "Tài khoản ảo kèm tín hiệu thật", "off": "Tắt"}.get(trader.settings.trade_mode, "")
     lead = (f'Chế độ <b>{mode}</b> · tín hiệu thật theo chiến lược <b>{html.escape(cal.STRATEGIES.get(trader.settings.signal_strategy, ""))}</b>'
             f' · tự động chạy lúc {html.escape(_run_time(trader))} mỗi ngày và bù các phiên bị lỡ'
             + (f' · phiên gần nhất {html.escape(last["day"])}' if last.get("day") else ""))
-    parts = [ui.hero("Bot giao dịch", lead, run_btn, eyebrow="Ba tài khoản ảo · không đặt lệnh thật"), ui.alert(msg, "info")]
+    parts = [ui.title("Bot giao dịch", lead, run_btn), ui.alert(msg, "info")]
     base = _common_start(trader.paper(), mom, fb)
     parts.append(ui.card("Hiệu quả ba chiến lược", _chart(trader),
                          sub="NAV quy về 100 tại phiên " + html.escape(base or "đầu tiên")
@@ -539,8 +539,8 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
                "<li>Kiểm tra: góc trên trang web và lệnh <code>/phienban</code> trong Telegram/Zoom hiện số mới; "
                "bot tự nhắn “Bot đã cập nhật” vào Telegram/Zoom.</li>"
                "<li>Bản dựng phải báo <b>đúng bản phát hành</b>; báo khác là thiếu file hoặc lẫn file cũ.</li></ol>")
-        body = (ui.hero("Phiên bản", "Bản đang chạy trên server, mã bản dựng để kiểm tra đã upload đúng và đủ, "
-                        "và những gì thay đổi qua từng phiên bản.", eyebrow="Quản lý")
+        body = (ui.title("Phiên bản", "Bản đang chạy trên server, mã bản dựng để kiểm tra đã upload đúng và đủ, "
+                        "và những gì thay đổi qua từng phiên bản.")
                 + stats + warn
                 + '<div class="grid g-wide mt">' + ui.card("Lịch sử phiên bản", history, sub="mới nhất ở trên")
                 + ui.card("Cập nhật bot", how) + "</div>")
@@ -610,6 +610,16 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
                         post_guard=post_guard, show_bot=lambda: trader is not None and settings.trade_mode != "off",
                         notify=getattr(trader, "notify", None))
 
+    from vnbot import claude_pick_web
+
+    claude_pick_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
+                             show_bot=lambda: trader is not None and settings.trade_mode != "off")
+
+    from vnbot import config_web
+
+    config_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
+                        show_bot=lambda: trader is not None and settings.trade_mode != "off")
+
     critic_llm: list = []        # the provider chain, built on the first web /critic
 
     def _ai_today() -> tuple[dict, list[dict]]:
@@ -620,7 +630,7 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     def _ai_stat(usage: dict) -> tuple[str, str, str]:
         cap = usage["cap"]
         value = f'{usage["total"]}<span class="muted" style="font-size:.6em"> / {cap}</span>' if cap else str(usage["total"])
-        return ("Lượt AI hôm nay", value, (ui.meter(usage["total"], cap) or "không giới hạn"))
+        return ("Lượt AI hôm nay", value, "trong hạn mức ngày" if cap else "không giới hạn")
 
     def _alerts_today() -> list[dict]:
         from vnbot.intraday import read_alerts
@@ -687,9 +697,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
 
             bot_link = ui.card(
                 "Bot giao dịch",
-                '<div class="grid g3">' + "".join(kpi(t, b) for t, b in books) + "</div>",
+                '<div class="kpis c3">' + "".join(kpi(t, b) for t, b in books) + "</div>",
                 sub="Ba tài khoản ảo, lãi/lỗ tính từ ngày khởi tạo của từng tài khoản",
-                action='<a class="btn btn-ghost" href="/bot">Chi tiết →</a>', cls="accent-gold",
+                action='<a class="btn btn-ghost" href="/bot">Chi tiết</a>', cls="accent-gold",
             )
         ai_card = ui.card(
             "Nhà cung cấp AI",
@@ -698,11 +708,10 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             + ui.meter(usage["total"], usage["cap"]),
             sub="Theo thứ tự dự phòng" if providers else
                 "Chưa cấu hình nhà cung cấp AI (ROUTER9_*, GROQ_API_KEY, OPENROUTER_API_KEY).",
-            action='<a class="btn btn-ghost" href="/ai">Xem →</a>')
+            action='<a class="btn btn-ghost" href="/ai">Xem</a>')
         body = (
-            ui.hero("Phân tích cổ phiếu",
-                    "Mọi hành động và mức giá do hệ thống định lượng xác lập; AI chỉ đóng vai trò phản biện và diễn giải.",
-                    eyebrow="Bảng điều khiển")
+            ui.title("Tổng quan",
+                    "Mọi hành động và mức giá do hệ thống định lượng xác lập; AI chỉ đóng vai trò phản biện và diễn giải.")
             + ui.alert(error, "err")
             + stats
             + '<div class="grid g-wide">'
@@ -715,7 +724,7 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             + '<div class="stack">' + bot_link + ui.card("Danh sách theo dõi", watch) + ai_card + "</div>"
             + "</div>"
         )
-        return _page("Phân tích", body, refresh=20 if jobs.is_active() else None, active="home",
+        return _page("Tổng quan", body, refresh=20 if jobs.is_active() else None, active="home",
                      show_bot=trader is not None and settings.trade_mode != "off")
 
     @app.get("/ai", dependencies=[Depends(guard)])
@@ -788,10 +797,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
                  f"<td class='num'>{_switch_form(key, switches.on(key)) if ready else _UNSET_BADGE}</td></tr>"
                  for key, label, ready, note in channels]
         body = (
-            ui.hero("AI & cảnh báo",
+            ui.title("AI & cảnh báo",
                     "AI chỉ được hỏi khi thực sự cần: mỗi mã một lượt, trong hạn mức hằng ngày. Mọi ý kiến phản biện "
-                    "đều được lưu lại và đối chiếu với diễn biến các phiên sau, giúp bạn đánh giá mức độ đáng tin của AI.",
-                    eyebrow="Giám sát")
+                    "đều được lưu lại và đối chiếu với diễn biến các phiên sau, giúp bạn đánh giá mức độ đáng tin của AI.")
             + stats
             + '<div class="grid g2">' + budget + alert_card + "</div>"
             + '<div class="mt">'
@@ -802,7 +810,7 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
                       flush=True)
             + "</div>"
             + '<div class="mt">' + ui.card("Kênh thông báo", ui.table([("Kênh", ""), ("", "")], chrow, ""), flush=True,
-                                            action='<a class="btn btn-ghost" href="/zoom">Cấu hình Zoom →</a>') + "</div>"
+                                            action='<a class="btn btn-ghost" href="/zoom">Cấu hình Zoom</a>') + "</div>"
         )
         return _page("AI & cảnh báo", body, active="ai", show_bot=trader is not None and settings.trade_mode != "off")
 
@@ -826,9 +834,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             logger.exception("Web critic for %r failed", code)
             return RedirectResponse(f"/?error={quote('Chưa thể phản biện (lỗi dữ liệu hoặc AI). Vui lòng thử lại sau ít phút.')}",
                                     status_code=303)
-        body = (ui.hero(f'<span class="tick">{html.escape(code)}</span> {ui.action_badge(result.action)}',
+        body = (ui.title(f'<span class="tick">{html.escape(code)}</span> {ui.action_badge(result.action)}',
                         f"Phiên {html.escape(day)} · AI phản biện, một lượt AI",
-                        '<a class="btn btn-ghost" href="/">← Mã khác</a>', eyebrow="AI phản biện")
+                        '<a class="btn btn-ghost" href="/">Mã khác</a>')
                 + '<div class="stack">'
                 + ui.card("Nhận định của AI", f'<pre class="report">{html.escape(verdict)}</pre>',
                           sub="AI không thay đổi hành động hay mức giá; kết quả sẽ được đối chiếu tại trang AI & cảnh báo",
@@ -858,9 +866,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             logger.exception("Quick decision for %r failed", ticker)
             text = "Chưa tính được quyết định định lượng (lỗi dữ liệu hoặc tính toán). Vui lòng thử lại sau ít phút."
         code = ticker.strip().upper()[:20]
-        body = (ui.hero(f'<span class="tick">{html.escape(code)}</span> · quyết định định lượng',
+        body = (ui.title(f'<span class="tick">{html.escape(code)}</span> · quyết định định lượng',
                         "Do Quant Engine tính toán, không dùng AI.",
-                        '<a class="btn btn-ghost" href="/">← Mã khác</a>', eyebrow="Quant Engine")
+                        '<a class="btn btn-ghost" href="/">Mã khác</a>')
                 + ui.card("", f'<pre class="report">{html.escape(text)}</pre>'))
         return _page(f"{code} - quyết định định lượng", body, active="home")   # page() escapes the title
 
@@ -915,11 +923,10 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
         if job is None:
             raise HTTPException(404, "Không tìm thấy lượt phân tích này.")
         live = job.status in ("queued", "quick", "running")
-        right = (f'<a class="btn btn-primary" href="/reports/{job.id}">Báo cáo đầy đủ →</a>' if job.html_path
-                 else '<a class="btn btn-ghost" href="/">← Trang chính</a>')
-        parts = [ui.hero(f'<span class="tick">{html.escape(job.ticker)}</span> {ui.action_badge(job.action)}',
-                         f"Ngày phân tích {html.escape(job.date)} · {_SOURCE_VI.get(job.source, '')}", right,
-                         eyebrow="Phân tích chuyên sâu"),
+        right = (f'<a class="btn btn-primary" href="/reports/{job.id}">Báo cáo đầy đủ</a>' if job.html_path
+                 else '<a class="btn btn-ghost" href="/">Trang chính</a>')
+        parts = [ui.title(f'<span class="tick">{html.escape(job.ticker)}</span> {ui.action_badge(job.action)}',
+                         f"Ngày phân tích {html.escape(job.date)} · {_SOURCE_VI.get(job.source, '')}", right),
                  ui.stepper(job.status)]
         if job.status == "queued":
             parts.append(ui.alert(f"Còn {jobs.position(job.id)} lượt chờ phía trước · trang sẽ tự cập nhật.", "info"))
@@ -956,14 +963,14 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
         message = {"Not Found": "Không tìm thấy trang.",
                    "Method Not Allowed": "Phương thức không được hỗ trợ."}.get(exc.detail, str(exc.detail))
         title = {503: "Trang web đang khoá", 429: "Tạm khoá đăng nhập"}.get(exc.status_code, "Đã xảy ra lỗi")
-        body = (ui.hero(title, "", '<a class="btn btn-ghost" href="/">← Trang chính</a>')
+        body = (ui.title(title, "", '<a class="btn btn-ghost" href="/">Trang chính</a>')
                 + ui.alert(message, "err"))
         return HTMLResponse(ui.page("Lỗi", body, show_bot=False, show_version=False), status_code=exc.status_code,
                             headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     def bad_form(request: Request, exc: RequestValidationError):
-        body = (ui.hero("Đã xảy ra lỗi", "", '<a class="btn btn-ghost" href="/">← Trang chính</a>')
+        body = (ui.title("Đã xảy ra lỗi", "", '<a class="btn btn-ghost" href="/">Trang chính</a>')
                 + ui.alert("Biểu mẫu thiếu thông tin hoặc chưa hợp lệ.", "err"))
         return _page("Lỗi", body, status_code=422, show_bot=False)
 
@@ -971,7 +978,7 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
     def server_error(request: Request, exc: Exception):
         # Never a traceback or an exception text on the page; Starlette re-raises
         # the exception after this response, so the server still logs it.
-        body = (ui.hero("Đã xảy ra lỗi", "", '<a class="btn btn-ghost" href="/">← Trang chính</a>')
+        body = (ui.title("Đã xảy ra lỗi", "", '<a class="btn btn-ghost" href="/">Trang chính</a>')
                 + ui.alert("Máy chủ gặp sự cố khi xử lý yêu cầu. Chi tiết đã được ghi vào nhật ký.", "err"))
         return _page("Lỗi", body, status_code=500, show_bot=False)
 

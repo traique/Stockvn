@@ -1,6 +1,8 @@
 # TradingAgents-VN on Botkeep: only what the web page, the Telegram bot and the
-# analysis need (no CLI libraries, no Anthropic/Google/AWS SDKs: the AI goes
-# through the OpenAI-compatible chain 9Router -> Groq -> OpenRouter -> Grok).
+# analysis need (no CLI libraries, no Google/AWS SDKs: the agents' AI goes through
+# the OpenAI-compatible chain 9Router -> Groq -> OpenRouter -> Grok; Anthropic's SDK
+# serves only Claude chọn bóng, imported when ANTHROPIC_API_KEY is set).
+anthropic>=2.3.0
 langchain-core>=1.6.5
 langchain-openai>=1.6.6
 langgraph>=1.2.12

@@ -25,6 +25,11 @@ stop hit, and on the next sessions the evening run's estimate of the ratio
 Each alert goes out once a day (kept in ``intraday_alerts.json``, so a restart
 does not repeat them). A price checked every few minutes can miss a brief dip
 through a stop between two reads.
+
+The one reminder of the discipline layer (``vnbot.kyluat``) also goes out from here:
+on the day a ⛔/🔴 exit ticket of the Tài sản portfolio falls due, between 14:20 and
+14:45, when no sale is in the journal yet - once a ticket, whatever the interval, and
+whether or not the price alerts are switched on (it is not a price alert).
 """
 
 from __future__ import annotations
@@ -106,6 +111,7 @@ def read_alerts(path: Path, day: str) -> list[dict]:
 
 
 TAISAN_LABEL = "💼 Tài sản"
+FOOTER = "Bot im lặng = không có việc cần làm. Bot không tự đặt lệnh; các tài khoản ảo vẫn khớp theo nến ngày sau 15:05."
 
 
 class IntradayMonitor:
@@ -283,6 +289,7 @@ class IntradayMonitor:
             for level in (drop, 2 * drop):
                 if change <= -level:
                     alerts.append((f"vni:{level:g}", f"📉 VNINDEX {change:+.2f}% so với phiên trước (ngưỡng −{level:g}%)"))
+        alerts += self._ticket_reminders(day, now)
         new = [(k, text) for k, text in alerts if k not in sent]
         self._keep_taisan_alerts(new, prices, day)
         if new:
@@ -290,7 +297,34 @@ class IntradayMonitor:
             self._remember(day, sent | {k for k, _ in new}, [text for _, text in new], at)
             self.notify(f"🔔 Cảnh báo trong phiên {at} (không gọi AI)\n"
                         + "\n".join(text for _, text in new)
-                        + "\nBot không tự đặt lệnh; các tài khoản ảo vẫn khớp theo nến ngày sau 15:05.")
+                        + "\n" + FOOTER)
+        return [text for _, text in new]
+
+    def _ticket_reminders(self, day: str, now) -> list[tuple[str, str]]:
+        """The reminder of an exit ticket due today (``kyluat.ticket_reminders``), [] outside
+        its window or when the portfolio is not there."""
+        account = getattr(self.trader, "taisan", None)
+        if account is None:
+            return []
+        from vnbot import kyluat
+
+        try:
+            return kyluat.ticket_reminders(account, day, now)
+        except Exception as exc:  # noqa: BLE001 - the price alerts still go out
+            logger.warning("Tài sản: ticket reminders: %s", exc)
+            return []
+
+    def remind(self, day: str, now=None) -> list[str]:
+        """The ticket reminders alone (no price read), sent and returned."""
+        from tradingagents.market import vn_rules
+
+        now = now or vn_rules.now_vn()
+        sent = self._sent(day)
+        new = [(k, text) for k, text in self._ticket_reminders(day, now) if k not in sent]
+        if new:
+            at = now.strftime("%H:%M")
+            self._remember(day, sent | {k for k, _ in new}, [text for _, text in new], at)
+            self.notify("\n".join(text for _, text in new))
         return [text for _, text in new]
 
     def _keep_taisan_alerts(self, new, prices, day) -> None:
@@ -309,9 +343,13 @@ class IntradayMonitor:
 
     def tick(self) -> None:
         from tradingagents.market import vn_rules
+        from vnbot import kyluat
 
         now = vn_rules.now_vn()
-        if vn_rules.session_phase(now) not in ACTIVE_PHASES:
+        phase = vn_rules.session_phase(now)
+        if phase in (*ACTIVE_PHASES, "atc") and kyluat.TICKET_REMIND_FROM <= now.strftime("%H:%M") < kyluat.TICKET_REMIND_UNTIL:
+            self.remind(now.strftime("%Y-%m-%d"), now)      # once a ticket; not bound to the interval
+        if phase not in ACTIVE_PHASES:
             return
         on = self.switches.on("intraday") if self.switches is not None else self.settings.intraday_alerts
         if not on:

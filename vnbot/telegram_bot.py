@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -121,6 +122,10 @@ HELP = (
     "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã đang theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
+    "Claude chọn bóng (cần ANTHROPIC_API_KEY và SIEUTINHIEU=1; chỉ ghi lại để đo, không phải lệnh):\n"
+    "/claude - phiên gần nhất: mã Claude chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
+    "/claude chay - chạy ngay cho phiên gần nhất (tốn phí API, mỗi phiên một lần) · /claude lichsu - các phiên gần đây\n"
+    "/claude tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
     "Hành động và mọi mức giá do hệ thống định lượng chốt; các agent AI chỉ diễn giải."
@@ -133,7 +138,8 @@ ZOOM_USER = "zoom"
 # The owner's real-money portfolio (vnbot.taisan). The old commands of the separate
 # Siêu tín hiệu account point to it.
 TAISAN_COMMANDS = ("/ts", "/taisan", "/tsmua", "/tsban", "/tsthuong", "/tscotuc", "/tsnap", "/tsrut", "/tstien",
-                   "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong")
+                   "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong",
+                   "/tskiemtra", "/tsgiu", "/tssan", "/tsmuctieu")
 STV_MOVED = {
     "/stvkhop": "Danh mục tiền thật đã chuyển sang Tài sản: mua /tsmua MÃ KL GIÁ, bán /tsban MÃ KL GIÁ (xem /ts).",
     "/stvcosan": "Danh mục tiền thật đã chuyển sang Tài sản: cổ phiếu mua từ trước ghi bằng /tsmua MÃ KL GIÁ NGÀY_MUA (xem /ts).",
@@ -153,7 +159,10 @@ def _amount(text: str) -> float:
     groups = re.split(r"[.,]", raw)
     if not raw or not all(g.isascii() and g.isdigit() for g in groups) or any(len(g) != 3 for g in groups[1:]):
         raise ValueError(f"Số không hợp lệ: {text!r}. Nhập số đầy đủ theo đồng, ví dụ 56300 hoặc 56.300.")
-    return float("".join(groups))
+    digits = "".join(groups)
+    if len(digits.lstrip("0")) > 15:                     # beyond any VND figure; float() would give inf
+        raise ValueError(f"Số quá lớn: {text[:40]!r}.")
+    return float(digits)
 
 
 def plain(text: str) -> str:
@@ -181,6 +190,9 @@ class TelegramBot:
         self.settings, self.jobs, self.watchlist = settings, jobs, watchlist
         if len(settings.telegram_token or "") >= 10:
             _SECRETS.add(settings.telegram_token)
+        key = os.environ.get("ANTHROPIC_API_KEY") or ""
+        if len(key) >= 10:
+            _SECRETS.add(key)           # never echoed back in an error message
         self._session = requests.Session()
         self._thread = threading.Thread(target=self._poll, name="telegram-bot", daemon=True)
         self.trader = None   # vnbot.trader.TradingBot, set by main_botkeep
@@ -511,6 +523,8 @@ class TelegramBot:
                 self._taisan(chat_id, command, args, message, from_zoom=user_id == ZOOM_USER)
             elif command == "/stvtheodoi":
                 self._stv_watch(chat_id, args)
+            elif command == "/claude":
+                self._claude(chat_id, args)
             elif command in ("/danhmuc", "/lenh", "/hieuchinh", "/khop", "/von", "/chay", "/thuong"):
                 self._trading(chat_id, command, args)
             else:
@@ -535,6 +549,43 @@ class TelegramBot:
         ahead = self.jobs.position(job.id)
         wait = f" (đang có {ahead} lượt chờ trước)" if ahead else ""
         self.send(chat_id, f"⏳ Đã nhận {code} ngày {day}{wait}. Quyết định hệ thống sẽ tới trước, báo cáo đầy đủ của các agent tới sau vài phút.")
+
+    def _claude(self, chat_id, args: str) -> None:
+        """Claude chọn bóng: the latest choice and the comparison, a run now, the history."""
+        from vnbot import claude_pick as cp
+
+        pick = cp.ClaudePick(self.settings.data_dir)
+        word = args.strip().lower()
+        if word in ("chay", "chạy", "run"):
+            off = cp.why_off()
+            if off:
+                raise ValueError(f"{cp.NAME} {off}.")
+            if pick.running:
+                raise ValueError(f"{cp.NAME} đang chạy, đợi một chút.")
+            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho Claude "
+                               "(đọc tin, 1-3 phút)...")
+
+            def work():                      # minutes with Claude: never on the chat's lane
+                try:
+                    text = pick.run()
+                except cp.Retry as exc:
+                    text = f"⚠️ Chưa gọi được Claude ({exc}). Gửi lại /claude chay sau ít phút."
+                except cp.PickError as exc:
+                    text = f"⚠️ {exc}"
+                except Exception as exc:  # noqa: BLE001 - said to the owner, logged
+                    logger.exception("Claude pick from Telegram failed")
+                    text = f"⚠️ Lỗi: {redact(exc)}"
+                self.send(chat_id, text)
+
+            threading.Thread(target=work, name="claude-pick-tg", daemon=True).start()
+        elif word in ("lichsu", "lịch sử", "lich su", "ls"):
+            self.send(chat_id, cp.history_text(pick.log.days()))
+        elif word in ("tuan", "tuần"):
+            self.send(chat_id, pick.last_week_text())
+        elif not word:
+            self.send(chat_id, pick.text())      # the evening run scores the open results; no download here
+        else:
+            raise ValueError("Dùng: /claude · /claude chay · /claude lichsu · /claude tuan")
 
     def _zoom_pairing(self, command: str, args: str, *, from_zoom: bool) -> str:
         """Pair, unpair or show the one Zoom account allowed to use the bot (from Telegram only)."""
