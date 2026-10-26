@@ -743,6 +743,15 @@ from vnbot import trend_estimate as te_module  # noqa: E402
 
 _lv = te_module.levels([20_000 + (i % 7) * 150 - i * 20 for i in range(80)])
 _rows, _ = te_module.assess(["AAA"], {"AAA": _lv["rule"]}, {"AAA": _lv}, {"AAA": _lv["prev"] * 1.01})
+_board = te_module.board_prices
+te_module.board_prices = lambda syms: {"VJC": {"price": 131_000, "ref": 128_400, "exchange": "HOSE"}}
+_names, _quotes = bot._stv_quotes(["VJC"], {"rows": [{"symbol": "VJC", "ref": 128_000}]})
+check("the message's quotes: the board asked as it goes out (price and reference now)",
+      _quotes["VJC"] == {"price": 131_000, "ref": 128_400}, _quotes)
+te_module.board_prices = lambda syms: (_ for _ in ()).throw(RuntimeError("board down"))
+_names, _quotes = bot._stv_quotes(["VJC"], {"rows": [{"symbol": "VJC", "ref": 128_000}]})
+check("board down: the reference from the scan, the price left to the scan's", _quotes["VJC"] == {"price": None, "ref": 128_000}, _quotes)
+te_module.board_prices = _board
 check("each estimate row carries its reference price (the previous close)",
       _rows and _rows[0]["ref"] == _lv["prev"] and external.change(_rows[0]["price"], _rows[0]["ref"]) == "+1,00%", _rows)
 check("live view: announced once", bot.stv_scan() is None)
