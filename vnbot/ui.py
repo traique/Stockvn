@@ -440,6 +440,8 @@ tr.void td{opacity:.55;text-decoration:line-through}
 .rank{display:inline-block;min-width:24px;color:var(--muted);font:400 var(--fs-small) var(--mono)}
 @media (min-width:900px){.sheet-grid{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--space-xl);padding:var(--space-xl)}
   .sheet-body{padding-top:var(--space-lg)}}
+.run-now{display:flex;flex-direction:column;align-items:flex-end;gap:var(--space-2xs);max-width:340px}
+.run-now p{text-align:right}
 /* under 60rem the sidebar folds into a 48px bar and a full-screen sheet */
 @media (max-width:60rem){
   .app{grid-template-columns:minmax(0,1fr)}
@@ -463,6 +465,7 @@ tr.void td{opacity:.55;text-decoration:line-through}
   .card-h{padding:var(--space-md) var(--space-md) var(--space-xs)}.card-b{padding:0 var(--space-md) var(--space-md)}.card>.card-b:first-child{padding-top:var(--space-md)}.acc>summary{padding:var(--space-sm) var(--space-md)}.acc-b{padding:0 var(--space-md) var(--space-md)}
   th:first-child,td:first-child{padding-left:var(--space-md)}th:last-child,td:last-child{padding-right:var(--space-md)}
   .title-row{margin-bottom:var(--space-md)}
+  .run-now{align-items:flex-start}.run-now p{text-align:left}
   input,select,textarea{font-size:1rem}
 }
 @media (max-width:767px){.strip>:nth-child(odd),.kpis>:nth-child(odd){padding-left:0;border-left:0}

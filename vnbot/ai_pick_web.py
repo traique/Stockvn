@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 HISTORY_ROWS = 40
 NOTE_ROWS = 10
 _LEVEL_VI = {"stop": "thủng cắt lỗ", "sell": "trang BÁN", "early": "dấu hiệu sớm"}
-_LAST = {"error": ""}          # the last run started from this page that failed outside the log (shown once)
+# The last run started by hand from this page: when, on which data, and how it ended (said on the page).
+_LAST: dict = {}
 
 
 def _e(text) -> str:
@@ -159,6 +160,12 @@ def _sheet(entry: dict | None, button: str) -> str:
     cands = entry.get("candidates") or []
     meta = (f'<div><dt>Chạy lúc</dt><dd>{_e(entry.get("at", "")[11:16])} {_e(cp._ddmm(day))}</dd></div>'
             f'<div><dt>Trả lời</dt><dd>{_who(entry)}</dd></div>')
+    if entry.get("live"):
+        meta += (f'<div><dt>Dữ liệu</dt><dd>trong phiên lúc {_e(entry["live"][11:16])}, giá khớp chưa chốt; '
+                 f'bot hỏi lại với tín hiệu đã chốt lúc {_e(cp.pick_time())}</dd></div>')
+    if entry.get("earlier"):
+        meta += ("<div><dt>Lần hỏi trước</dt><dd>" + ", ".join(
+            f'{_e(x.get("at", "")[11:16])} chọn {_e(x.get("pick"))}' for x in entry["earlier"]) + "</dd></div>")
     if cands:
         site = sum(1 for c in cands if c.get("source") != "bot")
         meta += f'<div><dt>Ứng viên</dt><dd>{len(cands)} lệnh MUA mới: {site} của trang, {len(cands) - site} bot ước tính</dd></div>'
@@ -174,7 +181,8 @@ def _sheet(entry: dict | None, button: str) -> str:
     rank = {s: i for i, s in enumerate(entry.get("ranking") or [], 1)}
     if pick.get("symbol"):
         cand = next(c for c in cands if c["symbol"] == pick["symbol"])
-        source = "bot ước tính đổi sang MUA, trang chưa báo" if cand.get("source") == "bot" else "lệnh MUA của trang"
+        source = ("bot ước tính đổi sang MUA trong phiên (giá khớp), trang chưa báo" if cand.get("live") else
+                  "bot ước tính đổi sang MUA, trang chưa báo" if cand.get("source") == "bot" else "lệnh MUA của trang")
         head = (f'<div class="sheet-head"><p class="small muted">Phiên {_e(cp._ddmm(day))}, {source}, '
                 f'độ tin {pick["confidence"]}/100</p>'
                 f'<div class="sheet-title"><h2 class="sheet-code" id="pick">{_e(pick["symbol"])}</h2>'
@@ -193,7 +201,7 @@ def _sheet(entry: dict | None, button: str) -> str:
     for c in sorted(cands, key=lambda c: rank.get(c["symbol"], 99)):
         tag = ('<span class="badge b-ok">chọn</span>' if c["symbol"] == pick.get("symbol")
                else '<span class="badge b-err">tránh</span>' if c["symbol"] in avoid else "")
-        source = "bot ước tính" if c.get("source") == "bot" else (
+        source = "bot ước tính trong phiên" if c.get("live") else "bot ước tính" if c.get("source") == "bot" else (
             f"trang, mạnh {c['strength']}%" if c.get("strength") is not None else "trang")
         rows.append(f'<tr><td><span class="rank">{rank.get(c["symbol"], "")}</span><span class="sym">{_e(c["symbol"])}</span> {tag}'
                     f'<div class="muted small">{_e(source)}</div></td>'
@@ -267,23 +275,37 @@ def _history(days: list[dict]) -> str:
                    sub="Kết quả tính tới hôm nay, chưa trừ phí và thuế (như nhau cho mọi lệnh)", flush=True)
 
 
+def _run_notice(running: bool) -> str:
+    """Where the last run by hand is: running (on which data, since when) or how it ended."""
+    if not _LAST:
+        return ""
+    head = f'Chạy tay lúc {_LAST["at"]}: phiên {_e(cp._ddmm(_LAST["day"]))}, dữ liệu {_e(_LAST["note"])}.'
+    if running and not _LAST.get("result"):
+        return ui.alert(f"{head} Đang chạy, thường mất 1-3 phút; trang tự tải lại.", "info")
+    if _LAST.get("result"):
+        return ui.alert(f'{head} {_e(_LAST["result"])}', _LAST.get("kind") or "info")
+    return ""
+
+
 def page_body(pick: cp.AiPick, msg: str = "") -> str:
     days = pick.log.days()
     notes = pick.notes.rows()
     st = pick.stats()                       # the checkpoints pinned on their first sessions
     off = cp.why_off()
     running = pick.running
+    plan = cp.manual_plan()
     button = ("" if off else
-              '<form method="post" action="/chonbong/chay" style="margin:0">'
+              '<div class="run-now"><form method="post" action="/chonbong/chay" style="margin:0" '
+              "onsubmit=\"var b=this.querySelector('button');b.disabled=true;b.textContent='Đang gửi…'\">"
               f'<button class="btn btn-primary" type="submit"{" disabled" if running else ""}>'
-              f'{"AI đang xem…" if running else "Chạy ngay phiên gần nhất"}</button></form>')
+              f'{"AI đang xem…" if running else "Chạy ngay với dữ liệu mới nhất"}</button></form>'
+              f'<p class="small muted">Bấm lúc này: phiên {_e(cp._ddmm(plan["day"]))}, {_e(plan["note"])}.</p></div>')
     notice = ""
     if off:
         notice = ui.alert(f"Tính năng {off}. Thêm biến môi trường trên Botkeep rồi khởi động lại bot.", "info")
-    elif running:
-        notice = ui.alert("Đang đọc các lệnh và tin (1-3 phút); trang tự tải lại.", "info")
-    elif _LAST["error"]:
-        notice = ui.alert(f"Lần chạy gần nhất từ trang này lỗi: {_LAST['error']}", "err")
+    else:
+        notice = _run_notice(running) or (
+            ui.alert("AI đang chạy lượt tự động của phiên (1-3 phút); trang tự tải lại.", "info") if running else "")
     kind = "err" if msg[:1] in ("⚠", "❌") else "ok" if msg[:1] in ("✅", "▶") else "info"
     lead = "Mỗi chiều AI chọn một lệnh MUA mới để đo, không phải để đặt lệnh."
     verdict_rows = "".join(f"<li>{_e(_web(line))}</li>" for line in cp.stats_lines(st))
@@ -331,7 +353,7 @@ def register(app, data_dir, *, guard, post_guard, show_bot=lambda: True) -> None
     def render(msg: str = "") -> HTMLResponse:
         pick = cp.AiPick(data_dir)
         return HTMLResponse(ui.page(cp.NAME, page_body(pick, msg[:600]), active="chonbong",
-                                    refresh=15 if pick.running else None, show_bot=show_bot()))
+                                    refresh=10 if pick.running else None, show_bot=show_bot()))
 
     @app.get("/chonbong", dependencies=[Depends(guard)])
     def chonbong_page(msg: str = "") -> HTMLResponse:
@@ -344,19 +366,32 @@ def register(app, data_dir, *, guard, post_guard, show_bot=lambda: True) -> None
         if off:
             return RedirectResponse(f"/chonbong?msg={quote(f'⚠️ Tính năng {off}.')}", status_code=303)
         if pick.running:
-            return RedirectResponse(f"/chonbong?msg={quote('AI đang chạy, đợi một chút.')}", status_code=303)
+            return RedirectResponse(f"/chonbong?msg={quote('AI đang chạy, đợi lượt này xong.')}", status_code=303)
+        plan = cp.manual_plan()
+        _LAST.clear()
+        _LAST.update(at=pick.now().strftime("%H:%M"), day=plan["day"], note=plan["note"])
 
         def work():
             try:
-                pick.run()
-                _LAST["error"] = ""
-            except Exception as exc:  # noqa: BLE001 - said on the page (a Retry is not in the log), logged
+                pick.run(plan["day"], force=True, live=plan["live"])
+                entry = pick.log.get(plan["day"]) or {}
+                chosen = (entry.get("pick") or {}).get("symbol")
+                if entry.get("error"):
+                    result, kind = f"Không có lựa chọn: {entry['error']}", "err"
+                elif chosen:
+                    result, kind = f"Xong lúc {pick.now():%H:%M}: AI chọn {chosen}.", "ok"
+                else:
+                    result, kind = f"Xong lúc {pick.now():%H:%M}: AI không chọn mã nào.", "ok"
+            except cp.Retry as exc:
+                result, kind = f"Chưa gọi được 9Router ({str(exc)[:200]}). Thử lại sau ít phút.", "err"
+            except Exception as exc:  # noqa: BLE001 - said on the page, logged
                 logger.exception("AI pick from the web failed")
-                _LAST["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+                result, kind = f"Lỗi: {type(exc).__name__}: {str(exc)[:200]}", "err"
+            _LAST.update(result=result, kind=kind)
 
         threading.Thread(target=work, name="ai-pick-web", daemon=True).start()
         for _ in range(40):                  # the page that follows shows it running (and refreshes)
-            if pick.running:
+            if pick.running or _LAST.get("result"):
                 break
             time.sleep(0.05)
-        return RedirectResponse("/chonbong", status_code=303)   # no message in the URL: the page refreshes itself
+        return RedirectResponse("/chonbong", status_code=303)   # the notice on the page says where the run is

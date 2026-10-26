@@ -24,13 +24,19 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.9.0"
+VERSION = "v1.10.0"
 RELEASED = "2026-10-26"
-RELEASE_BUILD = "509d7a4"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "f0a1ff6"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.10.0", "2026-10-26", (
+        "Chạy tay AI chọn bóng (nút trên web, /chonbong chay hoặc ngay) luôn hỏi lại với dữ liệu mới nhất",
+        "Trong phiên: giá khớp hôm nay, mã bot ước tính vừa qua mức MUA; kết quả tạm, 15:50 hỏi lại",
+        "Sau 15:10: tín hiệu đã chốt của hôm nay; trước giờ mở cửa: phiên gần nhất, có ghi rõ",
+        "Trang web: dưới nút ghi bấm lúc này dùng dữ liệu nào; bấm xong hiện đang chạy, rồi kết quả hoặc lỗi",
+    )),
     ("v1.9.0", "2026-10-26", (
         "Bỏ hẳn tên cũ: lệnh /chonbong, trang /chonbong, biến AI_PICK_*, file ai_pick.json",
         "Dữ liệu, cài đặt và biến môi trường theo tên cũ được tự chuyển sang tên mới khi khởi động",

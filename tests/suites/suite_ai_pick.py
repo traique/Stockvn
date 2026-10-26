@@ -281,4 +281,115 @@ os.environ.pop(OLD + "_MODEL")
 settings_module._carry_over_pick(old_dir)
 t.ok("a second start changes nothing", json.loads((old_dir / "settings.json").read_text(encoding="utf-8")) == saved)
 
+# ───────────── 8. a run by hand: the newest data of today ─────────────
+from unittest import mock  # noqa: E402
+
+from vnbot import market_scan  # noqa: E402
+
+FRI = datetime(2026, 10, 23, 10, 30)
+plan = cp.manual_plan(FRI)
+t.ok("in the session: today, on the matched prices", plan["day"] == "2026-10-23" and plan["live"] and "10:30" in plan["note"])
+plan = cp.manual_plan(datetime(2026, 10, 23, 15, 30))
+t.ok("after the site's final signals: today, final", plan["day"] == "2026-10-23" and not plan["live"]
+     and "đã chốt" in plan["note"])
+plan = cp.manual_plan(datetime(2026, 10, 23, 8, 0))
+t.ok("before the open: the last session, said so", plan["day"] == "2026-10-22" and not plan["live"]
+     and "chưa mở cửa" in plan["note"])
+plan = cp.manual_plan(datetime(2026, 10, 24, 11, 0))
+t.ok("on a day off: the last session, said so", plan["day"] == "2026-10-23" and "không giao dịch" in plan["note"])
+
+
+class Closes:
+    def series(self, codes, as_of):
+        return {c: [20000.0 + i * 10 for i in range(60)] for c in codes}, {}, {}
+
+
+SNAP = {"at": "2026-10-23T10:30", "basis": "2026-10-22", "size": 300, "rows": [
+    {"symbol": "CCC", "state": "SELL", "price": 21500, "level": 21000, "dist": 2.4, "flip": "BUY", "value": 9e9},
+    {"symbol": "DDD", "state": "BUY", "price": 9000, "level": 9500, "dist": -5.3, "flip": "SELL", "value": 8e9},
+    {"symbol": "EEE", "state": "SELL", "price": 30500, "level": 30100, "dist": 1.3, "flip": "BUY", "value": 7e9}]}
+with mock.patch.object(market_scan, "scan", return_value=SNAP) as scanned:
+    got, why = cp.live_candidates(Closes(), 300, FRI)
+t.ok("live candidates: the stocks past the level that turns them to BUY now, marked live",
+     [c["symbol"] for c in got] == ["CCC", "EEE"] and all(c["live"] and c["source"] == "bot" for c in got)
+     and got[0]["price"] == 21500 and got[0]["level"] == 21000 and why == "" and scanned.called)
+t.ok("...the prompt says the price is matched, not closed", "giá khớp 21.500 đã qua mức 21.000, chưa chốt"
+     in cp.candidate_line(1, got[0]))
+with mock.patch.object(market_scan, "scan", return_value={"error": "ngoài giờ giao dịch"}):
+    t.ok("no scan: none, and why", cp.live_candidates(Closes(), 300, FRI) == ([], "ngoài giờ giao dịch"))
+
+env(**ROUTER, SIEUTINHIEU=1)
+live_dir = DATA / "live"
+live_dir.mkdir()
+r = Router(fenced({"pick": {"symbol": "CCC", "confidence": 55, "reason": "vượt mức", "sources": []}, "avoid": [],
+                   "ranking": ["CCC", "EEE"], "market_note": "x"}))
+with mock.patch.object(market_scan, "scan", return_value=SNAP):
+    text = Evening(live_dir, store=Store(), client=r, bars=bars, closes=Closes(), now=lambda: FRI).run(
+        "2026-10-23", force=True, live=True)
+entry = cp.PickLog(live_dir).get("2026-10-23")
+t.ok("a live run: today, the live candidates, recorded as provisional", entry["pick"]["symbol"] == "CCC"
+     and entry["provisional"] and entry["live"] == "2026-10-23T10:30" and [c["symbol"] for c in entry["candidates"]] == ["CCC", "EEE"])
+t.ok("...the question says it is the session, the matched prices", "ĐANG TRONG PHIÊN 23/10 lúc 10:30" in r.seen[0]["messages"][1]["content"])
+t.ok("...the message says the data is of the session and asked again at the close", "Dữ liệu trong phiên lúc 10:30" in text
+     and "trong phiên, giá khớp" in text, text)
+t.ok("...the scheduler asks again with the final signals", cp.PickLog(live_dir).status("2026-10-23", FRI) == "retryable")
+r = Router(fenced(answer))
+Evening(live_dir, store=Store(), client=r, bars=bars, now=lambda: datetime(2026, 10, 23, 15, 50)).run("2026-10-23")
+entry = cp.PickLog(live_dir).get("2026-10-23")
+t.ok("the evening run replaces it, keeping a trace of the earlier answer", entry["pick"]["symbol"] == "AAA"
+     and not entry.get("provisional") and entry["earlier"] == [{"at": "2026-10-23T10:30", "pick": "CCC", "live": True}]
+     and cp.PickLog(live_dir).status("2026-10-23", FRI) == "done")
+r = Router(fenced({**answer, "pick": {"symbol": "BBB", "confidence": 50, "reason": "r", "sources": []}}))
+Evening(live_dir, store=Store(), client=r, bars=bars, now=lambda: datetime(2026, 10, 23, 16, 10)).run("2026-10-23", force=True)
+entry = cp.PickLog(live_dir).get("2026-10-23")
+t.ok("by hand on an answered session: asked again (force), the earlier answers kept", len(r.seen) == 1
+     and entry["pick"]["symbol"] == "BBB" and [x["pick"] for x in entry["earlier"]] == ["CCC", "AAA"])
+
+
+class Holder(cp.AiPick):
+    pass
+
+
+h = Holder(live_dir, board=lambda symbols: {"HPG": {"price": 24000}}, now=lambda: FRI)
+out = h._at_matched_prices([{"symbol": "HPG", "qty": 100, "avg": 26000, "close": 26500, "stop": 25000, "target": None,
+                             "site": None, "rule": "GIỮ", "rule_why": "x"}])
+t.ok("holdings in the session: the matched price, the rule judged on it", out[0]["close"] == 24000 and out[0]["live"]
+     and out[0]["rule"] == "BÁN" and out[0]["pnl_pct"] == round((24000 / 26000 - 1) * 100, 2))
+t.ok("...said as the matched price in the question", "giá khớp 24.000" in cp.holding_line({**out[0], "weight": 10}))
+
+# the page: what the button will use, and where the run is
+cpw._LAST.clear()
+with mock.patch.object(cp, "manual_plan", return_value={"day": "2026-10-23", "live": True, "note": "giá khớp trong phiên hôm nay lúc 10:30"}):
+    body = cpw.page_body(cp.AiPick(live_dir, now=lambda: FRI))
+t.ok("the button says what a run now will use", "Chạy ngay với dữ liệu mới nhất" in body
+     and "Bấm lúc này: phiên 23/10, giá khớp trong phiên hôm nay lúc 10:30." in body and "Đang gửi…" in body)
+cpw._LAST.update(at="10:30", day="2026-10-23", note="giá khớp trong phiên hôm nay lúc 10:30")
+with mock.patch.object(cp.AiPick, "running", new_callable=mock.PropertyMock, return_value=True):
+    body = cpw.page_body(cp.AiPick(live_dir, now=lambda: FRI))
+t.ok("while it runs: since when, on which data", "Chạy tay lúc 10:30: phiên 23/10, dữ liệu giá khớp trong phiên hôm nay lúc 10:30. "
+     "Đang chạy" in body)
+cpw._LAST.update(result="Xong lúc 10:32: AI chọn CCC.", kind="ok")
+body = cpw.page_body(cp.AiPick(live_dir, now=lambda: FRI))
+t.ok("when it is done: the result", "Xong lúc 10:32: AI chọn CCC." in body and "alert-ok" in body)
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+app = FastAPI()
+cpw.register(app, live_dir, guard=lambda: None, post_guard=[])
+calls = []
+
+
+def fake_run(self, day=None, *, force=False, live=False):
+    calls.append((day, force, live))
+    return "ok"
+
+
+cpw._LAST.clear()
+with mock.patch.object(cp.AiPick, "run", fake_run), \
+        mock.patch.object(cp, "manual_plan", return_value={"day": "2026-10-23", "live": True, "note": "giá khớp lúc 10:30"}):
+    page = TestClient(app).post("/chonbong/chay")
+t.ok("the button: a forced run of today's live data, the page then says so", calls == [("2026-10-23", True, True)]
+     and page.status_code == 200 and "Chạy tay lúc" in page.text and "AI chọn BBB" in page.text, (calls, cpw._LAST))
+
 t.done()
