@@ -32,11 +32,11 @@ RELEASE_BUILD = "1831e44"          # written by `python -m vnbot.version --stamp
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.7.0", "2026-10-26", (
-        "Claude chọn bóng: chưa có ANTHROPIC_API_KEY, Claude lỗi hoặc chạm trần USD thì 9Router trả lời thay (CLAUDE_PICK_ROUTER9)",
-        "9Router dùng chung hạn mức ngày và thời gian nghỉ với các agent; không tìm tin nên không có nguồn, không tính vào trần USD",
+        "Claude chọn bóng: chưa có khoá Claude, Claude lỗi hoặc chạm trần USD thì 9Router trả lời thay",
+        "9Router dùng chung hạn mức ngày với các agent; không tìm tin nên không có nguồn, không tính vào trần USD",
         "Mỗi tin nhắn, bản ghi và trang web ghi rõ Claude hay 9Router trả lời, và vì sao",
-        "Giao diện Coral: giấy xám ấm, bản ghi như tờ giấy cotton, nút in nổi, chữ Be Vietnam Pro, số trong bảng Geist Mono",
-        "Trang Claude chọn bóng mở đầu bằng phiếu chọn của phiên, mã được chọn đóng dấu; bảng thành khối có nhãn trên điện thoại",
+        "Giao diện Coral: giấy xám ấm, bản ghi như tờ giấy cotton, nút in nổi, chữ Be Vietnam Pro",
+        "Trang Claude chọn bóng mở đầu bằng phiếu chọn của phiên, mã được chọn đóng dấu Đã chọn",
         "Số thiếu ghi chưa có thay gạch ngang; axe 0 lỗi ở mọi trang, sáng và tối, 390 và 1440 px",
     )),
     ("v1.6.0", "2026-10-25", (
