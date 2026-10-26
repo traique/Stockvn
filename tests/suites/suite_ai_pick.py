@@ -1,0 +1,219 @@
+"""AI chọn bóng on 9Router (UniRouter, Gemini web with its own web search): what is asked,
+how the JSON answer is read and checked, what is recorded and said (``claude_pick``)."""
+import json
+import os
+from datetime import datetime
+from types import SimpleNamespace as NS
+
+import _common  # noqa: F401 - clean env, no .env, offline, temp folder, repo on sys.path
+
+import httpx  # noqa: E402
+import openai  # noqa: E402
+
+from tradingagents.llm_clients import fallback_client as fc  # noqa: E402
+from vnbot import claude_pick as cp  # noqa: E402
+
+t = _common.Checks()
+DATA = _common.ROOT / "data"
+DATA.mkdir()
+REQ = httpx.Request("POST", "https://router.example/v1")
+DAY = "2026-10-23"
+NOW = datetime(2026, 10, 23, 15, 55)
+TOOL = cp.submit_tool(["AAA", "BBB"], ["HPG"])
+ANSWER = {"pick": {"symbol": "AAA", "confidence": 60, "reason": "nền giá chặt",
+                   "sources": ["[CafeF](https://cafef.vn/aaa-tang-von.chn)", "https://example.com/blog"]},
+          "avoid": [{"symbol": "BBB", "reason": "đã tăng xa", "sources": []}], "ranking": ["AAA", "BBB"],
+          "holdings": [{"symbol": "HPG", "view": "Giữ", "reason": "chưa thủng cắt lỗ", "sources": []}],
+          "market_note": "thị trường đi ngang"}
+ROUTER = {"ROUTER9_BASE_URL": "https://router.example/v1", "ROUTER9_API_KEY": "r9"}
+
+
+def env(**values) -> None:
+    for key in ("ROUTER9_BASE_URL", "ROUTER9_API_KEY", "CLAUDE_PICK_MODEL", "SIEUTINHIEU", "CLAUDE_PICK", "CLAUDE_PICK_BOT",
+                "LLM_MAX_CALLS_PER_DAY"):
+        os.environ.pop(key, None)
+    os.environ.update({k: str(v) for k, v in values.items()})
+    fc.reset_provider_state()
+
+
+class Router:
+    """9Router's OpenAI-compatible client: answers the texts in turn (or raises ``error``)."""
+
+    def __init__(self, *texts, error=None, finish="stop"):
+        self.texts, self.error, self.finish, self.seen = list(texts), error, finish, []
+        self.chat = NS(completions=NS(create=self.create))
+
+    def create(self, **kwargs):
+        self.seen.append(json.loads(json.dumps(kwargs)))
+        if self.error is not None:
+            raise self.error
+        text = self.texts.pop(0) if self.texts else ""
+        return NS(model="gemini-pro", usage=NS(prompt_tokens=900, completion_tokens=300),
+                  choices=[NS(finish_reason=self.finish, message=NS(content=text, tool_calls=None))])
+
+
+def fenced(obj) -> str:
+    return "Đây là kết quả:\n```json\n" + json.dumps(obj, ensure_ascii=False) + "\n```"
+
+
+# ───────────── 1. configuration ─────────────
+env(SIEUTINHIEU=1)
+t.ok("without 9Router: off, and the message says what is missing", not cp.enabled() and "ROUTER9_BASE_URL" in cp.why_off())
+env(SIEUTINHIEU=1, **ROUTER)
+t.ok("with 9Router: on, Gemini web by default", cp.enabled() and cp.why_off() == "" and cp.model() == "gmw/gemini-pro")
+env(**ROUTER, CLAUDE_PICK_MODEL="gmw/gemini-flash")
+t.ok("CLAUDE_PICK_MODEL picks the model", cp.model() == "gmw/gemini-flash")
+env(**ROUTER, CLAUDE_PICK_MODEL="claude-opus-5-5")
+t.ok("an old Anthropic name left in the settings falls back to the default", cp.model() == "gmw/gemini-pro")
+t.ok("no Anthropic SDK is imported any more", "anthropic" not in open(cp.__file__, encoding="utf-8").read().lower().replace(
+    "anthropic name", ""))
+
+# ───────────── 2. the request ─────────────
+env(**ROUTER)
+r = Router(fenced(ANSWER))
+raw, meta = cp.ask("đề bài", TOOL, client=r)
+sent = r.seen[0]
+t.ok("no tools are sent (Gemini web would be skipped, and its search with it)", "tools" not in sent and "tool_choice" not in sent)
+t.ok("the model, the system, the question and the JSON Schema", sent["model"] == "gmw/gemini-pro"
+     and sent["messages"][0]["role"] == "system" and "Tìm trên web" in sent["messages"][0]["content"]
+     and sent["messages"][1]["content"].startswith("đề bài")
+     and json.dumps(TOOL["input_schema"], ensure_ascii=False) in sent["messages"][1]["content"])
+t.ok("the JSON read from a fenced block, the meta", raw == ANSWER and meta["served_by"] == "gemini-pro"
+     and meta["usage"] == {"input": 900, "output": 300})
+r = Router("Tôi sẽ tìm tin trước.", json.dumps({"market_note": "x"}))
+raw, _ = cp.ask("đề", TOOL, client=r)
+t.ok("not JSON at first: asked once more, with the first answer and a nudge", raw == {"market_note": "x"} and len(r.seen) == 2
+     and r.seen[1]["messages"][-1]["content"] == cp.NUDGE and r.seen[1]["messages"][-2]["role"] == "assistant")
+try:
+    cp.ask("đề", TOOL, client=Router("không", "vẫn không"))
+    t.ok("never JSON: PickError after two answers", False)
+except cp.PickError as exc:
+    t.ok("never JSON: PickError after two answers", "JSON" in str(exc) and exc.meta["model"] == "gmw/gemini-pro")
+text, _ = cp.ask("dữ kiện", None, client=Router("  • giữ kỷ luật  "))
+t.ok("the weekly review: plain text, no schema", text == "• giữ kỷ luật")
+try:
+    cp.ask("x", TOOL, client=Router(error=openai.APIConnectionError(request=REQ)))
+    t.ok("9Router unreachable: Retry", False)
+except cp.Retry as exc:
+    t.ok("9Router unreachable: Retry", "9Router" in str(exc))
+t.ok("...and it rests, shared with the agents' chain", fc.is_resting("router9"))
+r = Router(fenced(ANSWER))
+try:
+    cp.ask("x", TOOL, client=r)
+    t.ok("while resting: Retry at once, nothing sent", False)
+except cp.Retry:
+    t.ok("while resting: Retry at once, nothing sent", r.seen == [])
+env(**ROUTER, LLM_MAX_CALLS_PER_DAY=1)
+cp.ask("x", TOOL, client=Router(fenced(ANSWER)))
+try:
+    cp.ask("x", TOOL, client=Router(fenced(ANSWER)))
+    t.ok("the day's AI budget counts these answers", False)
+except cp.Retry as exc:
+    t.ok("the day's AI budget counts these answers", "hạn mức" in str(exc), str(exc))
+
+# ───────────── 3. reading the answer ─────────────
+out = cp.clean(ANSWER, [{"symbol": "AAA"}, {"symbol": "BBB"}], ["HPG"])
+t.ok("a source kept only on the news sites (a Markdown link or a bare URL)",
+     out["pick"]["sources"] == ["https://cafef.vn/aaa-tang-von.chn"])
+t.ok("a view in any case is read (\"Giữ\" -> GIỮ)", out["views"]["HPG"]["view"] == "GIỮ")
+out = cp.clean({"pick": {"symbol": "ZZZ", "confidence": 900}, "ranking": "AAA", "avoid": [{"symbol": "AAA"}, "x"]},
+               [{"symbol": "AAA"}, {"symbol": "BBB"}], [])
+t.ok("codes outside the candidates, a ranking that is not a list and odd items are dropped",
+     out["pick"]["symbol"] == "" and out["ranking"] == ["AAA", "BBB"] and [a["symbol"] for a in out["avoid"]] == ["AAA"])
+t.ok("www. and subdomains of a news site count; a look-alike does not",
+     cp._sources(["https://www.vietstock.vn/a", "https://s.cafef.vn/b", "https://cafef.vn.evil.com/c"])
+     == ["https://www.vietstock.vn/a", "https://s.cafef.vn/b"])
+
+
+# ───────────── 4. a whole evening ─────────────
+class Store:
+    def refresh(self, symbols, fresh_after=None):
+        return [], None
+
+    def fetched_at(self, symbol):
+        return f"{DAY}T15:20"
+
+    def signals(self, symbol):
+        return []
+
+    def state(self, symbol, day, cutoff):
+        return {"side": "BUY", "day": DAY, "live": True, "price": 20000, "sl": 18500, "tp1": 23000, "strength_pct": 70}
+
+
+class Evening(cp.ClaudePick):
+    def symbols(self):
+        return ["AAA", "BBB"]
+
+    def _held(self):
+        return []
+
+
+def bars(symbol, day):
+    return [{"d": f"2026-10-{d:02d}", "o": 20000.0, "h": 20500.0, "l": 19800.0, "c": 20000.0 + d * 50, "v": 1e6}
+            for d in range(1, 24)]
+
+
+env(**ROUTER, SIEUTINHIEU=1, CLAUDE_PICK_BOT=0)
+evening_dir = DATA / "evening"
+evening_dir.mkdir()
+answer = {k: v for k, v in ANSWER.items() if k != "holdings"}
+text = Evening(evening_dir, store=Store(), client=Router(fenced(answer)), bars=bars, now=lambda: NOW).run(DAY)
+entry = cp.PickLog(evening_dir).get(DAY)
+t.ok("the evening: recorded with the model that answered, no cost", entry["pick"]["symbol"] == "AAA"
+     and entry["model"] == "gmw/gemini-pro" and entry["served_by"] == "gemini-pro" and not entry.get("pending")
+     and "cost_usd" not in entry and entry["pick"]["sources"] == ["https://cafef.vn/aaa-tang-von.chn"], entry)
+t.ok("...the message: the AI's pick and who answered", "⭐ AI chọn: " in text and "Trả lời: gemini-pro (qua 9Router)" in text
+     and "Claude" not in text and "USD" not in text, text)
+t.ok("...the session is done (not asked again)", cp.PickLog(evening_dir).status(DAY, NOW) == "done")
+r = Router(fenced(answer))
+Evening(evening_dir, store=Store(), client=r, bars=bars, now=lambda: NOW).run(DAY)
+t.ok("...a second run only shows it", r.seen == [])
+
+env(**ROUTER, SIEUTINHIEU=1, CLAUDE_PICK_BOT=0)
+bad_dir = DATA / "bad"
+bad_dir.mkdir()
+text = Evening(bad_dir, store=Store(), client=Router("xin lỗi", "không"), bars=bars, now=lambda: NOW).run(DAY)
+t.ok("an answer that is never JSON: recorded as a failure, asked again on the next run",
+     "Không có lựa chọn" in text and cp.PickLog(bad_dir).status(DAY, NOW) == "retryable")
+text = Evening(bad_dir, store=Store(), client=Router(fenced(answer)), bars=bars, now=lambda: NOW).run(DAY)
+t.ok("...and the next run answers it", cp.PickLog(bad_dir).get(DAY)["pick"]["symbol"] == "AAA")
+
+env(**ROUTER, SIEUTINHIEU=1, CLAUDE_PICK_BOT=0)
+retry_dir = DATA / "retry"
+retry_dir.mkdir()
+try:
+    Evening(retry_dir, store=Store(), client=Router(error=openai.APIConnectionError(request=REQ)), bars=bars,
+            now=lambda: NOW).run(DAY)
+    t.ok("9Router down: Retry, the day free to try again", False)
+except cp.Retry:
+    saved = cp.PickLog(retry_dir).get(DAY)
+    t.ok("9Router down: Retry, the day free to try again", saved and "9Router" in saved["error"]
+         and cp.PickLog(retry_dir).status(DAY, NOW) == "retryable", saved)
+text = Evening(retry_dir, now=lambda: NOW).give_up(DAY, "ConnectionError")
+t.ok("given up after the day's tries: said once, the candidates kept", "không gọi được 9Router" in text
+     and cp.PickLog(retry_dir).get(DAY).get("candidates"))
+
+# ───────────── 5. the texts ─────────────
+note = {"level": "stop", "symbol": "HPG", "at": f"{DAY}T10:30", "rule": "⛔", "cause": "chưa rõ", "news": "chưa có tin",
+        "view": "GIỮ", "reason": "r"}
+t.ok("an alert note says AI, not Claude", "AI xem cảnh báo" in cp.note_text(note) and "AI: GIỮ" in cp.note_text(note))
+week = {"week": "2026-W43", "day": DAY, "facts": ["f"], "text": "• ổn"}
+t.ok("a weekly review says AI", "Nhận xét của AI:" in cp.week_text(week) and "Claude" not in cp.week_text(week))
+
+# ───────────── 6. the page ─────────────
+from vnbot import claude_pick_web as cpw  # noqa: E402
+
+env(**ROUTER, SIEUTINHIEU=1)
+body = cpw.page_body(cp.ClaudePick(evening_dir, now=lambda: NOW))
+t.ok("the page leads with the pick sheet: the code pressed as chosen", '<section class="card sheet"' in body
+     and 'id="pick">AAA</h2><span class="stamp">Đã chọn</span>' in body
+     and body.index("sheet") < body.index("Kết quả đo tới nay"))
+t.ok("...says the model that answers now and the one that answered", "Trả lời: gmw/gemini-pro qua 9Router" in body
+     and "gemini-pro qua 9Router" in body and "Claude" not in body and "USD" not in body)
+t.ok("...the candidates restack on a phone, every cell labelled", '<table class="stack">' in body and 'data-label="Giá"' in body)
+t.ok("...no dotted meta strings or dash placeholders", " · " not in body and "—" not in body)
+t.ok("...the cited source links to the news site", 'href="https://cafef.vn/aaa-tang-von.chn"' in body)
+body = cpw.page_body(cp.ClaudePick(retry_dir, now=lambda: NOW))
+t.ok("a failed session: the error on the sheet, no stamp", "không có lựa chọn" in body and 'class="stamp"' not in body)
+
+t.done()

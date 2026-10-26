@@ -24,13 +24,20 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.7.0"
+VERSION = "v1.8.0"
 RELEASED = "2026-10-26"
-RELEASE_BUILD = "1831e44"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "389c5a3"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.8.0", "2026-10-26", (
+        "AI chọn bóng thay Claude chọn bóng: không dùng API Anthropic nữa, không còn chi phí USD",
+        "AI là Gemini web trên 9Router (UniRouter), mặc định gmw/gemini-pro, tự tìm tin trên web",
+        "Hỏi bằng chữ kèm JSON Schema, đọc một khối JSON; không đúng mẫu thì hỏi lại một lần",
+        "Nguồn tin chỉ giữ link tới các trang tin tài chính đã định; model đổi ở CLAUDE_PICK_MODEL",
+        "Tính vào hạn mức AI ngày của 9Router; lệnh và trang vẫn là /claude",
+    )),
     ("v1.7.0", "2026-10-26", (
         "Claude chọn bóng: chưa có khoá Claude, Claude lỗi hoặc chạm trần USD thì 9Router trả lời thay",
         "9Router dùng chung hạn mức ngày với các agent; không tìm tin nên không có nguồn, không tính vào trần USD",

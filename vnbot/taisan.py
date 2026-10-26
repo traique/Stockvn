@@ -420,7 +420,7 @@ class TaiSan:
         self._live: tuple[float, dict] = (0.0, {})
         self.rebuilding = False
         self._bad_lines: set[str] = set()
-        # (level, symbol, price, day) on a new alert: Claude's look at the news (vnbot.claude_pick), set by main
+        # (level, symbol, price, day) on a new alert: the AI's look at the news (vnbot.claude_pick), set by main
         self.on_alert = None
 
     # ── the journal ──
@@ -1010,7 +1010,7 @@ class TaiSan:
     def record_alert(self, level: str, symbol: str, price: float | None, day: str, at: str = "", *, hook: bool = True) -> bool:
         """Keep an alert sent for a holding, once per (day, symbol, level), to judge later how
         the price went after it (``settle_shadow``). True when it is new. ``hook``: also tell
-        ``on_alert`` (Claude's look at the news); off for an alert the evening report repeats."""
+        ``on_alert`` (the AI's look at the news); off for an alert the evening report repeats."""
         if level not in ALERT_LEVELS:
             return False
         added = []
