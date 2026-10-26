@@ -39,6 +39,13 @@ of searches a request, ``MAX_TOKENS`` of output. Configuration: ``ANTHROPIC_API_
 claude-opus-5-5), ``CLAUDE_PICK_EFFORT`` (default medium), ``CLAUDE_PICK_SEARCHES`` (10),
 ``CLAUDE_PICK_TIME`` (15:50), ``CLAUDE_PICK_BOT`` (1: the scan's candidates too),
 ``CLAUDE_PICK_ALERTS`` (5 a day, 0 = none), ``CLAUDE_PICK_WEEKLY`` (1).
+
+9Router stands in (``ClaudePick._ask``, ``CLAUDE_PICK_ROUTER9``, on by default): without
+``ANTHROPIC_API_KEY``, past the month's cap, or when Claude's API fails (cannot be reached,
+an error status, a timeout), the same question goes to 9Router (``ROUTER9_BASE_URL``,
+``ROUTER9_API_KEY``, model ``CLAUDE_PICK_ROUTER9_MODEL`` or ``ROUTER9_MODEL``) through the
+agents' provider chain. It has no news search, so its answers carry no sources; it is not
+billed to the cap. Every record says who answered (``via``, ``served_by``) and why.
 """
 
 from __future__ import annotations
@@ -84,6 +91,8 @@ PINS_FILE = "claude_checkpoints.json"
 TOOL = "submit_picks"
 NOTE_TOOL = "submit_note"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+ROUTER_DEFAULT_MODEL = "gpt-4o-mini"   # 9Router's model when neither CLAUDE_PICK_ROUTER9_MODEL nor ROUTER9_MODEL is set
+ROUTER_TIMEOUT = 300.0     # seconds for one 9Router answer (no searches, one request)
 NEWS_DOMAINS = ("cafef.vn", "vietstock.vn", "vnexpress.net", "tinnhanhchungkhoan.vn", "vneconomy.vn",
                 "baodautu.vn", "nguoiquansat.vn", "hsx.vn", "hnx.vn", "ssc.gov.vn")
 # USD per million tokens: input, output, cache write (5 min), cache read. A model not listed
@@ -118,10 +127,34 @@ def api_key() -> str:
     return (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 
 
+def router_on() -> bool:
+    from vnbot.settings import _flag
+
+    return _flag("CLAUDE_PICK_ROUTER9", True)
+
+
+def router_ready() -> bool:
+    """9Router can stand in for Claude: allowed (``CLAUDE_PICK_ROUTER9``) and configured."""
+    return router_on() and bool((os.environ.get("ROUTER9_BASE_URL") or "").strip()
+                                and (os.environ.get("ROUTER9_API_KEY") or "").strip())
+
+
+def router_model() -> str:
+    return ((os.environ.get("CLAUDE_PICK_ROUTER9_MODEL") or "").strip() or (os.environ.get("ROUTER9_MODEL") or "").strip()
+            or ROUTER_DEFAULT_MODEL)
+
+
 def enabled() -> bool:
     from vnbot.settings import _flag
 
-    return _flag("CLAUDE_PICK", True) and bool(api_key()) and external.enabled()
+    return _flag("CLAUDE_PICK", True) and bool(api_key() or router_ready()) and external.enabled()
+
+
+def route() -> dict:
+    """Who answers: ``main`` "claude" or "router9" ("" when neither can), and whether 9Router
+    stands by when Claude fails (``backup``) - for the pages and /claude."""
+    main = "claude" if api_key() else "router9" if router_ready() else ""
+    return {"main": main, "backup": main == "claude" and router_ready(), "model": model(), "router_model": router_model()}
 
 
 def why_off() -> str:
@@ -131,8 +164,8 @@ def why_off() -> str:
     if not _flag("CLAUDE_PICK", True):
         return "đang tắt bằng CLAUDE_PICK=0"
     missing = []
-    if not api_key():
-        missing.append("ANTHROPIC_API_KEY")
+    if not api_key() and not router_ready():
+        missing.append("ANTHROPIC_API_KEY (hoặc 9Router: ROUTER9_BASE_URL và ROUTER9_API_KEY)")
     if not external.enabled():
         missing.append("SIEUTINHIEU=1 (tín hiệu của trang)")
     return ("chưa có " + " và ".join(missing)) if missing else ""
@@ -616,10 +649,11 @@ def ask(prompt: str, tool: dict | None, *, client=None, model_id: str | None = N
     messages: list = [{"role": "user", "content": prompt}]
     nudged = False
 
-    def fail(text: str, estimated: float | None = None) -> PickError:
+    def fail(text: str, estimated: float | None = None, *, api: bool = False) -> PickError:
         meta["cost"] = cost_usd(model_id, usage, models) if estimated is None else round(estimated, 4)
         error = PickError(text)
         error.meta = meta
+        error.api_error = api          # the API failed (not Claude's answer): 9Router may stand in
         return error
 
     for _ in range(MAX_TURNS):
@@ -634,12 +668,12 @@ def ask(prompt: str, tool: dict | None, *, client=None, model_id: str | None = N
                 # generous estimate and never tried again, so the cap counts it.
                 meta["estimated"] = True
                 raise fail(f"Claude không trả lời kịp ({type(exc).__name__}); lượt này được tính vào chi phí theo ước tính",
-                           cost_usd(model_id, usage, models) + estimate_cost(model_id, prompt, left)) from exc
+                           cost_usd(model_id, usage, models) + estimate_cost(model_id, prompt, left), api=True) from exc
             # Tried again later only while nothing was paid yet: a turn already answered is
             # recorded with its cost, so the monthly cap counts every request.
             if _transient(exc) and not any(usage.values()):
                 raise Retry(f"{type(exc).__name__}: {str(exc)[:200]}") from exc
-            raise fail(f"Claude báo lỗi: {type(exc).__name__}: {str(exc)[:200]}") from exc
+            raise fail(f"Claude báo lỗi: {type(exc).__name__}: {str(exc)[:200]}", api=True) from exc
         meta["served_by"] = getattr(response, "model", None) or model_id
         _usage(usage, models, getattr(response, "usage", None), meta["served_by"])
         meta["urls"] |= _urls(response.content)
@@ -663,6 +697,101 @@ def ask(prompt: str, tool: dict | None, *, client=None, model_id: str | None = N
         messages.append({"role": "user", "content": NUDGE.format(tool=tool["name"])})
         nudged = True
     raise fail("Claude không gửi kết quả" + (f" qua {tool['name']}" if tool else ""))
+
+
+# ─── 9Router: the stand-in when Claude has no key or its API fails ───────────
+
+ROUTER_NOTE = (
+    "\n\nLượt này chạy qua 9Router thay cho Claude và KHÔNG có công cụ web_search: chỉ dựa vào số liệu trong đề bài, "
+    "không bịa tin; nói rõ là chưa xem tin khi cần; để sources là mảng rỗng."
+)
+
+
+def _router_client():
+    import openai
+
+    # No SDK retries, as for Claude: the scheduler tries again later (Retry) and the chain rests 9Router.
+    return openai.OpenAI(base_url=os.environ["ROUTER9_BASE_URL"].strip().rstrip("/"),
+                         api_key=os.environ["ROUTER9_API_KEY"].strip(), timeout=ROUTER_TIMEOUT, max_retries=0)
+
+
+def _openai_tool(tool: dict) -> dict:
+    """An Anthropic tool definition as an OpenAI-compatible function."""
+    return {"type": "function", "function": {"name": tool["name"], "description": tool.get("description", ""),
+                                             "parameters": tool["input_schema"]}}
+
+
+def _json_in(text: str) -> dict | None:
+    """The first JSON object written in a text (a model that answered in text, not through the tool)."""
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    while start != -1:
+        try:
+            found, _ = decoder.raw_decode(text, start)
+        except ValueError:
+            found = None
+        if isinstance(found, dict):
+            return found
+        start = text.find("{", start + 1)
+    return None
+
+
+def ask_router(prompt: str, tool: dict | None, *, client=None, system: str = SYSTEM) -> tuple[dict | str, dict]:
+    """The same question to 9Router (OpenAI-compatible), without the news search: the answer
+    as ``ask`` gives it, meta with ``via`` "router9" and no cost (9Router is not billed to the
+    Claude cap). Goes through the agents' provider chain for 9Router alone, so its daily caps,
+    pacing and rest after a failure are shared with them. ``Retry`` when 9Router cannot be
+    reached; ``PickError`` when it answered without a usable result."""
+    from tradingagents.llm_clients import fallback_client as fc
+
+    model_id = router_model()
+    usage = {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0, "searches": 0}
+    meta = {"model": model_id, "served_by": f"9Router · {model_id}", "via": "router9", "usage": usage, "models": {},
+            "urls": set(), "cost": 0.0}
+    args = {"model": model_id, "max_tokens": MAX_TOKENS,
+            "messages": [{"role": "system", "content": system + ROUTER_NOTE}, {"role": "user", "content": prompt}]}
+    if tool:
+        args.update(tools=[_openai_tool(tool)], tool_choice={"type": "function", "function": {"name": tool["name"]}})
+
+    def fail(text: str) -> PickError:
+        error = PickError(text)
+        error.meta = meta
+        return error
+
+    try:
+        response = fc.run_chain([("router9", client or _router_client())], lambda c: c.chat.completions.create(**args))
+    except RuntimeError as exc:          # every attempt failed, 9Router resting, or the day's AI budget spent
+        raise Retry(f"9Router: {str(exc)[:200]}") from exc
+    except Exception as exc:  # noqa: BLE001 - anything else 9Router's answer broke: recorded, costs nothing
+        raise fail(f"9Router báo lỗi: {type(exc).__name__}: {str(exc)[:200]}") from exc
+    used = getattr(response, "usage", None)
+    usage["input"] = int(getattr(used, "prompt_tokens", 0) or 0)
+    usage["output"] = int(getattr(used, "completion_tokens", 0) or 0)
+    meta["served_by"] = f"9Router · {getattr(response, 'model', None) or model_id}"
+    choice = (getattr(response, "choices", None) or [None])[0]
+    if choice is None:
+        raise fail("9Router không trả lời")
+    message = choice.message
+    text = (getattr(message, "content", None) or "").strip()
+    if tool is None:
+        if text:
+            return text, meta
+        raise fail("9Router trả lời rỗng")
+    for call in getattr(message, "tool_calls", None) or []:
+        function = getattr(call, "function", None)
+        if getattr(function, "name", "") == tool["name"]:
+            try:
+                found = json.loads(function.arguments or "{}")
+            except ValueError:
+                found = None
+            if isinstance(found, dict):
+                return found, meta
+    found = _json_in(text)
+    if found is not None:
+        return found, meta
+    if getattr(choice, "finish_reason", "") == "length":
+        raise fail("câu trả lời của 9Router bị cắt (hết max_tokens)")
+    raise fail(f"9Router không gửi kết quả qua {tool['name']}")
 
 
 def _sources(items, urls: set[str]) -> list[str]:
@@ -1139,6 +1268,14 @@ def _views_lines(entry: dict) -> list[str]:
     return out
 
 
+def via_line(item: dict) -> str:
+    """"" when Claude answered; else that 9Router stood in, and why."""
+    if item.get("via") != "router9":
+        return ""
+    return (f"🔁 9Router trả lời thay Claude ({item.get('served_by') or item.get('model')})"
+            + (f": {item['fallback']}" if item.get("fallback") else "") + ". Không tìm tin, nên không có nguồn.")
+
+
 def entry_text(entry: dict, st: dict | None = None, month_cost: float | None = None) -> str:
     """The evening message of one session."""
     day = entry["day"]
@@ -1148,6 +1285,8 @@ def entry_text(entry: dict, st: dict | None = None, month_cost: float | None = N
     if entry.get("pending"):
         lines.append(f"⏳ Đang hỏi Claude (từ {entry['pending'][11:16]}); kết quả gửi khi xong.")
         return "\n".join(lines)
+    if via_line(entry):
+        lines.append(via_line(entry))
     if entry.get("error"):
         lines.append(f"⚠️ Không có lựa chọn: {entry['error']}")
     else:
@@ -1225,7 +1364,10 @@ def note_text(note: dict) -> str:
     if note.get("error"):
         lines.append(f"⚠️ {note['error']}")
     else:
-        lines += [f"Nguyên nhân: {note['cause']} · {note['news']}", f"Claude: {note['view']} · {note['reason']}"]
+        if via_line(note):
+            lines.append(via_line(note))
+        lines += [f"Nguyên nhân: {note['cause']} · {note['news']}",
+                  f"{'9Router' if note.get('via') else 'Claude'}: {note['view']} · {note['reason']}"]
         if note.get("sources"):
             lines.append("Nguồn: " + " · ".join(note["sources"][:2]))
     if note.get("cost_usd"):
@@ -1239,7 +1381,8 @@ def week_text(note: dict) -> str:
     if note.get("error"):
         lines += ["", f"⚠️ {note['error']}"]
     elif note.get("text"):
-        lines += ["", "Nhận xét của Claude:", note["text"]]
+        lines += ["", *([via_line(note)] if via_line(note) else []),
+                  f"Nhận xét của {'9Router' if note.get('via') else 'Claude'}:", note["text"]]
     if note.get("cost_usd"):
         lines += ["", f"Chi phí {_usd(note['cost_usd'])} USD"]
     return "\n".join(lines)
@@ -1289,16 +1432,18 @@ ALERT_SYSTEM = (
 
 class ClaudePick:
     """The evening answers, the alert notes, the weekly review and their scoring. ``client``,
-    ``bars`` (symbol, as_of -> bars), ``account``, ``closes`` and ``now`` are for the tests;
-    by default Anthropic's SDK, the bot's price sources, Tài sản and the market scan's closes."""
+    ``router``, ``bars`` (symbol, as_of -> bars), ``account``, ``closes`` and ``now`` are for
+    the tests; by default Anthropic's SDK, 9Router through the OpenAI SDK, the bot's price
+    sources, Tài sản and the market scan's closes."""
 
-    def __init__(self, data_dir: Path, *, store=None, client=None, bars: Callable[[str, str], list[dict]] | None = None,
-                 account=None, closes=None, now: Callable | None = None):
+    def __init__(self, data_dir: Path, *, store=None, client=None, router=None,
+                 bars: Callable[[str, str], list[dict]] | None = None, account=None, closes=None, now: Callable | None = None):
         self.data_dir = Path(data_dir)
         self.log = PickLog(self.data_dir)
         self.notes = NoteLog(self.data_dir)
         self.store = store or external.SignalStore(self.data_dir)
         self._client = client
+        self._router = router
         self._bars = bars or _load_bars
         self._account = account
         self._closes = closes
@@ -1384,6 +1529,54 @@ class ClaudePick:
                     "không gọi Claude cho tới tháng sau")
         return ""
 
+    def _blocked(self) -> str:
+        """Why nothing can answer now ("" when Claude or 9Router can): the month's cap with no 9Router."""
+        return "" if router_ready() else self._capped()
+
+    def _claude_now(self) -> bool:
+        """Claude takes this request: it has a key and the month's cap is not reached."""
+        return bool(api_key()) and not self._capped()
+
+    def _ask(self, prompt: str, tool: dict | None, *, searches: int | None = None, system: str = SYSTEM,
+             effort_level: str | None = None) -> tuple[dict | str, dict]:
+        """Claude when it can answer, else 9Router (``ask_router``): without a key, past the
+        month's cap, or when Claude's API fails (cannot be reached, an error, a timeout). The
+        stand-in's meta says why (``fallback``) and keeps what the failed Claude request cost,
+        so the cap counts it. Raises like ``ask``: when both fail, the error names both."""
+        claude = None
+        if not api_key():
+            why = "chưa có ANTHROPIC_API_KEY"
+        elif self._capped():
+            why = self._capped()
+        else:
+            try:
+                return ask(prompt, tool, client=self._client, searches=searches, system=system, effort_level=effort_level)
+            except Retry as exc:
+                if not router_ready():
+                    raise
+                why, claude = f"Claude không trả lời ({str(exc)[:120]})", exc
+            except PickError as exc:
+                if not getattr(exc, "api_error", False) or not router_ready():
+                    raise
+                why, claude = str(exc), exc
+        if not router_ready():
+            raise PickError(why)
+        paid = getattr(claude, "meta", None) or {}
+        logger.warning("%s: answered by 9Router: %s", NAME, why)
+        try:
+            raw, meta = ask_router(prompt, tool, client=self._router, system=system)
+        except (PickError, Retry) as exc:
+            text = f"{why}; 9Router dự phòng cũng lỗi: {exc}"
+            if isinstance(exc, Retry) and not paid.get("cost"):
+                raise Retry(text) from exc
+            error = PickError(text)
+            error.meta = {**(getattr(exc, "meta", None) or {}), **paid}
+            raise error from exc
+        meta.update(fallback=why, cost=round(float(paid.get("cost") or 0), 4))
+        if paid:
+            meta.update(claude_model=paid.get("model"), estimated=paid.get("estimated"))
+        return raw, meta
+
     # ── the evening ──
     def run(self, day: str | None = None) -> str:
         """Answer for session ``day`` (the latest by default), once: a session already answered
@@ -1454,7 +1647,7 @@ class ClaudePick:
             self.log.save(entry)
             return entry_text(entry)
         with _SPEND_LOCK:
-            capped = self._capped()
+            capped = self._blocked()
             if capped:
                 entry["error"] = capped
                 entry["cost_usd"] = lost or None
@@ -1471,18 +1664,22 @@ class ClaudePick:
             codes, codes_held = [c["symbol"] for c in cands], [h["symbol"] for h in holdings]
             # Recorded before paying, at a generous estimate: a process that dies mid-request still
             # leaves the request counted (the next run carries it as "lost" and replaces the entry).
-            self.log.save({**entry, "pending": stamp, "cost_usd": lost + estimate_cost(model(), prompt, max_searches())})
+            claude = self._claude_now()
+            self.log.save({**entry, "pending": stamp,
+                           "cost_usd": lost + (estimate_cost(model(), prompt, max_searches()) if claude else 0.0)})
             try:
-                raw, meta = ask(prompt, submit_tool(codes, codes_held), client=self._client)
+                raw, meta = self._ask(prompt, submit_tool(codes, codes_held))
             except PickError as exc:
                 meta = getattr(exc, "meta", {}) or {}
-                entry.update(error=str(exc), model=meta.get("model", model()), cost_usd=lost + float(meta.get("cost") or 0),
-                             usage=meta.get("usage"), models=meta.get("models"), estimated=meta.get("estimated"))
+                entry.update(error=str(exc), model=meta.get("model", model() if claude else router_model()),
+                             cost_usd=lost + float(meta.get("cost") or 0), usage=meta.get("usage"), models=meta.get("models"),
+                             estimated=meta.get("estimated"))
                 self._keep(self.log, entry, self.log.save)
                 return entry_text(entry, None, self.month_cost(stamp[:7]))
             except Retry:
                 # nothing paid: the placeholder goes (the day may be tried again), the lost cost stays counted
-                self.log.save({**entry, "error": "chưa gọi được Claude", "cost_usd": lost or None} if not lost
+                self.log.save({**entry, "error": "chưa gọi được Claude" if claude else "chưa gọi được 9Router",
+                               "cost_usd": lost or None} if not lost
                               else {**entry, "pending": stamp, "cost_usd": lost})
                 raise
             try:
@@ -1497,8 +1694,12 @@ class ClaudePick:
             except Exception as exc:  # noqa: BLE001 - an answer paid for is recorded, never asked for again
                 logger.exception("%s: answer not readable", NAME)
                 entry["error"] = f"không đọc được câu trả lời của Claude ({type(exc).__name__})"
-            entry.update(model=meta["model"], served_by=meta["served_by"], effort=effort(), usage=meta["usage"],
+            entry.update(model=meta["model"], served_by=meta["served_by"], usage=meta["usage"],
                          models=meta.get("models"), cost_usd=lost + meta["cost"])
+            if meta.get("via"):
+                entry.update(via=meta["via"], fallback=meta.get("fallback"), estimated=meta.get("estimated"))
+            else:
+                entry["effort"] = effort()
             self._keep(self.log, entry, self.log.save)
         return entry_text(entry, self.stats(), self.month_cost(stamp[:7]))
 
@@ -1508,7 +1709,7 @@ class ClaudePick:
         if self.log.get(day) is not None:
             return self.text(day)
         entry = {"day": day, "at": self.now().strftime("%Y-%m-%dT%H:%M"), "candidates": [],
-                 "error": f"không gọi được Claude ({error[:160]})"}
+                 "error": f"không gọi được {'Claude' if api_key() else '9Router'} ({error[:160]})"}
         self.log.save(entry)
         return entry_text(entry)
 
@@ -1523,7 +1724,7 @@ class ClaudePick:
             today = self.notes.alerts_on(day)
             if len(today) >= alerts_per_day() or any(n["symbol"] == symbol and n["level"] == level for n in today):
                 return None
-            if self._capped():
+            if self._blocked():
                 return None
             stamp = self.now().strftime("%Y-%m-%dT%H:%M")
             item = next((h for h in holdings_context(self.account, day, self.store, self._bars)
@@ -1548,17 +1749,18 @@ class ClaudePick:
             note = {"kind": "alert", "day": day, "at": stamp, "symbol": symbol, "level": level, "price": price,
                     "rule": advice}
             with _SPEND_LOCK:
-                if self._capped():
+                if self._blocked():
                     return None
                 try:
-                    raw, meta = ask(prompt, note_tool(symbol), client=self._client, searches=ALERT_SEARCHES,
-                                    system=ALERT_SYSTEM)
+                    raw, meta = self._ask(prompt, note_tool(symbol), searches=ALERT_SEARCHES, system=ALERT_SYSTEM)
                     note.update(cause=raw.get("cause") if raw.get("cause") in CAUSES else "chưa rõ",
                                 news=str(raw.get("news") or "").strip()[:400],
                                 view=raw.get("view") if raw.get("view") in VIEWS else None,
                                 reason=str(raw.get("reason") or "").strip()[:500],
                                 sources=_sources(raw.get("sources"), meta["urls"]), cost_usd=meta["cost"],
                                 model=meta["model"], models=meta.get("models"))
+                    if meta.get("via"):
+                        note.update(via=meta["via"], served_by=meta["served_by"], fallback=meta.get("fallback"))
                 except PickError as exc:
                     meta = getattr(exc, "meta", {}) or {}
                     note.update(error=str(exc), cost_usd=meta.get("cost", 0.0), estimated=meta.get("estimated"))
@@ -1659,14 +1861,15 @@ class ClaudePick:
         note = {"kind": "week", "week": week, "day": day, "at": self.now().strftime("%Y-%m-%dT%H:%M"),
                 "facts": self.week_facts(day)}
         with _SPEND_LOCK:
-            capped = self._capped()
+            capped = self._blocked()
             if capped:
                 note["error"] = capped
             else:
                 try:
-                    text, meta = ask("\n".join(note["facts"]), None, client=self._client, searches=0, system=WEEK_SYSTEM,
-                                     effort_level="low")
+                    text, meta = self._ask("\n".join(note["facts"]), None, searches=0, system=WEEK_SYSTEM, effort_level="low")
                     note.update(text=str(text)[:2000], cost_usd=meta["cost"], model=meta["model"], models=meta.get("models"))
+                    if meta.get("via"):
+                        note.update(via=meta["via"], served_by=meta["served_by"], fallback=meta.get("fallback"))
                 except PickError as exc:
                     meta = getattr(exc, "meta", {}) or {}
                     note.update(error=str(exc), cost_usd=meta.get("cost", 0.0), estimated=meta.get("estimated"))

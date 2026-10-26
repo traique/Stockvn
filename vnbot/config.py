@@ -132,9 +132,13 @@ FIELDS: tuple[Field, ...] = (
     _F("TAISAN_MAX_WEIGHT_NEW", "Tỷ trọng tối đa sau khi mua", "Một mã không quá chừng này % tài sản sau lệnh mua.", "float", "30", "taisan",
        lo=5, hi=100, unit="%"),
     # Claude chọn bóng
-    _F("CLAUDE_PICK", "Claude chọn bóng", "Mỗi phiên Claude đọc các lệnh MUA mới và danh mục, chọn một mã để đo. Cần ANTHROPIC_API_KEY và "
-       "Siêu tín hiệu bật.", "flag", "1", "claude"),
+    _F("CLAUDE_PICK", "Claude chọn bóng", "Mỗi phiên Claude đọc các lệnh MUA mới và danh mục, chọn một mã để đo. Cần ANTHROPIC_API_KEY "
+       "(hoặc 9Router) và Siêu tín hiệu bật.", "flag", "1", "claude"),
     _F("CLAUDE_PICK_MODEL", "Model", "Model của Anthropic dùng để chọn.", "text", "claude-opus-5-5", "claude"),
+    _F("CLAUDE_PICK_ROUTER9", "Dự phòng 9Router", "Chưa có ANTHROPIC_API_KEY, Claude lỗi hoặc chạm trần chi phí thì hỏi 9Router "
+       "(không tìm tin, không tính vào trần USD). Cần ROUTER9_BASE_URL và ROUTER9_API_KEY.", "flag", "1", "claude"),
+    _F("CLAUDE_PICK_ROUTER9_MODEL", "Model 9Router dự phòng", "Model trên 9Router khi trả lời thay Claude; bỏ trống = ROUTER9_MODEL.",
+       "text", "", "claude"),
     _F("CLAUDE_PICK_EFFORT", "Mức suy nghĩ", "", "choice", "medium", "claude",
        options=(("low", "Thấp"), ("medium", "Vừa"), ("high", "Cao"))),
     _F("CLAUDE_PICK_SEARCHES", "Lượt tìm tin mỗi phiên", "Khoảng 0,01 USD một lượt.", "int", "10", "claude", lo=1, hi=20, unit="lượt"),

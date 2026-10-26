@@ -102,7 +102,8 @@ t.ok("POST /caidat without password -> 401; cross-site -> 403",
      and web.post("/caidat/xoa", data={"key": "TAISAN_RISK_PCT"}).status_code == 401)
 r = web.post("/caidat", data={"group": "claude", "CLAUDE_PICK": "1", "CLAUDE_PICK_MODEL": "claude-opus-5-5", "CLAUDE_PICK_EFFORT": "high",
                               "CLAUDE_PICK_SEARCHES": "10", "CLAUDE_PICK_MONTHLY_USD": "15", "CLAUDE_PICK_BOT": "1", "CLAUDE_PICK_ALERTS": "5",
-                              "CLAUDE_PICK_WEEKLY": "1"}, auth=AUTH, follow_redirects=False)
+                              "CLAUDE_PICK_WEEKLY": "1", "CLAUDE_PICK_ROUTER9": "1", "CLAUDE_PICK_ROUTER9_MODEL": ""},
+             auth=AUTH, follow_redirects=False)
 from urllib.parse import unquote  # noqa: E402
 loc = unquote(r.headers.get("location", ""))
 t.ok("saving from the form: back to the group with a message, the environment set",

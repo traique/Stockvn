@@ -562,14 +562,15 @@ class TelegramBot:
                 raise ValueError(f"{cp.NAME} {off}.")
             if pick.running:
                 raise ValueError(f"{cp.NAME} đang chạy, đợi một chút.")
-            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho Claude "
-                               "(đọc tin, 1-3 phút)...")
+            who = ("Claude (đọc tin, 1-3 phút)" if cp.route()["main"] == "claude"
+                   else "9Router thay Claude (chưa có ANTHROPIC_API_KEY, không tìm tin)")
+            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho {who}...")
 
             def work():                      # minutes with Claude: never on the chat's lane
                 try:
                     text = pick.run()
                 except cp.Retry as exc:
-                    text = f"⚠️ Chưa gọi được Claude ({exc}). Gửi lại /claude chay sau ít phút."
+                    text = f"⚠️ Chưa gọi được AI ({exc}). Gửi lại /claude chay sau ít phút."
                 except cp.PickError as exc:
                     text = f"⚠️ {exc}"
                 except Exception as exc:  # noqa: BLE001 - said to the owner, logged
