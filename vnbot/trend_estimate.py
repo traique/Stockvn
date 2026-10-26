@@ -195,8 +195,9 @@ def board_prices(symbols) -> dict[str, dict]:
 
 
 def assess(symbols, states: dict, lv: dict, prices: dict, *, exchange_of=None, refs=None) -> tuple[list[dict], dict]:
-    """One row per stock with a state, levels and a price: ``{symbol, state, price, level,
-    dist, flip}``; and {symbol: why not} for the others. ``refs`` ({symbol: (reference price,
+    """One row per stock with a state, levels and a price: ``{symbol, state, price, ref, level,
+    dist, flip}`` (``ref``: the previous close, the board's reference on an ex-date); and
+    {symbol: why not} for the others. ``refs`` ({symbol: (reference price,
     exchange)}, from the price board) puts the levels on an ex-date's basis (``rebase``). A
     price still outside the exchange's band around the previous close is not a real move
     of the trend (an ex-date not adjusted, a bad tick): left out."""
@@ -220,7 +221,7 @@ def assess(symbols, states: dict, lv: dict, prices: dict, *, exchange_of=None, r
         if abs(price / levels_["prev"] - 1) * 100 > band + 0.5:
             skipped[sym] = "giá ngoài biên độ so với phiên trước, nghi ngày GDKHQ"
             continue
-        row = {"symbol": sym, "state": state, "price": price, "level": level_for(state, levels_),
+        row = {"symbol": sym, "state": state, "price": price, "ref": levels_["prev"], "level": level_for(state, levels_),
                "dist": round(distance_pct(state, price, levels_), 2), "flip": flip(state, price, levels_)}
         if levels_.get("rebased"):
             row["rebased"] = levels_["rebased"]

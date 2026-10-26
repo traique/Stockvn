@@ -725,8 +725,26 @@ check("live view: a held stock's SELL goes to the holdings block, not final",
       and "(tín hiệu trong phiên, có thể đổi khi đóng cửa)" in scan2, scan2)
 check("live view: the watchlist's changes, not the unfollowed stock",
       "👀 Đổi chiều trong phiên (chưa chốt, có thể đổi khi đóng cửa)" in scan2
-      and "🔴 VNM MUA → BÁN lúc 10:20 · giá 59.800" in scan2 and "🟢 GEX BÁN → MUA lúc 10:10 · giá 24.100" in scan2
+      and "🔴 VNM\n   MUA → BÁN lúc 10:20 · giá 59.800" in scan2 and "🟢 GEX\n   BÁN → MUA lúc 10:10 · giá 24.100" in scan2
       and "ZZZ" not in scan2 and "HPG" not in scan2 and "Premium" in scan2, scan2)
+check("a change says the company and the price against the reference when they are known",
+      T._stock_head("🟢", "VJC", {"VJC": "Vietjet Air"}) == "🟢 VJC · Vietjet Air" and T._stock_head("🟢", "VJC", {}) == "🟢 VJC"
+      and external.change(130_000, 128_400) == "+1,25%" and external.change(9_000, 10_000) == "-10,00%"
+      and external.change(130_000, None) == "" and T._paren("") == "" and T._paren("+1,25%") == " (+1,25%)")
+_listing = vci_module.fetch_listing
+vci_module.fetch_listing = lambda: [{"symbol": "VJC", "organShortName": "Vietjet Air", "organName": "CTCP Hàng không VietJet"},
+                                    {"symbol": "FPT", "organName": "CTCP FPT"}, "noise"]
+check("company names from the listing: the short name, else the full one, unknown codes left out",
+      external.company_names(["vjc", "FPT", "ZZZ"]) == {"VJC": "Vietjet Air", "FPT": "CTCP FPT"})
+vci_module.fetch_listing = lambda: (_ for _ in ()).throw(RuntimeError("down"))
+check("listing down and no copy on disk: no names, no error", isinstance(external.company_names(["VJC"]), dict))
+vci_module.fetch_listing = _listing
+from vnbot import trend_estimate as te_module  # noqa: E402
+
+_lv = te_module.levels([20_000 + (i % 7) * 150 - i * 20 for i in range(80)])
+_rows, _ = te_module.assess(["AAA"], {"AAA": _lv["rule"]}, {"AAA": _lv}, {"AAA": _lv["prev"] * 1.01})
+check("each estimate row carries its reference price (the previous close)",
+      _rows and _rows[0]["ref"] == _lv["prev"] and external.change(_rows[0]["price"], _rows[0]["ref"]) == "+1,00%", _rows)
 check("live view: announced once", bot.stv_scan() is None)
 
 # after the close: the day's final signals of the watchlist (and the holdings), each stock asked once

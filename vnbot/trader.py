@@ -89,6 +89,15 @@ def _fmt(value: float | None) -> str:
     return f"{value:,.0f}".replace(",", ".")
 
 
+def _stock_head(icon: str, symbol: str, names: dict[str, str]) -> str:
+    """"🟢 VJC · Vietjet Air" (the code alone when its name is not known)."""
+    return f"{icon} {symbol}" + (f" · {names[symbol]}" if names.get(symbol) else "")
+
+
+def _paren(text: str) -> str:
+    return f" ({text})" if text else ""
+
+
 def _vnd(value: float) -> str:
     return f"{value:,.0f}".replace(",", ".") + " đồng"
 
@@ -1287,7 +1296,7 @@ class TradingBot:
                 logger.warning("Siêu tín hiệu: ước tính đổi chiều lỗi: %s", exc)
         stamp = f"{today}T{hhmm}"
         guessed = [{"symbol": r["symbol"], "side": r["flip"], "day": today, "at": stamp, "price": r["price"],
-                    "now": r["price"], "from": r["state"], "stage": "estimate", "level": r["level"]}
+                    "now": r["price"], "ref": r.get("ref"), "from": r["state"], "stage": "estimate", "level": r["level"]}
                    for r in estimate.get("rows", []) if r.get("flip")]
 
         # 1. the holdings: a SELL (the stock's history, or a change in the session: the site's, the bot's estimate)
@@ -1361,16 +1370,20 @@ class TradingBot:
                       + ("" if x.SellAlerts.final(sig) else " · trong phiên, chưa chốt") for sym, sig in finals]
             if any(sig["side"] == "BUY" for _, sig in finals):
                 lines.append("Anh tự quyết định mua; mua xong báo /tsmua MÃ KL GIÁ.")
+        names, refs = self._stv_names_refs([sym for sym, _ in moves + guesses], estimate)
         if moves:
             lines += ["", "👀 Đổi chiều trong phiên (chưa chốt, có thể đổi khi đóng cửa)"]
-            lines += [f"{x.icon(c['side'])} {sym} {x.word(c['from']) + ' → ' if c['from'] in ('BUY', 'SELL') else ''}"
-                      f"{x.word(c['side'])} lúc {c['at'][11:16]}" + (f" · giá {_fmt(c['now'])}" if c.get("now") else "")
+            lines += [_stock_head(x.icon(c["side"]), sym, names) + "\n   "
+                      + f"{x.word(c['from']) + ' → ' if c['from'] in ('BUY', 'SELL') else ''}{x.word(c['side'])} lúc {c['at'][11:16]}"
+                      + (f" · giá {_fmt(c['now'])}" + _paren(x.change(c["now"], refs.get(sym))) if c.get("now") else "")
                       + (" · đang giữ" if sym in held else "") for sym, c in moves]
             lines.append("(miễn phí, trang chỉ cho xem 2 mã đổi chiều mỗi bên; danh sách đầy đủ cần Premium)")
         if guesses:
             lines += ["", "🧮 Bot ước tính đổi chiều trong phiên (giá đã qua mức đổi chiều; chưa chốt)"]
-            lines += [f"{x.icon(c['side'])} {sym} {x.word(c['from'])} → {x.word(c['side'])} · giá {_fmt(c['price'])} "
-                      f"{'<' if c['side'] == 'SELL' else '>'} mức {_fmt(c['level'])}" + (" · đang giữ" if sym in held else "")
+            lines += [_stock_head(x.icon(c["side"]), sym, names) + "\n   "
+                      + f"{x.word(c['from'])} → {x.word(c['side'])} · giá {_fmt(c['price'])}"
+                      + _paren(x.change(c["price"], c.get("ref") or refs.get(sym)))
+                      + f" {'<' if c['side'] == 'SELL' else '>'} mức {_fmt(c['level'])}" + (" · đang giữ" if sym in held else "")
                       for sym, c in guesses]
             lines.append("(ước tính của bot, không phải tín hiệu của trang; chi tiết: /stvdoichieu)")
         if undone:
@@ -1659,6 +1672,29 @@ class TradingBot:
         if error:
             lines.append(f"⚠️ Lấy tín hiệu chưa trọn ({error}).")
         return "\n".join(lines)
+
+    def _stv_names_refs(self, symbols, estimate: dict) -> tuple[dict[str, str], dict[str, float]]:
+        """The company names of ``symbols`` and their reference prices (the previous close):
+        from the estimate's rows, else one request to the price board. Neither is needed to
+        send the message, so a failure only leaves them out."""
+        from vnbot import external as x
+        from vnbot import trend_estimate as te
+
+        if not symbols:
+            return {}, {}
+        try:
+            names = x.company_names(symbols)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Siêu tín hiệu: company names not read: %s", exc)
+            names = {}
+        refs = {r["symbol"]: r["ref"] for r in estimate.get("rows", []) if r.get("ref")}
+        missing = [s for s in symbols if s not in refs]
+        if missing:
+            try:
+                refs.update({s: b["ref"] for s, b in te.board_prices(missing).items() if b.get("ref")})
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Siêu tín hiệu: reference prices not read: %s", exc)
+        return names, refs
 
     def _stv_estimate(self, symbols, store, now, *, live: bool) -> dict:
         """The bot's estimate of the site's trend changes (``vnbot.trend_estimate``), saved for
