@@ -22,7 +22,7 @@ leaks around the real-money journal of ``vnbot.taisan``:
   deadline day;
 - **the discipline meter** (``rule_replay``, ``discipline``): the assets had every ⛔/🔴 been
   sold the session after, the counts of the last four weeks, early sells, the win rate with
-  its 90% confidence interval; computed by code, commented on by Claude, never predicted;
+  its 90% confidence interval; computed by code, commented on by the AI, never predicted;
 - **the recovery goal** (``goal``, ``/tsmuctieu``): the arithmetic of the owner's target next
   to the measured figures (``MEASURED``), shown weekly, never as a forecast.
 

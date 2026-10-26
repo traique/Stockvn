@@ -108,7 +108,7 @@ def _start():
     bot.taisan = trader.taisan          # the owner's real-money portfolio (/ts, the /taisan tab)
     from vnbot import claude_pick
 
-    # Claude's look at the news when a rule alert fires on a holding (only with ANTHROPIC_API_KEY)
+    # The AI's look at the news when a rule alert fires on a holding (only with 9Router set)
     trader.taisan.on_alert = claude_pick.alert_hook(SETTINGS.data_dir, bot.broadcast)
     jobs.start()
     bot.start()

@@ -1572,7 +1572,7 @@ class TradingBot:
 
     def _keep_early(self, real, early, today) -> None:
         """An early SELL sign on a holding that is not pushed: kept for the shadow results
-        (``TaiSan.record_alert``, level "early", without Claude's note) and the 15:30 report."""
+        (``TaiSan.record_alert``, level "early", without the AI's note) and the 15:30 report."""
         try:
             prices, _ = self._current_prices([real.positions[sym] for sym, _ in early])
         except Exception as exc:  # noqa: BLE001 - kept without a price

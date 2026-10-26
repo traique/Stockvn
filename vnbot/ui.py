@@ -522,7 +522,7 @@ NONE = "chưa có"   # a figure that is missing (a zero is a zero)
 
 # The sidebar: the main screens, then the tools and the system pages (key, path, label, icon).
 NAV = (("home", "/", "Tổng quan", "home"), ("taisan", "/taisan", "Danh mục", "wallet"))
-TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("claude", "/claude", "Claude chọn bóng", "spark"),
+TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("claude", "/claude", "AI chọn bóng", "spark"),
          ("bot", "/bot", "Bot giao dịch", "bot"))
 SYSTEM = (("caidat", "/caidat", "Cài đặt", "gear"), ("zoom", "/zoom", "Cấu hình Zoom", "video"),
           ("phienban", "/phienban", "Phiên bản", "tag"))

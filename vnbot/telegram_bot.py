@@ -122,9 +122,9 @@ HELP = (
     "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã đang theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
-    "Claude chọn bóng (cần ANTHROPIC_API_KEY và SIEUTINHIEU=1; chỉ ghi lại để đo, không phải lệnh):\n"
-    "/claude - phiên gần nhất: mã Claude chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
-    "/claude chay - chạy ngay cho phiên gần nhất (tốn phí API, mỗi phiên một lần) · /claude lichsu - các phiên gần đây\n"
+    "AI chọn bóng (Gemini qua 9Router, cần SIEUTINHIEU=1; chỉ ghi lại để đo, không phải lệnh):\n"
+    "/claude - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
+    "/claude chay - chạy ngay cho phiên gần nhất (mỗi phiên một lần) · /claude lichsu - các phiên gần đây\n"
     "/claude tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
@@ -190,7 +190,7 @@ class TelegramBot:
         self.settings, self.jobs, self.watchlist = settings, jobs, watchlist
         if len(settings.telegram_token or "") >= 10:
             _SECRETS.add(settings.telegram_token)
-        key = os.environ.get("ANTHROPIC_API_KEY") or ""
+        key = os.environ.get("ROUTER9_API_KEY") or ""
         if len(key) >= 10:
             _SECRETS.add(key)           # never echoed back in an error message
         self._session = requests.Session()
@@ -551,7 +551,7 @@ class TelegramBot:
         self.send(chat_id, f"⏳ Đã nhận {code} ngày {day}{wait}. Quyết định hệ thống sẽ tới trước, báo cáo đầy đủ của các agent tới sau vài phút.")
 
     def _claude(self, chat_id, args: str) -> None:
-        """Claude chọn bóng: the latest choice and the comparison, a run now, the history."""
+        """AI chọn bóng: the latest choice and the comparison, a run now, the history."""
         from vnbot import claude_pick as cp
 
         pick = cp.ClaudePick(self.settings.data_dir)
@@ -562,11 +562,10 @@ class TelegramBot:
                 raise ValueError(f"{cp.NAME} {off}.")
             if pick.running:
                 raise ValueError(f"{cp.NAME} đang chạy, đợi một chút.")
-            who = ("Claude (đọc tin, 1-3 phút)" if cp.route()["main"] == "claude"
-                   else "9Router thay Claude (chưa có ANTHROPIC_API_KEY, không tìm tin)")
-            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho {who}...")
+            self.send(chat_id, f"⏳ Đang gửi các lệnh MUA mới và danh mục phiên {cp._ddmm(cp.latest_session())} cho "
+                               f"{cp.model()} qua 9Router (tìm tin trên web, 1-3 phút)...")
 
-            def work():                      # minutes with Claude: never on the chat's lane
+            def work():                      # minutes with the AI: never on the chat's lane
                 try:
                     text = pick.run()
                 except cp.Retry as exc:
@@ -574,7 +573,7 @@ class TelegramBot:
                 except cp.PickError as exc:
                     text = f"⚠️ {exc}"
                 except Exception as exc:  # noqa: BLE001 - said to the owner, logged
-                    logger.exception("Claude pick from Telegram failed")
+                    logger.exception("AI pick from Telegram failed")
                     text = f"⚠️ Lỗi: {redact(exc)}"
                 self.send(chat_id, text)
 

@@ -5,7 +5,7 @@ This module lets the owner change the non-secret ones from the web page: a value
 there is kept in ``settings.json`` under the data directory and written into the
 environment on every start (``apply``, called by ``settings.load`` before anything reads
 the variables) and again when saved, so the modules that read the environment at call
-time (Siêu tín hiệu, Tài sản, Claude chọn bóng, the AI budget) follow it at once. The
+time (Siêu tín hiệu, Tài sản, AI chọn bóng, the AI budget) follow it at once. The
 values frozen into ``Settings`` at start (the schedule, the trading bot, the daily
 screen) take effect after a restart; ``Field.restart`` says which.
 
@@ -61,7 +61,7 @@ FIELDS: tuple[Field, ...] = (
        "trước 15:05 (nến ngày chưa chốt).", "hhmm", "", "lich", restart=True),
     _F("STV_MORNING_TIME", "Giờ bản tin sáng", "Bản tin Siêu tín hiệu vào Zoom (hoặc Telegram) các ngày giao dịch; phải trước 11:30.",
        "hhmm", "08:30", "lich"),
-    _F("CLAUDE_PICK_TIME", "Giờ Claude chọn bóng", "Sau khi trang chốt tín hiệu; không sớm hơn 15:10.", "hhmm", "15:50", "lich"),
+    _F("CLAUDE_PICK_TIME", "Giờ AI chọn bóng", "Sau khi trang chốt tín hiệu; không sớm hơn 15:10.", "hhmm", "15:50", "lich"),
     # Sàng lọc & AI
     _F("WATCHLIST", "Watchlist mặc định", "Các mã theo dõi khi chưa lưu danh sách trên trang Tổng quan (danh sách lưu ở đó được ưu tiên).",
        "list", "", "sangloc", restart=True, max_items=30),
@@ -112,7 +112,7 @@ FIELDS: tuple[Field, ...] = (
        restart=True, options=(("factor", "Phòng thủ"), ("momentum", "Động lượng VN30"), ("engine", "Quant Engine"))),
     # Siêu tín hiệu
     _F("SIEUTINHIEU", "Theo dõi sieutinhieu.vn", "Mỗi tối lấy tín hiệu của trang cho các mã đang giữ và watchlist riêng, chạy một sổ ảo theo "
-       "tín hiệu đó. Claude chọn bóng cần mục này bật.", "flag", "0", "stv"),
+       "tín hiệu đó. AI chọn bóng cần mục này bật.", "flag", "0", "stv"),
     _F("STV_WATCHLIST", "Watchlist riêng của Siêu tín hiệu", "Tối đa 60 mã; bỏ trống = 60 mã mặc định. Danh sách sửa bằng /stvtheodoi được ưu tiên.",
        "list", "", "stv", max_items=60),
     _F("STV_SCAN_MINUTES", "Chu kỳ hỏi trang trong phiên", "Bao nhiêu phút một lần bot hỏi tín hiệu các mã đang giữ, 09:00-17:00 ngày giao dịch.",
@@ -131,24 +131,16 @@ FIELDS: tuple[Field, ...] = (
        "taisan", lo=1, hi=30, unit="%"),
     _F("TAISAN_MAX_WEIGHT_NEW", "Tỷ trọng tối đa sau khi mua", "Một mã không quá chừng này % tài sản sau lệnh mua.", "float", "30", "taisan",
        lo=5, hi=100, unit="%"),
-    # Claude chọn bóng
-    _F("CLAUDE_PICK", "Claude chọn bóng", "Mỗi phiên Claude đọc các lệnh MUA mới và danh mục, chọn một mã để đo. Cần ANTHROPIC_API_KEY "
-       "(hoặc 9Router) và Siêu tín hiệu bật.", "flag", "1", "claude"),
-    _F("CLAUDE_PICK_MODEL", "Model", "Model của Anthropic dùng để chọn.", "text", "claude-opus-5-5", "claude"),
-    _F("CLAUDE_PICK_ROUTER9", "Dự phòng 9Router", "Chưa có ANTHROPIC_API_KEY, Claude lỗi hoặc chạm trần chi phí thì hỏi 9Router "
-       "(không tìm tin, không tính vào trần USD). Cần ROUTER9_BASE_URL và ROUTER9_API_KEY.", "flag", "1", "claude"),
-    _F("CLAUDE_PICK_ROUTER9_MODEL", "Model 9Router dự phòng", "Model trên 9Router khi trả lời thay Claude; bỏ trống = ROUTER9_MODEL.",
-       "text", "", "claude"),
-    _F("CLAUDE_PICK_EFFORT", "Mức suy nghĩ", "", "choice", "medium", "claude",
-       options=(("low", "Thấp"), ("medium", "Vừa"), ("high", "Cao"))),
-    _F("CLAUDE_PICK_SEARCHES", "Lượt tìm tin mỗi phiên", "Khoảng 0,01 USD một lượt.", "int", "10", "claude", lo=1, hi=20, unit="lượt"),
-    _F("CLAUDE_PICK_MONTHLY_USD", "Trần chi phí mỗi tháng", "Mọi lượt gọi Claude cộng lại; chạm trần thì ngừng tới tháng sau.", "float",
-       "15", "claude", lo=0, hi=1000, unit="USD"),
+    # AI chọn bóng
+    _F("CLAUDE_PICK", "AI chọn bóng", "Mỗi phiên AI (qua 9Router) đọc các lệnh MUA mới và danh mục, tìm tin trên web, chọn một mã để đo. "
+       "Cần ROUTER9_BASE_URL, ROUTER9_API_KEY và Siêu tín hiệu bật.", "flag", "1", "claude"),
+    _F("CLAUDE_PICK_MODEL", "Model trên 9Router", "Model có tìm web, ví dụ gmw/gemini-pro hoặc gmw/gemini-flash (Gemini web của "
+       "UniRouter). Tên model Claude cũ được bỏ qua.", "text", "gmw/gemini-pro", "claude"),
     _F("CLAUDE_PICK_BOT", "Thêm mã bot ước tính", "Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (cần quét toàn thị trường).",
        "flag", "1", "claude"),
-    _F("CLAUDE_PICK_ALERTS", "Xem tin khi có cảnh báo", "Số lần tối đa mỗi ngày Claude tìm tin khi một mã đang giữ có cảnh báo; 0 = tắt.",
+    _F("CLAUDE_PICK_ALERTS", "Xem tin khi có cảnh báo", "Số lần tối đa mỗi ngày AI tìm tin khi một mã đang giữ có cảnh báo; 0 = tắt.",
        "int", "5", "claude", lo=0, hi=20, unit="lần"),
-    _F("CLAUDE_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, Claude nhận xét kỷ luật so với quy tắc.", "flag", "1", "claude"),
+    _F("CLAUDE_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, AI nhận xét kỷ luật so với quy tắc.", "flag", "1", "claude"),
     # Kết nối & trang web
     _F("PUBLIC_URL", "Địa chỉ công khai", "Để bot gửi kèm link báo cáo và khai báo với Zoom, ví dụ https://abc.botkeep.cloud.", "text", "",
        "ketnoi", restart=True),
@@ -166,7 +158,7 @@ GROUPS: tuple[Group, ...] = tuple(
         ("bot", "Bot giao dịch ảo", "Ba tài khoản ảo. Bot không bao giờ đặt lệnh tới công ty chứng khoán."),
         ("stv", "Siêu tín hiệu", "So sánh với sieutinhieu.vn, dùng cá nhân."),
         ("taisan", "Danh mục Tài sản", "Ngân sách rủi ro cho sổ tiền thật; chỉ để kiểm tra, không khuyên mua."),
-        ("claude", "Claude chọn bóng", "Chọn bóng để đo, không phải lệnh."),
+        ("claude", "AI chọn bóng", "Chọn bóng để đo, không phải lệnh. AI là model trên 9Router (UniRouter), mặc định Gemini có tìm web."),
         ("ketnoi", "Kết nối & trang web", "Khoá và token chỉ đặt được trên Botkeep; trang này chỉ cho biết đã có hay chưa."),
     ))
 
@@ -174,7 +166,7 @@ BY_KEY: dict[str, Field] = {f.key: f for f in FIELDS}
 
 # Shown as set / not set only: never their values, never editable here.
 SECRETS: tuple[tuple[str, str], ...] = (
-    ("WEB_PASSWORD", "Mật khẩu trang web"), ("TELEGRAM_TOKEN", "Telegram token"), ("ANTHROPIC_API_KEY", "Khoá API Anthropic (Claude)"),
+    ("WEB_PASSWORD", "Mật khẩu trang web"), ("TELEGRAM_TOKEN", "Telegram token"),
     ("ROUTER9_API_KEY", "Khoá 9Router"), ("GROQ_API_KEY", "Khoá Groq"), ("OPENROUTER_API_KEY", "Khoá OpenRouter"),
     ("XAI_API_KEY", "Khoá xAI"), ("ZOOM_CLIENT_ID", "Zoom client id"), ("ZOOM_CLIENT_SECRET", "Zoom client secret"),
     ("ZOOM_SECRET_TOKEN", "Zoom secret token"), ("ZOOM_BOT_JID", "Zoom bot JID"), ("ZOOM_ACCOUNT_ID", "Zoom account id"),

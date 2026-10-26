@@ -57,8 +57,7 @@ PUBLIC_URL=https://<ten-server>.botkeep...   # địa chỉ Botkeep cấp
 TELEGRAM_TOKEN=123456:ABC...
 TELEGRAM_ALLOWED_IDS=        # để trống lúc đầu, xem bước 4
 
-# Tuỳ chọn: Claude chọn bóng (cần thêm SIEUTINHIEU=1), xem mục "Claude chọn bóng"
-# ANTHROPIC_API_KEY=sk-ant-...
+# Tuỳ chọn: AI chọn bóng (Gemini qua 9Router, cần thêm SIEUTINHIEU=1), xem mục "AI chọn bóng"
 ```
 
 5. Bấm **Start**. Log khởi động cần có:
@@ -111,7 +110,7 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/stvquet` · `/stvsang` | Quét ngay danh mục Tài sản + 60 mã watchlist (mã trùng hỏi 1 lần, khoảng 2 phút) · bản tin sáng ngay bây giờ |
 | `/stvthitruong` | Bot quét 300 mã thanh khoản cao nhất thị trường: mã đã qua mức đổi chiều (trong phiên: theo giá khớp; ngoài giờ: theo giá đóng cửa), so với phần trang cho xem miễn phí, và kết quả đối chiếu các phiên trước |
 | `/stvdoichieu` | Đổi chiều trong phiên do bot ước tính cho danh mục + watchlist: mã đã qua mức đổi chiều, rồi mã sát mức (cách ≤ 2%). Ngoài giờ: mức giá đóng cửa sẽ làm từng mã đổi chiều ở phiên tới |
-| `/claude` · `/claude lichsu` · `/claude tuan` | Claude chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`) |
+| `/claude` · `/claude lichsu` · `/claude tuan` | AI chọn bóng: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`) |
 | `/claude chay` | Chạy ngay cho phiên gần nhất (tốn phí API; mỗi phiên chỉ một lần) |
 | `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
 | `/id` | Telegram id của bạn |
@@ -176,7 +175,7 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 - Kiểm tra trước khi mua `/tskiemtra` và thẻ 📏 trên mọi `/tsmua`: sổ không bao giờ từ chối một lệnh, chỉ gắn nhãn (✅ trong ngân sách / ⚠️ có lưu ý / ⛔ ngoài quy tắc) để sau này so kết quả các nhóm bằng giá 10 và 20 phiên sau. Bán khi trang vẫn MUA và chưa có ⛔/🔴 được gắn «bán trước tín hiệu», cũng để đo.
 - Việc treo: mỗi ⛔/🔴 có hạn bán là phiên sau (hoặc phiên đầu tiên bán được theo T+2 với cổ phiếu mới mua); đóng khi anh bán, khi anh giữ có lý do (`/tsgiu`, bắt buộc cắt lỗ), hoặc tự rút khi trang MUA lại; huỷ lệnh bán bằng `/tshuy` thì việc treo mở lại. Thước kỷ luật thứ Sáu đếm: bán trong 1 phiên / giữ có lý do / bỏ qua, và tài sản sẽ ra sao nếu mọi ⛔/🔴 được bán ở phiên sau (giá đóng cửa phiên sau, gần đúng).
 - Mục tiêu hoàn vốn: số học trên số đo. Ví dụ 24/10/2026: cần +38%; VNINDEX 2022-10/2026 **chưa có cửa sổ 2 tháng nào** đạt mức đó (1.152 cửa sổ, tốt nhất +23,5%), 6 tháng 1,0% số cửa sổ, 12 tháng 9,6%; quy tắc ⛔/🔴 đo được +1,14%/lệnh (582 lệnh) nên mục tiêu 2 tháng đòi gấp ~10 lần mức đo được, hoàn vốn với mức đo được là việc ~20 tháng. Bot nói thẳng điều đó mỗi tuần thay vì «cần +x%/phiên». Chi tiết: `docs/backtest_2026-10-24/README.md`.
-- **Bot không đặt lệnh; không khuyên margin hay bình quân giá xuống; không trừ phí/thuế vào giá anh nhập.** Mọi ý kiến của Claude vẫn chỉ là bóng để đo (xem *Claude chọn bóng*).
+- **Bot không đặt lệnh; không khuyên margin hay bình quân giá xuống; không trừ phí/thuế vào giá anh nhập.** Mọi ý kiến của AI vẫn chỉ là bóng để đo (xem *AI chọn bóng*).
 
 **Backtest các quy tắc bán** (23/10/2026, `docs/backtest_2026-10-23/thoat_tai_san.md`; 39 mã: 13 mã anh từng giao dịch và VN30, 582 lần MUA của trang): bán khi ⛔ **hoặc** 🔴 (cách bot đang báo) cho lãi trung bình như chỉ chờ trang BÁN (+1,1% so với +1,2% mỗi lệnh) nhưng số lệnh lỗ quá 10% giảm từ 31 xuống 5; trên 13 mã của anh đây là quy tắc tốt nhất (+0,6%/lệnh). Bán sớm theo 🟠 không tốt hơn chờ trang chốt (đúng 48% số lần), nên cảnh báo 🟠 khuyên theo dõi, chỉ bán sớm khi sát mức cắt lỗ. Giữ tới khi thủng cắt lỗ bắt được vài xu hướng rất lớn (VIC, VHM) nhưng thắng 23%, lỗ trung bình −7%, và thua trên 13 mã của anh.
 
@@ -184,13 +183,13 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 
 ### Trang web
 
-Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, mỗi bản ghi là một tờ giấy cotton có cạnh sáng bên trái và bóng đổ nhẹ sang phải, nút như thẻ in nổi (nút chính màu mực), lựa chọn 2-4 mục là một rãnh có thẻ trượt. Màu coral chỉ dùng cho vòng focus, gạch chân link và con dấu "Đã chọn" trên phiếu của Claude; xanh lá/đỏ chỉ ở lãi/lỗ; trạng thái là khung viền mực theo màu của nó. Chữ Be Vietnam Pro (vẽ riêng cho tiếng Việt), số trong bảng bằng Geist Mono; số thiếu ghi "chưa có", không dùng gạch ngang. Giao diện tối được suy ra (không đảo màu): không bóng đổ, nền sáng dần theo tầng. Trên điện thoại các bảng của trang Claude thành từng khối có nhãn. Thanh bên trái liệt kê mọi trang; trên điện thoại thanh này gập thành thanh 48 px với nút menu mở trang chọn toàn màn hình (hoạt động cả khi tắt JavaScript). Có giao diện sáng và tối. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở mọi trang, cả hai giao diện, từ màn 390 px.
+Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, mỗi bản ghi là một tờ giấy cotton có cạnh sáng bên trái và bóng đổ nhẹ sang phải, nút như thẻ in nổi (nút chính màu mực), lựa chọn 2-4 mục là một rãnh có thẻ trượt. Màu coral chỉ dùng cho vòng focus, gạch chân link và con dấu "Đã chọn" trên phiếu của AI chọn bóng; xanh lá/đỏ chỉ ở lãi/lỗ; trạng thái là khung viền mực theo màu của nó. Chữ Be Vietnam Pro (vẽ riêng cho tiếng Việt), số trong bảng bằng Geist Mono; số thiếu ghi "chưa có", không dùng gạch ngang. Giao diện tối được suy ra (không đảo màu): không bóng đổ, nền sáng dần theo tầng. Trên điện thoại các bảng của trang AI chọn bóng thành từng khối có nhãn. Thanh bên trái liệt kê mọi trang; trên điện thoại thanh này gập thành thanh 48 px với nút menu mở trang chọn toàn màn hình (hoạt động cả khi tắt JavaScript). Có giao diện sáng và tối. Toàn bộ dùng được bằng bàn phím, đạt kiểm tra truy cập WCAG 2 A/AA (axe-core) ở mọi trang, cả hai giao diện, từ màn 390 px.
 
-- **Thanh bên:** **Tổng quan** (`/`), **Danh mục** (`/taisan`); nhóm *Công cụ*: AI & cảnh báo, Claude chọn bóng, Bot giao dịch; nhóm *Hệ thống*: **Cài đặt** (`/caidat`), Cấu hình Zoom, Phiên bản. Dưới cùng: ngày (thứ, dương lịch, âm lịch), trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành).
+- **Thanh bên:** **Tổng quan** (`/`), **Danh mục** (`/taisan`); nhóm *Công cụ*: AI & cảnh báo, AI chọn bóng, Bot giao dịch; nhóm *Hệ thống*: **Cài đặt** (`/caidat`), Cấu hình Zoom, Phiên bản. Dưới cùng: ngày (thứ, dương lịch, âm lịch), trạng thái thị trường, nút sáng/tối, số phiên bản (đỏ nếu code khác bản phát hành).
 - **Tổng quan** (`/`): dải số đầu trang (lượt AI, thị trường, cảnh báo, rổ sàng lọc), phân tích một mã (AI phản biện, quyết định định lượng, phân tích chuyên sâu), lượt gần đây, ba tài khoản ảo, watchlist, nhà cung cấp AI.
 - **Danh mục** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
-- **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, Claude chọn bóng, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, Anthropic, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
-- **Claude chọn bóng** (`/claude`): xem mục **Claude chọn bóng**.
+- **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, AI chọn bóng, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, 9Router, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
+- **AI chọn bóng** (`/claude`): xem mục **AI chọn bóng**.
 - **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
 
 ### Báo cáo tự động
@@ -207,7 +206,7 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 
    Mã khác muốn AI xem thì gửi `/phanbien MÃ` (1 lượt) hoặc `/phantich MÃ` (đầy đủ).
 3. **Báo cáo Tài sản** (danh mục tiền thật), các ngày giao dịch lúc **15:30**, gửi Telegram và Zoom; chạy riêng, không phụ thuộc `TRADE_MODE` hay `SIEUTINHIEU`. Xem mục **Tài sản**.
-4. **Claude chọn bóng** (nếu có `ANTHROPIC_API_KEY` và `SIEUTINHIEU=1`), các ngày giao dịch lúc `CLAUDE_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **Claude chọn bóng**.
+4. **AI chọn bóng** (nếu có 9Router và `SIEUTINHIEU=1`), các ngày giao dịch lúc `CLAUDE_PICK_TIME` (mặc định **15:50**), gửi Telegram và Zoom. Xem mục **AI chọn bóng**.
 
 - **Ngày lễ:** bot giao dịch chỉ xử lý những phiên VNINDEX thực sự có nến, nên ngày lễ tự bỏ qua; phân tích watchlist cũng bỏ qua ngày lễ khi chạy sau 15:05.
 - **Chạy bù:** mỗi lần chạy (kể cả lúc server khởi động), bot xử lý lần lượt mọi phiên bị lỡ từ phiên cuối đã xử lý, mỗi phiên chỉ dùng dữ liệu tới phiên đó. Bù tối đa 20 phiên; phiên cũ hơn bị bỏ qua và lệnh chờ của chúng bị huỷ (báo cáo có ghi).
@@ -263,30 +262,32 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 - **Tin nhắn dễ đọc trên điện thoại:** chia mục có biểu tượng (📊 toàn thị trường, 👀 watchlist, 💼 tài khoản thật), mỗi mã một dòng, chi tiết (vùng vào, mục tiêu, cắt lỗ) ở dòng thụt vào bên dưới.
 - **`/stv`**: tổng quan - dòng Tài sản của anh, sổ ảo, lợi nhuận của từng sổ so với các sổ của bot. **`/stvdanhmuc`**: từng mã của sổ ảo so sánh. **`/stv MÃ`**: tín hiệu của một mã và lịch sử của nó tính lại hai cách - theo giá tín hiệu (giá đóng cửa ngày phát, chưa phí) và làm được thật (mở cửa phiên sau, có phí). Lịch sử cũ của trang được tạo lại hàng loạt (backtest), nên chỉ sổ ảo chạy từ hôm bật mới là phép so sánh công bằng.
 
-### Claude chọn bóng (tuỳ chọn, cần API của Claude hoặc 9Router)
+### AI chọn bóng (tuỳ chọn, Gemini có tìm web qua 9Router)
 
-Câu hỏi: dùng Claude đọc các lệnh MUA và danh mục thì có chọn tốt hơn, có giúp quyết định đúng lúc hơn không? Không ai biết trước, và **không backtest được**: Claude đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**. **Mọi ý kiến của Claude không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào; quy tắc ⛔/🔴 vẫn là quy tắc chính.
+Câu hỏi: dùng AI đọc các lệnh MUA và danh mục thì có chọn tốt hơn, có giúp quyết định đúng lúc hơn không? Không ai biết trước, và **không backtest được**: AI đã đọc tin tức của quá khứ, hỏi nó về một tín hiệu năm 2025 là hỏi khi đã có đáp án. Vì vậy bot chỉ **ghi lại và đo từ hôm bật trở đi**. **Mọi ý kiến của AI không phải lệnh**: không đổi lệnh, sổ, nhật ký Tài sản hay cảnh báo nào; quy tắc ⛔/🔴 vẫn là quy tắc chính.
 
-- **Bật:** đặt `ANTHROPIC_API_KEY` (tạo tại platform.claude.com, nên đặt luôn hạn mức chi tiêu ở đó) và `SIEUTINHIEU=1`, rồi khởi động lại. Chưa có khoá Claude nhưng đã cấu hình 9Router (`ROUTER9_BASE_URL`, `ROUTER9_API_KEY`) thì tính năng vẫn chạy, do 9Router trả lời.
-- **9Router trả lời thay Claude** (`CLAUDE_PICK_ROUTER9=1`, mặc định bật): khi **chưa có `ANTHROPIC_API_KEY`**, khi **API của Claude lỗi** (mất kết nối, khoá sai 401/403, hết tín dụng 400, quá tải 5xx, quá thời gian) hoặc khi **chạm trần** `CLAUDE_PICK_MONTHLY_USD`, bot gửi đúng câu hỏi đó cho 9Router (model `CLAUDE_PICK_ROUTER9_MODEL`, bỏ trống thì `ROUTER9_MODEL`) qua cùng chuỗi nhà cung cấp của các agent: dùng chung hạn mức ngày (`LLM_MAX_CALLS_PER_DAY`, `ROUTER9_MAX_CALLS_PER_DAY`), giãn cách và thời gian nghỉ khi 9Router lỗi. 9Router **không tìm tin** nên câu trả lời không có nguồn, và không tính vào trần USD của Claude (lượt Claude đã trả tiền trước khi lỗi vẫn được tính). Lời từ chối hay câu trả lời hỏng của Claude vẫn là câu trả lời, không chuyển sang 9Router. Mỗi tin nhắn, bản ghi và trang web ghi rõ ai trả lời và vì sao. Cả hai cùng lỗi thì bot thử lại như cũ. Tắt: `CLAUDE_PICK_ROUTER9=0`.
-- **Mỗi phiên lúc `CLAUDE_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08), một lượt gọi Claude:
-  1. **Ứng viên:** các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), mạnh nhất trước; rồi tới **các mã bot ước tính vừa đổi sang MUA** trong 300 mã thanh khoản cao nhất (cùng cách tính với trang, khớp ~88% ngày đổi chiều; tắt bằng `CLAUDE_PICK_BOT=0`), tối đa 25 mã. Nhờ vậy gần như phiên nào cũng có nhiều lệnh để chọn.
+- **AI là gì:** một model trên **9Router** ([UniRouter](https://github.com/traique/unirouter)), mặc định `gmw/gemini-pro`: Gemini web (đăng nhập bằng cookie trong trang quản trị UniRouter) **tự tìm tin trên web**, không tốn phí API. Không còn dùng API của Anthropic (Claude).
+- **Bật:** cần `ROUTER9_BASE_URL`, `ROUTER9_API_KEY` (chuỗi AI của bot đã dùng hai biến này) và `SIEUTINHIEU=1`, rồi khởi động lại. Trong UniRouter, nguồn *Gemini Web (cookie)* phải đang chạy; nếu key `sk-uni-…` của bot bị giới hạn nguồn thì cho phép nguồn này.
+- **Đổi model:** `CLAUDE_PICK_MODEL` (ở trang `/caidat`), ví dụ `gmw/gemini-flash` cho nhanh hơn. Chỉ model của Gemini web mới tìm web; model khác vẫn trả lời nhưng chỉ dựa vào số liệu bot đưa. Tên model Claude cũ (vd `claude-opus-5-5`) còn sót trong cấu hình được bỏ qua.
+- **Vì sao không dùng tools:** UniRouter chuyển mọi request có `tools` sang nguồn khác (Gemini web không gọi tool được), nên bot gửi câu hỏi dạng chữ kèm **JSON Schema** của câu trả lời và đọc **một khối JSON** Gemini trả về. Không phải JSON thì bot hỏi lại một lần; vẫn không được thì ghi lỗi và lần chạy sau hỏi lại.
+- **Mỗi phiên lúc `CLAUDE_PICK_TIME`** (mặc định 15:50, sau khi trang chốt tín hiệu ~15:08), một lượt hỏi:
+  1. **Ứng viên:** các tín hiệu MUA mới của phiên trong watchlist Siêu tín hiệu (60 mã, `/stvtheodoi`), mạnh nhất trước; rồi tới **các mã bot ước tính vừa đổi sang MUA** trong 300 mã thanh khoản cao nhất (cùng cách tính với trang, khớp ~88% ngày đổi chiều; tắt bằng `CLAUDE_PICK_BOT=0`), tối đa 25 mã.
   2. **Danh mục Tài sản:** từng mã đang giữ với khối lượng, giá vốn đúng như anh nhập (đã gồm phí, bot không trừ gì), giá đóng cửa, lãi/lỗ, tỷ trọng, cắt lỗ/mục tiêu, trạng thái của trang và **quy tắc đang báo gì** (⛔ thủng cắt lỗ hoặc 🔴 trang BÁN → BÁN; còn lại GIỮ).
-  3. Kèm số liệu code tính từ giá đóng cửa (thay đổi 1/20/60 phiên, khoảng cách tới TB20/50/200, đỉnh 52 tuần, giá trị giao dịch, khối lượng) và VNINDEX. Claude không tự đưa ra giá.
-  4. Claude tìm tin (tối đa `CLAUDE_PICK_SEARCHES` lượt, chỉ trên CafeF, Vietstock, VnExpress, Tin nhanh chứng khoán, VnEconomy, Báo Đầu tư, Người quan sát, HOSE, HNX, UBCKNN): phát hành thêm, cổ đông lớn mua bán, bị cảnh báo/kiểm soát, kết quả kinh doanh, pháp lý, ngày GDKHQ.
-  5. Claude trả lời qua một biểu mẫu cố định: **một mã chọn** (hoặc không chọn), **các mã nên tránh**, **xếp hạng mọi mã**, và **ý kiến GIỮ / CÂN NHẮC BÁN cho từng mã đang giữ**, kèm lý do và nguồn. Mã ngoài danh sách bị loại; nguồn chỉ được giữ khi đúng là trang Claude đã tìm thấy. Claude được dặn không khuyên mua thêm mã đang lỗ để bình quân giá.
-  6. Bot nhắn Telegram và Zoom, ghi vào `data/claude_pick.json`. Không có lệnh MUA mới nhưng có danh mục thì Claude chỉ xem danh mục; không có cả hai thì không gọi Claude.
-- **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ** (trong phiên hoặc sau giờ đóng cửa): ngay sau cảnh báo của bot, Claude tìm tin của mã đó (tối đa 3 lượt), cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `CLAUDE_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt), mỗi cảnh báo một lần. Cảnh báo của bot vẫn gửi ngay, không chờ Claude.
-- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi và lúc đó trang đang MUA hay BÁN, mua cao hơn giá tín hiệu bao nhiêu; các cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa; tài sản cuối tuần), Claude viết vài dòng nhận xét về kỷ luật và một việc cho tuần tới. Tắt: `CLAUDE_PICK_WEEKLY=0`. Xem lại: `/claude tuan`.
-- **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã Claude chọn và mã Claude bảo tránh), chưa trừ phí và thuế (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh):
+  3. Kèm số liệu code tính từ giá đóng cửa (thay đổi 1/20/60 phiên, khoảng cách tới TB20/50/200, đỉnh 52 tuần, giá trị giao dịch, khối lượng) và VNINDEX. AI không tự đưa ra giá.
+  4. Gemini tìm tin trên web, ưu tiên CafeF, Vietstock, VnExpress, Tin nhanh chứng khoán, VnEconomy, Báo Đầu tư, Người quan sát, HOSE, HNX, UBCKNN: phát hành thêm, cổ đông lớn mua bán, bị cảnh báo/kiểm soát, kết quả kinh doanh, pháp lý, ngày GDKHQ.
+  5. Câu trả lời: **một mã chọn** (hoặc không chọn), **các mã nên tránh**, **xếp hạng mọi mã**, và **ý kiến GIỮ / CÂN NHẮC BÁN cho từng mã đang giữ**, kèm lý do và nguồn. Mã ngoài danh sách bị loại. **Nguồn** là link AI tự nêu: bot chỉ giữ link tới các trang tin trên (không xem được AI đã tìm gì), trang web ghi rõ điều đó.
+  6. Bot nhắn Telegram và Zoom, ghi vào `data/claude_pick.json` (giữ tên file cũ để không mất lịch sử). Không có lệnh MUA mới nhưng có danh mục thì AI chỉ xem danh mục; không có cả hai thì không hỏi.
+- **Khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ**: ngay sau cảnh báo của bot, AI tìm tin của mã đó, cho biết giá đi như vậy vì **tin riêng của mã, theo thị trường chung hay chưa rõ**, và ý kiến GIỮ / CÂN NHẮC BÁN. Tối đa `CLAUDE_PICK_ALERTS` lần mỗi ngày (mặc định 5; 0 = tắt). Cảnh báo của bot vẫn gửi ngay, không chờ AI.
+- **Tổng kết tuần**, sau phiên cuối tuần: bot tự tính các dữ kiện (lệnh anh đã ghi, cảnh báo ⛔/🔴 và anh đã bán trong 2 phiên chưa, tài sản cuối tuần, thước kỷ luật), AI viết vài dòng nhận xét và một việc cho tuần tới. Tắt: `CLAUDE_PICK_WEEKLY=0`. Xem lại: `/claude tuan`.
+- **Chấm điểm, như nhau cho mọi ứng viên** (kể cả mã AI chọn và mã AI bảo tránh), chưa trừ phí và thuế (như nhau cho mọi lệnh nên không ảnh hưởng phép so sánh):
   - **Sau 10 phiên** (cách đo chính, có kết quả sau 2 tuần): mua ở giá mở cửa phiên sau, so với giá đóng cửa 10 phiên sau.
   - **Theo quy tắc ⛔/🔴** (chỉ lệnh của trang): bán ở giá mở cửa sau khi trang báo BÁN (đợi đủ T+2), khi giá chạm cắt lỗ của trang (từ T+2; mở cửa dưới cắt lỗ thì bán ở giá mở cửa), hoặc sau 60 phiên.
-  - **Ý kiến về danh mục và về cảnh báo:** giá 5 và 10 phiên sau so với giá đóng cửa hôm đó; bot tách riêng những lần Claude nói khác quy tắc.
-- **So sánh:** chỉ các phiên có **từ 2 lệnh trở lên** (có lựa chọn thật) và mọi lệnh đã đủ 10 phiên. Lệnh Claude chọn được so với **trung bình mọi lệnh cùng ngày** và với **lệnh mạnh nhất của trang**; **nửa trên bảng xếp hạng** của Claude so với nửa dưới; lệnh **bảo tránh** so với phần còn lại.
-- **Kết luận ở mốc định sẵn:** bot chỉ kết luận ở **20 phiên có lựa chọn (sơ bộ)** và **40 phiên**, mỗi mốc tính đúng trên chừng ấy phiên đầu tiên, kèm khoảng tin cậy 90%. Xem kết quả mỗi ngày rồi dừng khi thấy đẹp dễ tưởng nhầm may mắn là tài, nên kết luận ở một mốc không đổi theo các phiên sau. Với nhiễu thực tế của lệnh MUA (±5 điểm % sau 10 phiên), mốc 20 phiên chỉ thấy được khi Claude hơn trung bình khoảng 2 điểm %/lệnh trở lên. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
-- **Xem:** `/claude` (phiên gần nhất, ý kiến danh mục, thành tích), `/claude lichsu`, `/claude tuan`, trang web **Claude chọn bóng** (`/claude`, trong Công cụ): mở đầu bằng **phiếu chọn của phiên** (mã được chọn in lớn, đóng dấu "Đã chọn", giá tín hiệu, cắt lỗ, mục tiêu, lý do, mã nên tránh, ai trả lời) và bảng xếp hạng mọi ứng viên với hai cách chấm; rồi danh mục, kết quả đo tới nay, các lần Claude xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay.
-- **Chi phí:** mặc định Claude Opus 5.5, mức suy nghĩ `medium`: khoảng 0,2-0,5 USD một phiên (10 lượt tìm tin là 0,1 USD), 0,03-0,08 USD một lần xem cảnh báo, khoảng 0,01 USD một bản tổng kết tuần; tổng khoảng 6-12 USD một tháng. Trần `CLAUDE_PICK_MONTHLY_USD` (mặc định 15 USD) tính trên số token và lượt tìm thực tế của mọi lượt gọi, theo giá của **model thực sự trả lời** (một lượt máy chủ chuyển sang model khác tính theo model đó; model lạ tính giá đắt nhất); các lượt gọi xếp hàng sau một khoá chung nên hai lượt không bao giờ cùng tiêu đồng cuối. Một lượt được ghi trước khi trả tiền với chi phí ước tính, nên bot chết giữa chừng vẫn không làm trần hụt; một lượt quá giờ (timeout) cũng tính theo ước tính và không gọi lại (SDK không tự thử lại để khỏi trả hai lần). Chạm trần thì bot ngừng gọi tới tháng sau và báo lý do. Mỗi phiên chỉ gọi một lần; Claude không trả lời được (mạng, quá tải) thì bot thử lại sau 15, 30, 45 phút rồi bỏ phiên đó và báo một lần (bỏ rồi thì không hỏi lại trong ngày dù có lỗi gì); ngày không có nến VNINDEX tới 18:00 (nghỉ lễ lịch không biết) thì bỏ qua, không ghi "không có lệnh"; chưa lấy được tín hiệu của trang thì bot chờ. Mốc kết luận 20/40 phiên được **ghim** vào đúng các phiên đạt mốc lần đầu (xoá dữ liệu cũ không làm mốc trôi). `/claude chay` chạy nền và nhắn khi xong.
-- **An toàn:** key không bao giờ được in ra trong tin nhắn lỗi; nội dung trang web Claude đọc được coi là dữ liệu, không phải chỉ dẫn; trang web chỉ hiện link http(s). Nếu bộ lọc an toàn của Claude từ chối một yêu cầu, API tự chạy lại trên model dự phòng Anthropic khuyến nghị (tham số `fallbacks`).
+  - **Ý kiến về danh mục và về cảnh báo:** giá 5 và 10 phiên sau so với giá đóng cửa hôm đó; bot tách riêng những lần AI nói khác quy tắc.
+- **So sánh:** chỉ các phiên có **từ 2 lệnh trở lên** (có lựa chọn thật) và mọi lệnh đã đủ 10 phiên. Lệnh AI chọn được so với **trung bình mọi lệnh cùng ngày** và với **lệnh mạnh nhất của trang**; **nửa trên bảng xếp hạng** của AI so với nửa dưới; lệnh **bảo tránh** so với phần còn lại.
+- **Kết luận ở mốc định sẵn:** bot chỉ kết luận ở **20 phiên có lựa chọn (sơ bộ)** và **40 phiên**, mỗi mốc tính đúng trên chừng ấy phiên đầu tiên, kèm khoảng tin cậy 90%. Xem kết quả mỗi ngày rồi dừng khi thấy đẹp dễ tưởng nhầm may mắn là tài, nên kết luận ở một mốc không đổi theo các phiên sau. Với nhiễu thực tế của lệnh MUA (±5 điểm % sau 10 phiên), mốc 20 phiên chỉ thấy được khi AI hơn trung bình khoảng 2 điểm %/lệnh trở lên. Chỉ nên cân nhắc dùng tiền thật khi kết quả rõ ràng, và vẫn giữ mức rủi ro nhỏ cho mỗi lệnh.
+- **Xem:** `/claude` (phiên gần nhất, ý kiến danh mục, thành tích), `/claude lichsu`, `/claude tuan`, trang web **AI chọn bóng** (`/claude`, trong Công cụ): mở đầu bằng **phiếu chọn của phiên** (mã được chọn in lớn, đóng dấu "Đã chọn", giá tín hiệu, cắt lỗ, mục tiêu, lý do, mã nên tránh, model đã trả lời), bảng xếp hạng mọi ứng viên, danh mục, kết quả đo, các lần AI xem cảnh báo, tổng kết tuần, lịch sử và nút chạy ngay. Lệnh và đường dẫn vẫn là `/claude` để thói quen cũ không đổi.
+- **Hạn mức và lỗi:** mỗi lượt hỏi đi qua chuỗi nhà cung cấp của các agent cho riêng 9Router, nên tính vào hạn mức ngày (`LLM_MAX_CALLS_PER_DAY`, `ROUTER9_MAX_CALLS_PER_DAY`, mặc định 60 lượt/ngày cho mọi việc AI), và 9Router lỗi thì nghỉ `ROUTER9_RETRY_SEC` giây như với các agent. Một phiên thường là 1-2 lượt, mỗi lần cảnh báo 1-2 lượt, tổng kết tuần 1 lượt. 9Router không trả lời được thì bot thử lại sau 15, 30, 45 phút rồi bỏ phiên đó và báo một lần. Gemini web có thể mất 1-3 phút một lượt (bot chờ tối đa 5 phút).
+- **An toàn:** khoá 9Router không bao giờ được in ra trong tin nhắn lỗi; nội dung trang web AI đọc được coi là dữ liệu, không phải chỉ dẫn; trang web chỉ hiện link http(s) tới các trang tin đã định.
 
 ### Cảnh báo trong phiên (không gọi AI)
 
@@ -435,18 +436,12 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `MAX_TOOL_ROUNDS` | 8 | Số lượt gọi tool tối đa của mỗi analyst |
 | `KEEP_REPORTS` | 60 | Số thư mục báo cáo giữ lại |
 | `CACHE_MAX_AGE_DAYS` | 3 | Xoá cache giá cũ hơn số ngày này |
-| `ANTHROPIC_API_KEY` | - | Bật **Claude chọn bóng** (cần thêm `SIEUTINHIEU=1`); bỏ trống mà có 9Router thì 9Router trả lời |
-| `CLAUDE_PICK` | 1 | 0 = tắt Claude chọn bóng dù đã có key |
-| `CLAUDE_PICK_MODEL` | `claude-opus-5-5` | Model Claude |
-| `CLAUDE_PICK_EFFORT` | `medium` | Mức suy nghĩ: `low` / `medium` / `high` (`high` được 20.000 token trả lời, hai mức kia 16.000) |
-| `CLAUDE_PICK_MONTHLY_USD` | 15 | Trần chi phí mỗi tháng (USD), mọi lượt gọi Claude cộng lại |
-| `CLAUDE_PICK_SEARCHES` | 10 | Số lượt tìm tin tối đa mỗi phiên (1-20) |
+| `CLAUDE_PICK` | 1 | 0 = tắt **AI chọn bóng** (cần 9Router và `SIEUTINHIEU=1`) |
+| `CLAUDE_PICK_MODEL` | `gmw/gemini-pro` | Model trên 9Router; Gemini web (`gmw/…`) tự tìm tin trên web |
 | `CLAUDE_PICK_TIME` | `15:50` | Giờ chọn mỗi ngày giao dịch (không sớm hơn 15:10) |
 | `CLAUDE_PICK_BOT` | 1 | Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (300 mã, cần `STV_MARKET=1`) |
-| `CLAUDE_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày Claude xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
+| `CLAUDE_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày AI xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
 | `CLAUDE_PICK_WEEKLY` | 1 | Tổng kết tuần sau phiên cuối tuần (0 = tắt) |
-| `CLAUDE_PICK_ROUTER9` | 1 | 9Router trả lời thay khi chưa có khoá Claude, Claude lỗi hoặc chạm trần USD (0 = tắt) |
-| `CLAUDE_PICK_ROUTER9_MODEL` | - | Model trên 9Router khi trả lời thay Claude (bỏ trống = `ROUTER9_MODEL`) |
 
 ## 10. Giới hạn và xử lý sự cố
 

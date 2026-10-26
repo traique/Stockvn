@@ -100,23 +100,23 @@ t.ok("POST /caidat without password -> 401; cross-site -> 403",
      web.post("/caidat", data={"group": "taisan"}).status_code == 401
      and web.post("/caidat", data={"group": "taisan"}, auth=AUTH, headers={"origin": "https://evil.example"}).status_code == 403
      and web.post("/caidat/xoa", data={"key": "TAISAN_RISK_PCT"}).status_code == 401)
-r = web.post("/caidat", data={"group": "claude", "CLAUDE_PICK": "1", "CLAUDE_PICK_MODEL": "claude-opus-5-5", "CLAUDE_PICK_EFFORT": "high",
-                              "CLAUDE_PICK_SEARCHES": "10", "CLAUDE_PICK_MONTHLY_USD": "15", "CLAUDE_PICK_BOT": "1", "CLAUDE_PICK_ALERTS": "5",
-                              "CLAUDE_PICK_WEEKLY": "1", "CLAUDE_PICK_ROUTER9": "1", "CLAUDE_PICK_ROUTER9_MODEL": ""},
+r = web.post("/caidat", data={"group": "claude", "CLAUDE_PICK": "1", "CLAUDE_PICK_MODEL": "gmw/gemini-flash",
+                              "CLAUDE_PICK_BOT": "1", "CLAUDE_PICK_ALERTS": "5", "CLAUDE_PICK_WEEKLY": "1"},
              auth=AUTH, follow_redirects=False)
 from urllib.parse import unquote  # noqa: E402
 loc = unquote(r.headers.get("location", ""))
 t.ok("saving from the form: back to the group with a message, the environment set",
-     r.status_code == 303 and "đã lưu 1 thay đổi (CLAUDE_PICK_EFFORT)" in loc and loc.endswith("#claude") and os.environ["CLAUDE_PICK_EFFORT"] == "high", loc)
+     r.status_code == 303 and "đã lưu 1 thay đổi (CLAUDE_PICK_MODEL)" in loc and loc.endswith("#claude")
+     and os.environ["CLAUDE_PICK_MODEL"] == "gmw/gemini-flash", loc)
 from vnbot import claude_pick as cp  # noqa: E402
-t.ok("...Claude chọn bóng reads it", cp.effort() == "high")
+t.ok("...AI chọn bóng reads it", cp.model() == "gmw/gemini-flash")
 page = web.get("/caidat", auth=AUTH).text
-t.ok("the page shows the override and the way back", "Đang đặt trên web:" in page and 'value="CLAUDE_PICK_EFFORT"' in page)
-r = web.post("/caidat", data={"group": "claude", "CLAUDE_PICK_SEARCHES": "99"}, auth=AUTH, follow_redirects=False)
-t.ok("a bad value: a message, nothing saved", "Lượt tìm tin mỗi phiên: trong khoảng 1 đến 20" in unquote(r.headers["location"])
-     and config.read(DATA) == {"CLAUDE_PICK_EFFORT": "high"})
-r = web.post("/caidat/xoa", data={"key": "CLAUDE_PICK_EFFORT"}, auth=AUTH, follow_redirects=False)
-t.ok("clearing from the form", r.status_code == 303 and config.read(DATA) == {} and cp.effort() == "medium")
+t.ok("the page shows the override and the way back", "Đang đặt trên web:" in page and 'value="CLAUDE_PICK_MODEL"' in page)
+r = web.post("/caidat", data={"group": "claude", "CLAUDE_PICK_ALERTS": "99"}, auth=AUTH, follow_redirects=False)
+t.ok("a bad value: a message, nothing saved", "Xem tin khi có cảnh báo: trong khoảng 0 đến 20" in unquote(r.headers["location"])
+     and config.read(DATA) == {"CLAUDE_PICK_MODEL": "gmw/gemini-flash"}, unquote(r.headers["location"]))
+r = web.post("/caidat/xoa", data={"key": "CLAUDE_PICK_MODEL"}, auth=AUTH, follow_redirects=False)
+t.ok("clearing from the form", r.status_code == 303 and config.read(DATA) == {} and cp.model() == "gmw/gemini-pro")
 r = web.post("/caidat", data={"group": "lich", "DAILY_REPORT_TIME": "16:00", "TRADE_TIME": "", "STV_MORNING_TIME": "08:30", "CLAUDE_PICK_TIME": "15:50"},
              auth=AUTH, follow_redirects=False)
 t.ok("a restart key says so in the message", "khởi động lại" in unquote(r.headers["location"]))

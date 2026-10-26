@@ -144,7 +144,7 @@ class DailyScheduler:
     TAISAN_TIME, TAISAN_GIVE_UP = "15:30", "18:00"
     TAISAN_RETRY_SECONDS = 600
     TAISAN_MAX_TRIES = 6
-    # Claude chọn bóng (vnbot.claude_pick): once a session from claude_pick.pick_time(); a Claude
+    # AI chọn bóng (vnbot.claude_pick): once a session from claude_pick.pick_time(); a 9Router
     # that cannot be reached is tried again with a growing delay, then the day is given up.
     CLAUDE_RETRY_SECONDS = 900
     CLAUDE_MAX_TRIES = 4
@@ -198,7 +198,7 @@ class DailyScheduler:
         threading.Thread(target=self._scan_loop, name="stv-scan", daemon=True).start()
         # The owner's portfolio report runs on its own: minutes of downloads on a first rebuild.
         threading.Thread(target=self._taisan_loop, name="taisan", daemon=True).start()
-        # Claude's evening choice: one to three minutes with the searches, on its own as well.
+        # The AI's evening choice: one to three minutes with the searches, on its own as well.
         threading.Thread(target=self._claude_loop, name="claude-pick", daemon=True).start()
 
     def _claude_loop(self) -> None:
@@ -212,7 +212,7 @@ class DailyScheduler:
                     if week:
                         self._claude_week(week)
             except Exception:  # noqa: BLE001 - the loop must keep running
-                logger.exception("Claude pick loop failed")
+                logger.exception("AI pick loop failed")
             time.sleep(30)
 
     def _claude_due(self) -> str | None:
@@ -246,7 +246,7 @@ class DailyScheduler:
         try:
             return day in account.market.daily_closes(vn_rules.BENCHMARK, day)
         except Exception as exc:  # noqa: BLE001 - the run itself decides
-            logger.warning("Claude pick %s: VNINDEX bar not read: %s", day, exc)
+            logger.warning("AI pick %s: VNINDEX bar not read: %s", day, exc)
             return True
 
     def _claude_week_due(self) -> str | None:
@@ -273,9 +273,9 @@ class DailyScheduler:
             self._week_day, self._week_tries = day, 0
         try:
             text = claude_pick.ClaudePick(self.settings.data_dir).weekly_review(day)
-        except Exception as exc:  # Claude not reached (Retry), or a fault: never a loop of requests
+        except Exception as exc:  # 9Router not reached (Retry), or a fault: never a loop of requests
             self._week_tries += 1
-            logger.warning("Claude weekly review %s: %s: %s (try %d)", day, type(exc).__name__, exc, self._week_tries)
+            logger.warning("AI weekly review %s: %s: %s (try %d)", day, type(exc).__name__, exc, self._week_tries)
             self._week_next = time.time() + (86400 if self._week_tries >= 3 else self.CLAUDE_RETRY_SECONDS)
             return
         self._week_tries = 0
@@ -283,7 +283,7 @@ class DailyScheduler:
             self.notify(text)
 
     def _claude_run(self, day: str) -> None:
-        """Claude's choice of ``day``, sent to Telegram and Zoom; retried while Claude cannot be
+        """The AI's choice of ``day``, sent to Telegram and Zoom; retried while 9Router cannot be
         reached, then given up for the day (said once)."""
         from vnbot import claude_pick
 
@@ -295,7 +295,7 @@ class DailyScheduler:
             # No bar yet: a late close, or a closure the calendar does not know (then skipped at
             # TAISAN_GIVE_UP without recording "no new BUY" for a day that was no session).
             if vn_rules.now_vn().strftime("%H:%M") >= self.TAISAN_GIVE_UP:
-                logger.info("Claude pick %s: no VNINDEX bar by %s, the day is skipped", day, self.TAISAN_GIVE_UP)
+                logger.info("AI pick %s: no VNINDEX bar by %s, the day is skipped", day, self.TAISAN_GIVE_UP)
                 self._claude_done = day
             else:
                 self._claude_next = time.time() + 900
@@ -304,18 +304,18 @@ class DailyScheduler:
         try:
             text = pick.run(day)
         except claude_pick.PickError as exc:          # switched off meanwhile, or a run in progress
-            logger.info("Claude pick %s: %s", day, exc)
+            logger.info("AI pick %s: %s", day, exc)
             self._claude_next = time.time() + 600
             return
-        except Exception as exc:  # Claude not reached (Retry), or a fault: never a loop of requests
+        except Exception as exc:  # 9Router not reached (Retry), or a fault: never a loop of requests
             self._claude_tries += 1
-            logger.warning("Claude pick %s: %s: %s (try %d)", day, type(exc).__name__, exc, self._claude_tries)
+            logger.warning("AI pick %s: %s: %s (try %d)", day, type(exc).__name__, exc, self._claude_tries)
             if self._claude_tries >= self.CLAUDE_MAX_TRIES:
                 self._claude_given_up = day          # first: a failing give_up must never bring the loop back
                 try:
                     self.notify(pick.give_up(day, str(exc)))
                 except Exception:  # noqa: BLE001 - said in the log instead
-                    logger.exception("Claude pick %s: give_up failed", day)
+                    logger.exception("AI pick %s: give_up failed", day)
             else:
                 self._claude_next = time.time() + self.CLAUDE_RETRY_SECONDS * self._claude_tries
             return
