@@ -129,7 +129,7 @@ class Settings:
     extra: dict = field(default_factory=dict)
 
 
-# AI chọn bóng was named after its first model until v1.8.0: its files, its saved settings and
+# AI thẩm định tín hiệu was named after its first model until v1.8.0: its files, its saved settings and
 # its environment variables carry the old prefix on a server that ran it. Renamed once at
 # start so the measured sessions and the owner's settings carry over.
 _OLD_PICK = "CLAUDE_PICK"
@@ -145,7 +145,7 @@ def _carry_over_pick(data_dir: Path) -> None:
     for old, new in _OLD_PICK_FILES.items():
         if (data_dir / old).exists() and not (data_dir / new).exists():
             (data_dir / old).rename(data_dir / new)
-            log.info("AI chọn bóng: %s -> %s", old, new)
+            log.info("AI thẩm định tín hiệu: %s -> %s", old, new)
     saved = data_dir / "settings.json"
     try:
         data = json.loads(saved.read_text(encoding="utf-8")) if saved.exists() else {}

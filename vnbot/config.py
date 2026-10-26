@@ -5,7 +5,7 @@ This module lets the owner change the non-secret ones from the web page: a value
 there is kept in ``settings.json`` under the data directory and written into the
 environment on every start (``apply``, called by ``settings.load`` before anything reads
 the variables) and again when saved, so the modules that read the environment at call
-time (Siêu tín hiệu, Tài sản, AI chọn bóng, the AI budget) follow it at once. The
+time (Siêu tín hiệu, Tài sản, AI thẩm định tín hiệu, the AI budget) follow it at once. The
 values frozen into ``Settings`` at start (the schedule, the trading bot, the daily
 screen) take effect after a restart; ``Field.restart`` says which.
 
@@ -61,7 +61,7 @@ FIELDS: tuple[Field, ...] = (
        "trước 15:05 (nến ngày chưa chốt).", "hhmm", "", "lich", restart=True),
     _F("STV_MORNING_TIME", "Giờ bản tin sáng", "Bản tin Siêu tín hiệu vào Zoom (hoặc Telegram) các ngày giao dịch; phải trước 11:30.",
        "hhmm", "08:30", "lich"),
-    _F("AI_PICK_TIME", "Giờ AI chọn bóng", "Sau khi trang chốt tín hiệu; không sớm hơn 15:10.", "hhmm", "15:50", "lich"),
+    _F("AI_PICK_TIME", "Giờ AI thẩm định tín hiệu", "Sau khi trang chốt tín hiệu; không sớm hơn 15:10.", "hhmm", "15:50", "lich"),
     # Sàng lọc & AI
     _F("WATCHLIST", "Watchlist mặc định", "Các mã theo dõi khi chưa lưu danh sách trên trang Tổng quan (danh sách lưu ở đó được ưu tiên).",
        "list", "", "sangloc", restart=True, max_items=30),
@@ -112,7 +112,7 @@ FIELDS: tuple[Field, ...] = (
        restart=True, options=(("factor", "Phòng thủ"), ("momentum", "Động lượng VN30"), ("engine", "Quant Engine"))),
     # Siêu tín hiệu
     _F("SIEUTINHIEU", "Theo dõi sieutinhieu.vn", "Mỗi tối lấy tín hiệu của trang cho các mã đang giữ và watchlist riêng, chạy một sổ ảo theo "
-       "tín hiệu đó. AI chọn bóng cần mục này bật.", "flag", "0", "stv"),
+       "tín hiệu đó. AI thẩm định tín hiệu cần mục này bật.", "flag", "0", "stv"),
     _F("STV_WATCHLIST", "Watchlist riêng của Siêu tín hiệu", "Tối đa 60 mã; bỏ trống = 60 mã mặc định. Danh sách sửa bằng /stvtheodoi được ưu tiên.",
        "list", "", "stv", max_items=60),
     _F("STV_SCAN_MINUTES", "Chu kỳ hỏi trang trong phiên", "Bao nhiêu phút một lần bot hỏi tín hiệu các mã đang giữ, 09:00-17:00 ngày giao dịch.",
@@ -131,18 +131,18 @@ FIELDS: tuple[Field, ...] = (
        "taisan", lo=1, hi=30, unit="%"),
     _F("TAISAN_MAX_WEIGHT_NEW", "Tỷ trọng tối đa sau khi mua", "Một mã không quá chừng này % tài sản sau lệnh mua.", "float", "30", "taisan",
        lo=5, hi=100, unit="%"),
-    # AI chọn bóng
-    _F("AI_PICK", "AI chọn bóng", "Mỗi phiên AI (qua 9Router) đọc các lệnh MUA mới và danh mục, tìm tin trên web, chọn một mã để đo. "
-       "Cần ROUTER9_BASE_URL, ROUTER9_API_KEY và Siêu tín hiệu bật.", "flag", "1", "chonbong"),
+    # AI thẩm định tín hiệu
+    _F("AI_PICK", "AI thẩm định tín hiệu", "Mỗi phiên AI (qua 9Router) đọc các lệnh MUA mới và danh mục, tìm tin trên web, chọn một mã để đo. "
+       "Cần ROUTER9_BASE_URL, ROUTER9_API_KEY và Siêu tín hiệu bật.", "flag", "1", "thamdinh"),
     _F("AI_PICK_MODEL", "Model chính", "Chọn mã buổi chiều (1-2 lượt mỗi ngày). Gemini web của UniRouter tự tìm tin: "
-       "gmw/gemini-pro kỹ hơn nhưng tài khoản free có hạn mức ngày.", "text", "gmw/gemini-pro", "chonbong"),
+       "gmw/gemini-pro kỹ hơn nhưng tài khoản free có hạn mức ngày.", "text", "gmw/gemini-pro", "thamdinh"),
     _F("AI_PICK_MODEL_FAST", "Model nhanh", "Xem tin khi có cảnh báo và tổng kết tuần; cũng là model dự phòng: model này "
-       "lỗi hoặc hết hạn mức thì tự chuyển sang model kia, và ngược lại.", "text", "gmw/gemini-flash", "chonbong"),
+       "lỗi hoặc hết hạn mức thì tự chuyển sang model kia, và ngược lại.", "text", "gmw/gemini-flash", "thamdinh"),
     _F("AI_PICK_BOT", "Thêm mã bot ước tính", "Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (cần quét toàn thị trường).",
-       "flag", "1", "chonbong"),
+       "flag", "1", "thamdinh"),
     _F("AI_PICK_ALERTS", "Xem tin khi có cảnh báo", "Số lần tối đa mỗi ngày AI tìm tin khi một mã đang giữ có cảnh báo; 0 = tắt.",
-       "int", "5", "chonbong", lo=0, hi=20, unit="lần"),
-    _F("AI_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, AI nhận xét kỷ luật so với quy tắc.", "flag", "1", "chonbong"),
+       "int", "5", "thamdinh", lo=0, hi=20, unit="lần"),
+    _F("AI_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, AI nhận xét kỷ luật so với quy tắc.", "flag", "1", "thamdinh"),
     # Kết nối & trang web
     _F("PUBLIC_URL", "Địa chỉ công khai", "Để bot gửi kèm link báo cáo và khai báo với Zoom, ví dụ https://abc.botkeep.cloud.", "text", "",
        "ketnoi", restart=True),
@@ -160,7 +160,7 @@ GROUPS: tuple[Group, ...] = tuple(
         ("bot", "Bot giao dịch ảo", "Ba tài khoản ảo. Bot không bao giờ đặt lệnh tới công ty chứng khoán."),
         ("stv", "Siêu tín hiệu", "So sánh với sieutinhieu.vn, dùng cá nhân."),
         ("taisan", "Danh mục Tài sản", "Ngân sách rủi ro cho sổ tiền thật; chỉ để kiểm tra, không khuyên mua."),
-        ("chonbong", "AI chọn bóng", "Chọn bóng để đo, không phải lệnh. AI là model trên 9Router (UniRouter), mặc định Gemini có tìm web."),
+        ("thamdinh", "AI thẩm định tín hiệu", "Ghi lại để kiểm chứng, không phải lệnh đặt. AI là model trên 9Router (UniRouter), mặc định Gemini có tìm web."),
         ("ketnoi", "Kết nối & trang web", "Khoá và token chỉ đặt được trên Botkeep; trang này chỉ cho biết đã có hay chưa."),
     ))
 

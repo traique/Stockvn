@@ -1,4 +1,4 @@
-"""The AI chọn bóng page (/chonbong): the latest session (the pick, the avoided, the views
+"""The AI thẩm định tín hiệu page (/thamdinh): the latest session (the pick, the avoided, the views
 on the holdings), the running comparisons, the AI's notes on the rule alerts, the weekly
 review, the history and the month's spending (``vnbot.ai_pick``).
 
@@ -295,7 +295,7 @@ def page_body(pick: cp.AiPick, msg: str = "") -> str:
     running = pick.running
     plan = cp.manual_plan()
     button = ("" if off else
-              '<div class="run-now"><form method="post" action="/chonbong/chay" style="margin:0" '
+              '<div class="run-now"><form method="post" action="/thamdinh/chay" style="margin:0" '
               "onsubmit=\"var b=this.querySelector('button');b.disabled=true;b.textContent='Đang gửi…'\">"
               f'<button class="btn btn-primary" type="submit"{" disabled" if running else ""}>'
               f'{"AI đang xem…" if running else "Chạy ngay với dữ liệu mới nhất"}</button></form>'
@@ -307,7 +307,7 @@ def page_body(pick: cp.AiPick, msg: str = "") -> str:
         notice = _run_notice(running) or (
             ui.alert("AI đang chạy lượt tự động của phiên (1-3 phút); trang tự tải lại.", "info") if running else "")
     kind = "err" if msg[:1] in ("⚠", "❌") else "ok" if msg[:1] in ("✅", "▶") else "info"
-    lead = "Mỗi chiều AI chọn một lệnh MUA mới để đo, không phải để đặt lệnh."
+    lead = "Mỗi chiều AI xét các lệnh MUA mới trên tin tức và số liệu, chọn một mã, nêu mã nên tránh. Ghi lại để kiểm chứng, không phải lệnh đặt."
     verdict_rows = "".join(f"<li>{_e(_web(line))}</li>" for line in cp.stats_lines(st))
     method = (
         "<p>Mỗi chiều sau khi trang sieutinhieu.vn chốt tín hiệu, AI (Gemini qua 9Router) đọc các lệnh MUA mới (của trang và bot ước tính "
@@ -347,26 +347,30 @@ def page_body(pick: cp.AiPick, msg: str = "") -> str:
 
 
 def register(app, data_dir, *, guard, post_guard, show_bot=lambda: True) -> None:
-    """The /chonbong routes on ``app``."""
+    """The /thamdinh routes on ``app``."""
     from fastapi import Depends
 
     def render(msg: str = "") -> HTMLResponse:
         pick = cp.AiPick(data_dir)
-        return HTMLResponse(ui.page(cp.NAME, page_body(pick, msg[:600]), active="chonbong",
+        return HTMLResponse(ui.page(cp.NAME, page_body(pick, msg[:600]), active="thamdinh",
                                     refresh=10 if pick.running else None, show_bot=show_bot()))
 
-    @app.get("/chonbong", dependencies=[Depends(guard)])
-    def chonbong_page(msg: str = "") -> HTMLResponse:
+    @app.get("/thamdinh", dependencies=[Depends(guard)])
+    def thamdinh_page(msg: str = "") -> HTMLResponse:
         return render(msg)
 
-    @app.post("/chonbong/chay", dependencies=post_guard)
-    def chonbong_run():
+    @app.get("/chonbong", include_in_schema=False)
+    def old_address() -> RedirectResponse:      # the page's address until v1.11.0
+        return RedirectResponse("/thamdinh", status_code=301)
+
+    @app.post("/thamdinh/chay", dependencies=post_guard)
+    def thamdinh_run():
         pick = cp.AiPick(data_dir)
         off = cp.why_off()
         if off:
-            return RedirectResponse(f"/chonbong?msg={quote(f'⚠️ Tính năng {off}.')}", status_code=303)
+            return RedirectResponse(f"/thamdinh?msg={quote(f'⚠️ Tính năng {off}.')}", status_code=303)
         if pick.running:
-            return RedirectResponse(f"/chonbong?msg={quote('AI đang chạy, đợi lượt này xong.')}", status_code=303)
+            return RedirectResponse(f"/thamdinh?msg={quote('AI đang chạy, đợi lượt này xong.')}", status_code=303)
         plan = cp.manual_plan()
         _LAST.clear()
         _LAST.update(at=pick.now().strftime("%H:%M"), day=plan["day"], note=plan["note"])
@@ -394,4 +398,4 @@ def register(app, data_dir, *, guard, post_guard, show_bot=lambda: True) -> None
             if pick.running or _LAST.get("result"):
                 break
             time.sleep(0.05)
-        return RedirectResponse("/chonbong", status_code=303)   # the notice on the page says where the run is
+        return RedirectResponse("/thamdinh", status_code=303)   # the notice on the page says where the run is
