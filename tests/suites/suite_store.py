@@ -138,7 +138,7 @@ t.ok("a risk-off market: the regime is risk_off and the market is one of the sto
      d_up.market_regime == "risk_off" and "market" in d_up.gates and d_up.bias == "bullish", (d_up.market_regime, d_up.gates, d_up.bias))
 same = policy.evaluate_policy(p_up, regime_override=None)
 t.ok("no override = the bot's decision, unchanged", (same.action, same.confidence, same.gates) == (d_up.action, d_up.confidence, d_up.gates))
-lifted = engine.market_lifted(p_up, d_up)
+lifted = engine.lifted(p_up, d_up)
 cf = policy.evaluate_policy(replace(p_up, is_holding=False), regime_override="neutral")
 t.ok("lifting the market: the same stock decided with a neutral regime (its own gates still apply)",
      lifted is not None and lifted["action"] == cf.action and cf.market_regime == "neutral"
@@ -147,7 +147,7 @@ t.ok("...and the decision says nothing about distribution days it did not use", 
 p_down = engine.build_inputs("BBB", as_of, down, vni_on, exchange="HOSE", params=policy.DEFAULT_PARAMS).inputs
 d_down = policy.evaluate_policy(p_down)
 t.ok("a falling stock: the first gate is its own trend, nothing to lift",
-     d_down.gate == "bearish" and engine.market_lifted(p_down, d_down) is None, (d_down.gate, d_down.gates))
+     d_down.gate == "bearish" and engine.lifted(p_down, d_down) is None, (d_down.gate, d_down.gates))
 t.ok("gate '' only for a BUY (or a holder's qualified HOLD); every code has a label",
      (d_up.gate == "") == (d_up.action == "BUY") and all(g in policy.BUY_GATES for g in d_up.gates + d_down.gates))
 bad = replace(p_up, quality=replace(p_up.quality, status="bad"))
@@ -235,7 +235,7 @@ def result(sym, action, gate="", bias="bullish", alt=None, conf=0.6, holding=Fal
         setup_type="pullback", market_regime="risk_off", risk_level="medium", data_quality="ok",
         reasons=["VNINDEX có 9 ngày phân phối", "khối ngoại bán ròng toàn thị trường 12/15 phiên - hạ regime một bậc"],
         price=10000.0, entry_low=None, entry_high=None, stop_price=None, target_price=None, target2=None, rr_ratio=None,
-        is_holding=holding, gate=gate, gates=[gate] if gate else [], bias=bias, if_market_ok=alt)
+        is_holding=holding, gate=gate, gates=[gate] if gate else [], bias=bias, if_lifted=alt)
 
 
 results = {"AAA": result("AAA", "WATCH", "market", alt={"action": "BUY", "confidence": 0.8, "gate": "", "stop": 9500.0,

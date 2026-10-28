@@ -16,6 +16,8 @@ sẵn. Đây là nơi DUY NHẤT quyết định action; Gemini ở stock_analys
            CỰ THẬT gần nhất, tính tại giá mua XẤU NHẤT của vùng mua. Target
            suy ra từ hệ số reward_mult (không có kháng cự thật) chỉ để tham
            khảo, tự nó KHÔNG đủ điều kiện BUY.
+Sau cùng, công tắc đổi tay Params.breakout_buy = 0 hạ BUY của setup breakout
+xuống WATCH (người đang giữ: HOLD không kèm plan mua thêm).
 """
 
 import math
@@ -205,6 +207,7 @@ BUY_GATES: dict[str, str] = {
     "levels": "không tính được stop/mục tiêu",
     "resistance": "phá đỉnh, không còn kháng cự để đo R:R",
     "rr": "R:R dưới ngưỡng",
+    "breakout": "MUA breakout đang tắt",
 }
 
 
@@ -1083,6 +1086,17 @@ def evaluate_policy(inputs: PolicyInputs, *, regime_override: str | None = None)
             )
     else:
         invalidation_reason = None
+
+    if buy_qualified and setup_type == "breakout" and not p.breakout_buy:
+        # Switched off by hand (Params.breakout_buy). Checked last: this gate means the
+        # stock passed every other one. The levels stay on record, without a plan.
+        buy_qualified = False
+        action = "HOLD" if holding else "WATCH"
+        gates = ("breakout",)
+        # First: the summaries show only the first few reasons, and this one decides.
+        reasons.insert(0, f"MUA breakout đang tắt (breakout_buy = 0) - chưa {'mở thêm' if holding else 'vào mới'}")
+        if not holding:
+            invalidation_reason = None
 
     if action == "NO_TRADE":
         stop_price = target_price = rr_ratio = None

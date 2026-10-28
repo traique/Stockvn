@@ -191,7 +191,8 @@ Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, 
 - **Danh mục** (`/taisan`): danh mục tiền thật của anh, xem mục **Tài sản** bên trên.
 - **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, AI thẩm định tín hiệu, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, 9Router, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
 - **AI thẩm định tín hiệu** (`/thamdinh`): xem mục **AI thẩm định tín hiệu**.
-- **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
+- **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, **công tắc MUA breakout** của Quant Engine, ngưỡng và lịch sử hiệu chỉnh;
+  nút **Chạy phiên ngay** như `/chay`.
 - **Vì sao chưa MUA** (`/tinhieu`, trong Công cụ) và **Dữ liệu & nhật ký** (`/dulieu`, trong Hệ thống): xem mục **Vì sao chưa có MUA & kho dữ liệu**.
 
 ### Vì sao chưa có MUA & kho dữ liệu (v1.13.0, học từ bot OKX)
@@ -212,7 +213,8 @@ Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, 
   **22 MUA bị chặn chỉ vì thị trường** cũng lỗ: 10 phiên sau **-4,4%**, thắng 27%; theo kế hoạch 19/22 chạm cắt lỗ, -0,64R.
   Mẫu nhỏ, rổ VN100 hôm nay (thiên lệch sống sót), nhưng năm qua bộ lọc thị trường **không làm mất lệnh tốt**: nới cổng lúc này
   không có cơ sở; cùng chiều với backtest 23/10 (nới ngày phân phối, R:R 1,2, tin cậy 0,65/0,70 đều xấu hơn). Vì sao chính các lệnh
-  MUA lỗ (so với 2023-2025, theo setup): `docs/chandoan_2026-10-28/README.md`, mục **Bổ sung**.
+  MUA lỗ (so với 2023-2025, theo setup): `docs/chandoan_2026-10-28/README.md`, mục **Bổ sung**. Lệnh breakout lỗ ở cả hai giai
+  đoạn, nên từ v1.14.0 có **công tắc MUA breakout** (trang `/bot`, xem mục Bot giao dịch) để thử tắt trên sổ ảo.
 
 Vì vậy bot giờ **ghi lại và đo**, như bot OKX: mọi tín hiệu kể cả tín hiệu bị loại đều được theo dõi "bóng", và chỉ số đo mới được
 dùng để quyết định đổi luật.
@@ -224,14 +226,16 @@ dùng để quyết định đổi luật.
   `scans` (phễu của mỗi lượt), `market` (VNINDEX mỗi phiên), `equity` và `fills` (NAV và lệnh khớp các sổ, không bị cắt ở 500 lệnh),
   `events` (nhật ký hoạt động), `kv`.
 - **Cổng chặn MUA** (`policy.BUY_GATES`): mỗi quyết định ghi cổng đầu tiên mã trượt (xu hướng giảm, mâu thuẫn, chưa rõ xu hướng, độ tin
-  cậy, thị trường risk-off, phiên rủi ro, dữ liệu cũ, không tính được stop, phá đỉnh chưa đo được R:R, R:R dưới ngưỡng) và mọi cổng nó
-  trượt, cùng **quyết định nếu thị trường trung tính** (cùng code, chỉ nhấc cổng thị trường). Chỉ để ghi: quyết định, lệnh và mức giá
+  cậy, thị trường risk-off, phiên rủi ro, dữ liệu cũ, không tính được stop, phá đỉnh chưa đo được R:R, R:R dưới ngưỡng, MUA breakout
+  đang tắt) và mọi cổng nó trượt, cùng **quyết định nếu thị trường trung tính** (cùng code, chỉ nhấc cổng thị trường; mã chỉ vướng
+  công tắc MUA breakout thì là quyết định khi công tắc bật). Chỉ để ghi: quyết định, lệnh và mức giá
   của bot không đổi (đã so 4.000 quyết định trên dữ liệu thật, cả mã đang giữ và chưa giữ: giống hệt bản cũ).
-- **Suýt MUA:** chỉ vướng thị trường; hoặc độ tin cậy cách ngưỡng ≤ 0,05; R:R cách ngưỡng ≤ 0,3; hoặc phá đỉnh chưa đo được R:R.
+- **Suýt MUA:** chỉ vướng thị trường; hoặc chỉ vì MUA breakout đang tắt; hoặc độ tin cậy cách ngưỡng ≤ 0,05; R:R cách ngưỡng ≤ 0,3;
+  hoặc phá đỉnh chưa đo được R:R.
 - **Kết quả bóng** (`vnbot/chandoan.py`): mỗi tối, mã-phiên đủ phiên được chấm: giá 5/10/20 phiên sau tính từ giá mở cửa phiên kế
   tiếp, so với VNINDEX cùng khoảng; lệnh MUA (và MUA bị chặn vì thị trường) đi theo kế hoạch như sổ ảo: lệnh giới hạn tại cận trên
   vùng mua một phiên, bán được từ T+2, cắt lỗ (giá mở cửa dưới cắt lỗ thì bán ở giá mở cửa) hoặc mục tiêu, tối đa 30 phiên, tính bằng
-  R sau phí (1R = từ cận trên vùng mua tới cắt lỗ, khoảng sổ ảo dùng để tính khối lượng). Thống kê theo nhóm (MUA thật, bị chặn vì thị trường, suýt MUA khác, theo cổng) kèm **t**: một nhóm chỉ nói lên điều gì
+  R sau phí (1R = từ cận trên vùng mua tới cắt lỗ, khoảng sổ ảo dùng để tính khối lượng). Thống kê theo nhóm (MUA thật, bị chặn vì thị trường, MUA breakout bị tắt, suýt MUA khác, theo cổng) kèm **t**: một nhóm chỉ nói lên điều gì
   khi có ≥ 30 mẫu và |t| ≥ 2 (bài học của bot OKX: học trên 13-20 mẫu là học nhiễu). **Bot không tự nới cổng nào.**
 - **Dựng lại lịch sử:** trang `/dulieu` hoặc `/vikhongmua dunglai 120 [vn100]`: engine quyết định lại từng mã ở từng phiên đã qua
   (tối đa 250 phiên; giá điều chỉnh tới hôm nay, rổ mã hôm nay, không tin tức/dòng tiền), ghi với nguồn `replay` rồi chấm kết quả
@@ -288,6 +292,15 @@ Ba lịch chạy độc lập (giờ Việt Nam):
 - **Đêm đầu tiên chạy lâu hơn** (khoảng 20–30 phút): bot tải lịch sử khối ngoại, tự doanh và ETF cho cả rổ, cùng khoảng 400 phiên độ rộng HOSE (mỗi phiên một lượt gọi). Dữ liệu được lưu dần, nên khởi động lại giữa chừng không mất phần đã tải.
 - **Cách tự hiệu chỉnh và các giới hạn:** xem README chính, mục "Bot giao dịch tự hiệu chỉnh". Quy tắc: dữ liệu kiểm tra (60 phiên gần nhất) chỉ được dùng **một lần** - sau mỗi đêm đã đem bộ thử ra kiểm tra (đổi hay không), chiến lược đó chờ đủ 60 phiên mới mới xét tiếp; và bộ thử phải thắng bộ hiện tại hơn **2 lần mức nhiễu** (độ lệch điểm của các bộ lân cận trên cùng dữ liệu kiểm tra). Trên dữ liệu ngẫu nhiên, bản cũ đổi tham số khoảng 4 lần/năm, bản mới không đổi lần nào. Muốn tắt: `AUTO_CALIBRATE=0`. Muốn quay về ngưỡng gốc: xoá `data/results/quant_params.json`.
 - **Tham số thêm ngày 23/10/2026** (mặc định = hành vi cũ; hiệu chỉnh đêm được thử từng bước; kết quả backtest trong `BAO_CAO_RA_SOAT_2026-10-23.md`, mục E): `breakout_projected_ok` (0/1, MUA mã phá đỉnh không còn kháng cự, mục tiêu `projected_rr` × rủi ro), `confidence_sell_min` (ngưỡng SELL riêng khi đang giữ, mặc định 0,75), `stop_atr_mult` và `stop_min_pct` (khoảng stop = hệ số × ATR, không sát hơn % này), `buy_order_sessions` (lệnh mua giới hạn sống bao nhiêu phiên, giới hạn và stop theo quyết định mới nhất, huỷ khi engine hết BUY), `limit_fill_touch` (1 = khớp khi giá thấp nhất chạm giới hạn). Phòng thủ có thêm `fb_market_daily` + `fb_market_buffer_pct` (lọc MA200 kiểm tra hằng ngày với vùng đệm) và `fb_momentum_weight` (động lượng 6 tháng trong điểm xếp hạng), **không tự hiệu chỉnh**, chỉ đổi tay trong `quant_params.json` sau khi kiểm định.
+- **Công tắc MUA breakout** (`breakout_buy`, v1.14.0; mặc định bật = như cũ): trang `/bot`, thẻ **Công tắc Quant Engine**, nút **Tắt MUA
+  breakout** / **Bật lại MUA breakout**. Tắt: Quant Engine không mở MUA mới ở mã breakout (giá đóng cửa vượt kênh Donchian 20 phiên),
+  kể cả mã phá đỉnh khi `breakout_projected_ok=1`; mã đó thành THEO DÕI (đang giữ: GIỮ, không kèm kế hoạch mua thêm). Áp dụng cho
+  mọi quyết định của engine: sổ ảo Quant Engine, sàng lọc 15:30, phân tích, tín hiệu thật nếu `SIGNAL_STRATEGY=engine`; từ lượt quyết
+  định kế tiếp (lệnh mua đã đặt cho phiên tới không bị huỷ). Lý do: dựng lại 03/2023 - 10/2026 trên VN100, lệnh breakout theo kế
+  hoạch 46 lệnh, 5 chốt lời, 38 cắt lỗ, -0,68R/lệnh; pullback hoà vốn (`docs/chandoan_2026-10-28/README.md`, mục Bổ sung). Các mã bị
+  tắt vẫn được chấm kết quả bóng như thể đã mua theo kế hoạch: nhóm **MUA breakout bị tắt** ở `/tinhieu` và `/vikhongmua`, để so
+  với MUA thật trước khi quyết định giữ hay bật lại (cần ≥ 30 mẫu và |t| ≥ 2). Công tắc lưu trong `quant_params.json`; hiệu chỉnh đêm
+  không bao giờ đổi nó, và khi lưu một thay đổi chỉ ghi tham số của chính chiến lược đó. `/hieuchinh` hiện `breakout_buy 1→0` khi tắt.
 
 ### So sánh với sieutinhieu.vn (tuỳ chọn, dùng cá nhân)
 
@@ -556,7 +569,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `21/21 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `22/22 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -568,6 +581,7 @@ Kết quả `21/21 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `version` | Số phiên bản trên web và Telegram/Zoom, mã bản dựng, báo khi cập nhật |
 | `review_2026_10_23` | Các lỗi sửa ngày 23/10/2026 (xem `BAO_CAO_RA_SOAT_2026-10-23.md`): Output Guard, khối ngoại khớp lệnh, cache giá ngày nghỉ, chấm điểm bộ nhớ, hạn mức AI, Zoom |
 | `store` | Kho dữ liệu (SQLite, migration, chọn dòng cho thống kê), cổng chặn MUA và quyết định khi nhấc cổng thị trường, kế hoạch bóng (T+2, khoảng trống giá, không khớp), kết quả 5/10/20 phiên, thống kê và t, che bí mật trong log, trang `/tinhieu` `/dulieu`, tải CSV/JSON, lệnh `/vikhongmua` |
+| `breakout` | Công tắc MUA breakout: breakout thành THEO DÕI (đang giữ: GIỮ không kèm kế hoạch), pullback không đổi, kết quả bóng nhóm riêng, hiệu chỉnh đêm không đổi công tắc, nút trên trang `/bot` (mật khẩu, chặn POST chéo trang) |
 | `web`, `security_web`, `security_zoom`, `security_telegram` | Mật khẩu web, chặn POST chéo trang, giới hạn kích thước request, chữ ký Zoom, ghép đôi Zoom, chỉ người được phép mới ra lệnh Telegram, token không lộ trong log |
 
 Một số kiểm tra so với **số đã ghi lại** (ví dụ kết quả chiến lược Phòng thủ trên dữ liệu giả lập). Sửa chiến lược **có chủ đích** thì kiểm tra đó báo đổi: xem lại số mới rồi cập nhật trong file bộ kiểm thử. Bot không bao giờ chạy bộ kiểm thử; script tạo gói Botkeep bỏ thư mục `tests/` ra (có upload kèm cũng không sao).

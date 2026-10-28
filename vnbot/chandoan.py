@@ -8,17 +8,18 @@ lets the numbers move a rule. This does the same for a daily VN stock bot:
 - ``record_screen`` (the 15:30 screen; the trading run's decisions with ``kind="trade"``):
   one row per stock and session in the store's ``signals`` (vnbot.store): action,
   confidence, setup, the first gate it failed
-  (policy.BUY_GATES), every gate it failed, and the decision it would get were VNINDEX
-  not risk-off (engine.market_lifted); one ``scans`` row with the funnel; one ``market``
-  row with VNINDEX's regime and the MA filters of the defensive and momentum books.
+  (policy.BUY_GATES), every gate it failed, and the decision it would get without the
+  gate that can be lifted: VNINDEX not risk-off, or the breakout switch on (engine.lifted);
+  one ``scans`` row with the funnel; one ``market`` row with VNINDEX's regime and the MA
+  filters of the defensive and momentum books.
 - ``resolve``: once later sessions exist, each row gets its shadow result: the return
   5/10/20 sessions on from the next session's open (VNINDEX beside it), and, for a BUY
-  (or a BUY blocked only by the market), whether its plan would have hit the stop or
-  the target first, in R after costs, with the T+2 settlement and the next-session
-  limit order of the paper book.
+  (or a BUY blocked only by the market, or only by the breakout switch), whether its plan
+  would have hit the stop or the target first, in R after costs, with the T+2 settlement
+  and the next-session limit order of the paper book.
 - ``stats``: the groups compared (the real BUYs, the BUYs blocked by the market, the
-  other near misses, by gate), with the t statistic: a group says something only with
-  enough rows and |t| >= 2 (the OKX bot learned that the hard way).
+  breakouts switched off, the other near misses, by gate), with the t statistic: a group
+  says something only with enough rows and |t| >= 2 (the OKX bot learned that the hard way).
 
 Nothing here changes a decision, an order or a level: these are measurements for the
 owner to decide on. ``/vikhongmua`` (Telegram, Zoom) and the page ``/tinhieu`` show them.
@@ -51,6 +52,7 @@ SOURCE_RANK = {"screen": 0, "replay": 1, "trade": 2}   # which row of a (day, sy
 ACTION_VI = {"BUY": "MUA", "HOLD": "GIỮ", "WATCH": "THEO DÕI", "SELL": "BÁN", "NO_TRADE": "ĐỨNG NGOÀI"}
 NEAR_VI = {
     "market": "chỉ vướng thị trường",
+    "breakout": "MUA breakout đang tắt",
     "confidence": "độ tin cậy sát ngưỡng",
     "rr": "R:R sát ngưỡng",
     "resistance": "phá đỉnh, chưa đo được R:R",
@@ -63,6 +65,7 @@ KIND_VI = {"screen": "sàng lọc 15:30", "trade": "bot giao dịch", "replay": 
 GROUPS = (
     ("buy", "MUA thật của Quant Engine"),
     ("market", "MUA bị chặn chỉ vì thị trường"),
+    ("breakout", "MUA breakout bị tắt (breakout_buy = 0)"),
     ("near", "Suýt MUA khác (tin cậy/R:R sát ngưỡng, phá đỉnh)"),
     ("bullish", "Mọi mã xu hướng tăng"),
     ("bearish", "Mọi mã xu hướng giảm"),
@@ -95,14 +98,21 @@ def _price(value) -> str:
 
 
 # ── one decision -> one row ──
+def _lifted_kind(row: dict) -> str:
+    """Which gate the row's alternative decision (alt_*) lifted: the breakout switch is
+    checked last, so a row stopped by it passed the market gate."""
+    return "breakout" if row.get("gate") == "breakout" else "market"
+
+
 def near_kind(row: dict, params=None) -> str:
     """Why a stock that is not a BUY is close to one ("" = not close): ``market`` when only
-    the market gate stopped it, else the gate it failed with the market lifted, when
-    that gate is a threshold it nearly met (or a breakout with nothing to measure R:R on)."""
+    the market gate stopped it, ``breakout`` when only the breakout switch did, else the
+    gate it failed with the market lifted, when that gate is a threshold it nearly met
+    (or a breakout with nothing to measure R:R on)."""
     if row.get("action") == "BUY":
         return ""
     if row.get("alt_action") == "BUY":
-        return "market"
+        return _lifted_kind(row)
     if params is None:
         from tradingagents.quant.params import active
 
@@ -133,7 +143,7 @@ def _row(day: str, symbol: str, source: str, alt: dict | None, reasons, params, 
 def signal_row(result, source: str, params=None) -> dict:
     """The ``signals`` row of an engine.QuantResult (keyed by the session it decided on)."""
     return _row(
-        result.last_bar_date or result.as_of_date, result.symbol, source, getattr(result, "if_market_ok", None),
+        result.last_bar_date or result.as_of_date, result.symbol, source, getattr(result, "if_lifted", None),
         result.reasons, params,
         action=result.action, confidence=result.confidence, setup=result.setup_type,
         bias=getattr(result, "bias", "") or "", regime=result.market_regime, risk=result.risk_level,
@@ -162,7 +172,7 @@ def _near_label(row: dict, params=None) -> str:
         params = active()
     kind = row.get("near") or ""
     lifted = row.get("alt_action") is not None
-    if kind == "market":
+    if kind in ("market", "breakout"):
         bits = [f"tin cậy {_num(row.get('alt_confidence'))}"]
         if row.get("alt_rr") is not None:
             bits.append(f"R:R {_num(row.get('alt_rr'))}")
@@ -179,7 +189,7 @@ def scan_summary(rows: list[dict], *, day: str, kind: str, errors: list[str] | N
     actions = Counter(r["action"] for r in rows)
     gates = Counter(r["gate"] or "BUY" for r in rows if not r.get("holding"))
     regimes = Counter(r["regime"] for r in rows if r.get("regime") and r["regime"] != "unknown")
-    order = {"market": 0, "confidence": 1, "rr": 2, "resistance": 3}
+    order = {"market": 0, "breakout": 1, "confidence": 2, "rr": 3, "resistance": 4}
     near = sorted((r for r in rows if r.get("near")),
                   key=lambda r: (order.get(r["near"], 9), -(r.get("alt_confidence") or r.get("confidence") or 0)))
     buys = [{"symbol": r["symbol"], "entry_high": r.get("entry_high"), "stop": r.get("stop"),
@@ -378,7 +388,7 @@ def _plan_of(row: dict) -> tuple[str, float, float, float] | None:
     if row.get("action") == "BUY" and row.get("entry_high") and row.get("stop") and row.get("target"):
         return "engine", row["entry_high"], row["stop"], row["target"]
     if row.get("alt_action") == "BUY" and row.get("alt_entry_high") and row.get("alt_stop") and row.get("alt_target"):
-        return "market", row["alt_entry_high"], row["alt_stop"], row["alt_target"]
+        return _lifted_kind(row), row["alt_entry_high"], row["alt_stop"], row["alt_target"]
     return None
 
 
@@ -517,8 +527,8 @@ def dedupe(rows: list[dict]) -> list[dict]:
 def _member(group: str, row: dict) -> bool:
     if group == "buy":
         return row.get("action") == "BUY"
-    if group == "market":
-        return row.get("near") == "market"
+    if group in ("market", "breakout"):
+        return row.get("near") == group
     if group == "near":
         return row.get("near") in ("confidence", "rr", "resistance")
     if group in ("bullish", "bearish"):
@@ -597,7 +607,7 @@ def _market_lines(market: dict | None, glyph: bool = True) -> list[str]:
     return lines
 
 
-PLAN_GROUPS = ("buy", "market")      # the groups with a plan (stop, target) to follow
+PLAN_GROUPS = ("buy", "market", "breakout")      # the groups with a plan (stop, target) to follow
 BASELINES = ("bullish", "bearish", "all")   # context, not a decision: no verdict
 
 
@@ -613,6 +623,18 @@ def _group_line(name: str, block: dict, horizon: int) -> str:
         text += f"; theo kế hoạch {plan['n']} lệnh khớp, TB {_num(plan['mean'])}R" + (
             f", {block['nofill']} lệnh không khớp" if block["nofill"] else "")
     return text
+
+
+def breakout_note(params=None) -> str:
+    """One line while the breakout switch is off (``Params.breakout_buy`` = 0), else ""."""
+    if params is None:
+        from tradingagents.quant.params import active
+
+        params = active()
+    if params.breakout_buy:
+        return ""
+    return ("MUA breakout của Quant Engine đang tắt (trang Bot giao dịch): mã breakout chỉ được theo dõi, "
+            "kết quả bóng của chúng ở nhóm 'MUA breakout bị tắt'.")
 
 
 def latest_scan(store) -> dict | None:
@@ -644,6 +666,8 @@ def why_text(store=None, *, horizon: int = 10) -> str:
         lines.append("MUA: " + ", ".join(f"{b['symbol']} (vùng mua tới {_price(b.get('entry_high'))}, cắt lỗ "
                                          f"{_price(b.get('stop'))}, mục tiêu {_price(b.get('target'))})" for b in scan["buys"]))
     lines += [""] + _market_lines(market)
+    if breakout_note():
+        lines.append("⚙️ " + breakout_note())
     gates = scan.get("gates") or {}
     if gates:
         lines += ["", "🧱 Cổng chặn MUA (mỗi mã tính ở cổng đầu tiên nó trượt):"]
@@ -655,8 +679,9 @@ def why_text(store=None, *, horizon: int = 10) -> str:
                   f"{st['resolved']} mã-phiên có kết quả, {st['pending']} đang chờ):"]
     if st["resolved"]:
         lines.append(f"Từ {st['from']} tới {st['to']}.")
-        for name in ("buy", "market", "near", "bullish", "all"):
-            lines.append(_group_line(name, st["groups"][name], horizon))
+        for name in ("buy", "market", "breakout", "near", "bullish", "all"):
+            if name != "breakout" or st["groups"][name]["ret"]["n"]:     # only once the switch was used
+                lines.append(_group_line(name, st["groups"][name], horizon))
     else:
         lines.append("Chưa có: cần ít nhất 10 phiên sau ngày ghi đầu tiên (hoặc dựng lại lịch sử trên /dulieu).")
     lines += ["", "Bot không tự nới cổng nào vì các số này; chúng để anh quyết định. Trang web: /tinhieu."]
@@ -698,7 +723,7 @@ def replay(symbols: list[str], sessions: int, *, as_of: str, store=None, flows: 
     for (symbol, day), inputs in ds.inputs.items():
         inputs = replace(inputs, params=params, is_holding=False)
         decision = policy.evaluate_policy(inputs)
-        rows.append(decision_row(symbol, day, inputs, decision, engine.market_lifted(inputs, decision), "replay", params))
+        rows.append(decision_row(symbol, day, inputs, decision, engine.lifted(inputs, decision), "replay", params))
     store.add_signals(rows)
     by_day: dict[str, list[dict]] = defaultdict(list)
     for row in rows:

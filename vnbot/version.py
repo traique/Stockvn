@@ -24,13 +24,18 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.13.0"
+VERSION = "v1.14.0"
 RELEASED = "2026-10-28"
-RELEASE_BUILD = "67715ee"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "7eaa3df"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.14.0", "2026-10-28", (
+        "Công tắc MUA breakout của Quant Engine (trang Bot giao dịch): tắt để thử trên sổ ảo, mặc định bật như cũ",
+        "Tắt: mã breakout chỉ được THEO DÕI; kết quả bóng của chúng thành nhóm riêng ở /tinhieu và /vikhongmua",
+        "Hiệu chỉnh đêm không đổi công tắc này; khi lưu một thay đổi chỉ ghi tham số của chính chiến lược đó",
+    )),
     ("v1.13.0", "2026-10-28", (
         "Kho dữ liệu như bot OKX: SQLite data/bot.db, hoặc PostgreSQL dùng chung khi đặt DATABASE_URL",
         "Ghi quyết định Quant Engine cho mọi mã mỗi lượt quét, cổng chặn MUA và quyết định nếu thị trường tốt",

@@ -61,6 +61,8 @@ def _stats_table(st: dict) -> str:
     for name, _ in cd.GROUPS:
         g = st["groups"][name]
         ret, ex, plan = g["ret"], g["excess"], g["plan"]
+        if name == "breakout" and not ret["n"]:      # only once the switch was used
+            continue
         plan_txt = (f'{plan["n"]} lệnh, {cd._num(plan["mean"])}R' if plan["n"] else ui.NONE) if name in cd.PLAN_GROUPS else ""
         if name in cd.PLAN_GROUPS and g["nofill"]:
             plan_txt += f' · {g["nofill"]} không khớp'
@@ -112,7 +114,7 @@ def _market_card(store) -> str:
 
 def _decisions_table(rows: list[dict]) -> str:
     order = {"BUY": 0}
-    near_rank = {"market": 0, "confidence": 1, "rr": 2, "resistance": 3}
+    near_rank = {"market": 0, "breakout": 1, "confidence": 2, "rr": 3, "resistance": 4}
     rows = sorted(rows, key=lambda r: (order.get(r["action"], 1), near_rank.get(r.get("near") or "", 9),
                                        -(r.get("alt_confidence") or r.get("confidence") or 0)))
     body = []
@@ -166,15 +168,19 @@ def tinhieu_body(store) -> str:
                  + "</tr>" for g, n in gates.items()]
     funnel = ui.card("Cổng chặn MUA", ui.table([("Cổng (mỗi mã tính ở cổng đầu tiên nó trượt)", ""), ("Số mã", "num")],
                                                gate_rows, "Không có dữ liệu.", stack=True),
-                     sub="Thứ tự kiểm tra: dữ liệu → xu hướng → độ tin cậy → thị trường → phiên rủi ro → stop/mục tiêu → R:R", flush=True)
+                     sub="Thứ tự kiểm tra: dữ liệu → xu hướng → độ tin cậy → thị trường → phiên rủi ro → stop/mục tiêu → R:R"
+                         " → công tắc MUA breakout", flush=True)
     near = scan.get("near_list") or []
     near_html = ("<ul>" + "".join(f"<li>{_e(x)}</li>" for x in near) + "</ul>") if near else (
         '<p class="muted">Không có mã nào sát ngưỡng MUA trong lượt này.</p>')
-    near_card = ui.card("Suýt MUA", near_html, sub="Chỉ vướng thị trường; hoặc độ tin cậy/R:R sát ngưỡng; hoặc phá đỉnh chưa đo được R:R")
+    near_card = ui.card("Suýt MUA", near_html, sub="Chỉ vướng thị trường; hoặc chỉ vì MUA breakout đang tắt; hoặc độ tin cậy/R:R "
+                                                   "sát ngưỡng; hoặc phá đỉnh chưa đo được R:R")
     buys = scan.get("buys") or []
     buy_html = "".join(f'<li><b>{_e(b["symbol"])}</b>: vùng mua tới {_e(cd._price(b.get("entry_high")))}, cắt lỗ '
                        f'{_e(cd._price(b.get("stop")))}, mục tiêu {_e(cd._price(b.get("target")))}</li>' for b in buys)
     parts = [title, strip]
+    if cd.breakout_note():
+        parts.append(ui.alert(cd.breakout_note(), "info"))
     if buy_html:
         parts.append(ui.card("Lệnh MUA của lượt này", f"<ul>{buy_html}</ul>"))
     parts.append('<div class="grid g2 mt">' + funnel + near_card + "</div>")

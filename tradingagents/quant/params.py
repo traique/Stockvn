@@ -55,6 +55,10 @@ class Params:
     # 1 = a breakout with no resistance above may BUY, target = entry + projected_rr × risk.
     breakout_projected_ok: int = 0
     projected_rr: float = 2.0
+    # 0 = no new BUY on a breakout setup (a close above the 20-session Donchian channel),
+    # whatever its target. A switch set by hand (the page /bot), never calibrated: on the
+    # 2023-2026 replay the engine's breakout plans lost (docs/chandoan_2026-10-28).
+    breakout_buy: int = 1
     # SELL (a held stock) needs this confidence; the default equals the BUY threshold.
     confidence_sell_min: float = 0.75
     # Stop under the entry: stop_atr_mult x ATR14, never closer than stop_min_pct % of the
@@ -148,7 +152,12 @@ FACTOR_FIXED: dict[str, tuple[float, float, float]] = {
     "fb_market_buffer_pct": (0.0, 5.0, 1.0),
     "fb_momentum_weight": (0.0, 1.0, 0.5),
 }
-BOUNDS = {**TUNABLE, **MOMENTUM_TUNABLE, **FACTOR_FIXED}
+# The Quant Engine's switches set by hand only (the page /bot, or quant_params.json): the
+# calibration never moves them, and every challenger it tries keeps the value in force.
+MANUAL: dict[str, tuple[float, float, float]] = {
+    "breakout_buy": (0, 1, 1),
+}
+BOUNDS = {**TUNABLE, **MOMENTUM_TUNABLE, **FACTOR_FIXED, **MANUAL}
 
 DEFAULT = Params()
 
