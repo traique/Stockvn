@@ -45,6 +45,9 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    from vnbot import eventlog
+
+    eventlog.install_redaction()    # tokens, keys and passwords masked in every log line
 
     web = LateApp()
     logging.info("Web: listening on 0.0.0.0:%d (SERVER_PORT=%s, PORT=%s, APP_PORT=%s). If the host says the app is "
@@ -89,6 +92,11 @@ def _start():
     if SETTINGS.telegram_token and not SETTINGS.telegram_allowed_ids:
         logging.warning("TELEGRAM_ALLOWED_IDS is empty: the bot only answers /id until you add your id")
     logging.info("Removed %d stale cache files", prune_cache(SETTINGS))
+    from vnbot import eventlog, store as history
+
+    # The history store (every decision and why it is not a BUY, the shadow results, the
+    # activity log): SQLite under DATA_DIR, or the shared PostgreSQL of DATABASE_URL.
+    eventlog.install(history.open_store(SETTINGS.data_dir))
 
     jobs = JobQueue(SETTINGS)
     watchlist = Watchlist(SETTINGS)

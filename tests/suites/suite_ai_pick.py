@@ -335,7 +335,9 @@ with mock.patch.object(market_scan, "scan", return_value=SNAP):
 entry = cp.PickLog(live_dir).get("2026-10-23")
 t.ok("a live run: today, the live candidates, recorded as provisional", entry["pick"]["symbol"] == "CCC"
      and entry["provisional"] and entry["live"] == "2026-10-23T10:30" and [c["symbol"] for c in entry["candidates"]] == ["CCC", "EEE"])
-t.ok("...the question says it is the session, the matched prices", "ĐANG TRONG PHIÊN 23/10 lúc 10:30" in r.seen[0]["messages"][1]["content"])
+# dd/mm of the scenario's session as the bot writes it today (with the year once it is a past year).
+D23 = cp._ddmm("2026-10-23")
+t.ok("...the question says it is the session, the matched prices", f"ĐANG TRONG PHIÊN {D23} lúc 10:30" in r.seen[0]["messages"][1]["content"])
 t.ok("...the message says the data is of the session and asked again at the close", "Dữ liệu trong phiên lúc 10:30" in text
      and "trong phiên, giá khớp" in text, text)
 t.ok("...the scheduler asks again with the final signals", cp.PickLog(live_dir).status("2026-10-23", FRI) == "retryable")
@@ -368,11 +370,11 @@ cpw._LAST.clear()
 with mock.patch.object(cp, "manual_plan", return_value={"day": "2026-10-23", "live": True, "note": "giá khớp trong phiên hôm nay lúc 10:30"}):
     body = cpw.page_body(cp.AiPick(live_dir, now=lambda: FRI))
 t.ok("the button says what a run now will use", "Chạy ngay với dữ liệu mới nhất" in body
-     and "Bấm lúc này: phiên 23/10, giá khớp trong phiên hôm nay lúc 10:30." in body and "Đang gửi…" in body)
+     and f"Bấm lúc này: phiên {D23}, giá khớp trong phiên hôm nay lúc 10:30." in body and "Đang gửi…" in body)
 cpw._LAST.update(at="10:30", day="2026-10-23", note="giá khớp trong phiên hôm nay lúc 10:30")
 with mock.patch.object(cp.AiPick, "running", new_callable=mock.PropertyMock, return_value=True):
     body = cpw.page_body(cp.AiPick(live_dir, now=lambda: FRI))
-t.ok("while it runs: since when, on which data", "Chạy tay lúc 10:30: phiên 23/10, dữ liệu giá khớp trong phiên hôm nay lúc 10:30. "
+t.ok("while it runs: since when, on which data", f"Chạy tay lúc 10:30: phiên {D23}, dữ liệu giá khớp trong phiên hôm nay lúc 10:30. "
      "Đang chạy" in body)
 cpw._LAST.update(result="Xong lúc 10:32: AI chọn CCC.", kind="ok")
 body = cpw.page_body(cp.AiPick(live_dir, now=lambda: FRI))

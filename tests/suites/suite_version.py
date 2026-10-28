@@ -159,7 +159,7 @@ else:
          r.status_code == 200 and f">{ver.VERSION}<" in page and f"<code>{b}</code>" in page
          and "đúng bản phát hành" in page and all(f"<h3>{v}</h3>" in page for v in names), r.status_code)
     t.ok("header pill links to /phienban on every page", 'class="ver-pill" href="/phienban"' in page
-         and f">{ver.VERSION}</a>" in page)
+         and f'<span class="mono">{ver.VERSION}</span></a>' in page)
     t.ok("footer: version, build and the history link", f"TradingAgents VN {ver.VERSION}</span>" in page
          and f"bản dựng {ver.build()}" in page
          and '<a href="/phienban">lịch sử phiên bản</a>' in page)

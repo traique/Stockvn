@@ -111,6 +111,8 @@ HELP = (
     "/lenh - lệnh bot đặt cho phiên tới\n"
     "/chay - chạy ngay phiên đã đóng gần nhất (không đợi {trade_time})\n"
     "/hieuchinh - ngưỡng đang dùng và kết quả tự hiệu chỉnh gần đây\n"
+    "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA, kết quả bóng · /vikhongmua FPT - "
+    "lịch sử một mã · /vikhongmua dunglai 120 - dựng lại 120 phiên đã qua (thêm vn100 cho rổ VN100)\n"
     "/khop mua FPT 100 56300 - báo đã khớp lệnh thật, lô lẻ cũng được (bán: /khop ban ...; thêm ngày YYYY-MM-DD nếu khớp hôm trước)\n"
     "/von 500000000 - đặt tiền mặt tài khoản thật\n"
     "/thuong FPT 150 - báo số cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về tài khoản thật\n"
@@ -526,6 +528,8 @@ class TelegramBot:
                 self._stv_watch(chat_id, args)
             elif command in ("/thamdinh", "/chonbong"):      # /chonbong: its name until v1.11.0
                 self._thamdinh(chat_id, args)
+            elif command in ("/vikhongmua", "/chandoan"):
+                self._why(chat_id, args)
             elif command in ("/danhmuc", "/lenh", "/hieuchinh", "/khop", "/von", "/chay", "/thuong"):
                 self._trading(chat_id, command, args)
             else:
@@ -588,6 +592,14 @@ class TelegramBot:
             self.send(chat_id, pick.text())      # the evening run scores the open results; no download here
         else:
             raise ValueError("Dùng: /thamdinh · /thamdinh chay (hoặc ngay) · /thamdinh lichsu · /thamdinh tuan")
+
+    def _why(self, chat_id, args: str) -> None:
+        """Vì sao chưa có MUA (vnbot.chandoan): the funnel and the shadow results; a stock's
+        history; ``dunglai`` rebuilds past sessions on a background thread."""
+        from vnbot import chandoan
+
+        self.send(chat_id, chandoan.command_text(args, watchlist=self.watchlist.get(),
+                                                 notify=lambda text: self.send(chat_id, text)))
 
     def _zoom_pairing(self, command: str, args: str, *, from_zoom: bool) -> str:
         """Pair, unpair or show the one Zoom account allowed to use the bot (from Telegram only)."""

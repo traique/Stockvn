@@ -143,6 +143,14 @@ FIELDS: tuple[Field, ...] = (
     _F("AI_PICK_ALERTS", "Xem tin khi có cảnh báo", "Số lần tối đa mỗi ngày AI tìm tin khi một mã đang giữ có cảnh báo; 0 = tắt.",
        "int", "5", "thamdinh", lo=0, hi=20, unit="lần"),
     _F("AI_PICK_WEEKLY", "Tổng kết tuần", "Sau phiên cuối tuần, AI nhận xét kỷ luật so với quy tắc.", "flag", "1", "thamdinh"),
+    # Lưu trữ dữ liệu
+    _F("STORE", "Kho lịch sử", "Ghi mọi quyết định của Quant Engine (cả mã không MUA) kèm cổng chặn, kết quả bóng, NAV, lệnh khớp và "
+       "nhật ký hoạt động vào data/bot.db, hoặc PostgreSQL khi đặt DATABASE_URL. Tắt: không ghi gì, bot chạy như trước.",
+       "flag", "1", "luutru", restart=True),
+    _F("STORE_KEEP_DAYS", "Giữ lịch sử", "Quyết định, lượt quét, VNINDEX và NAV cũ hơn chừng này bị xoá ở lượt sàng lọc.",
+       "int", "730", "luutru", lo=60, hi=3650, unit="ngày"),
+    _F("EVENTS_KEEP_DAYS", "Giữ nhật ký hoạt động", "Các dòng log trên trang Dữ liệu & nhật ký cũ hơn chừng này bị xoá.",
+       "int", "14", "luutru", lo=1, hi=90, unit="ngày"),
     # Kết nối & trang web
     _F("PUBLIC_URL", "Địa chỉ công khai", "Để bot gửi kèm link báo cáo và khai báo với Zoom, ví dụ https://abc.botkeep.cloud.", "text", "",
        "ketnoi", restart=True),
@@ -161,6 +169,8 @@ GROUPS: tuple[Group, ...] = tuple(
         ("stv", "Siêu tín hiệu", "So sánh với sieutinhieu.vn, dùng cá nhân."),
         ("taisan", "Danh mục Tài sản", "Ngân sách rủi ro cho sổ tiền thật; chỉ để kiểm tra, không khuyên mua."),
         ("thamdinh", "AI thẩm định tín hiệu", "Ghi lại để kiểm chứng, không phải lệnh đặt. AI là model trên 9Router (UniRouter), mặc định Gemini có tìm web."),
+        ("luutru", "Lưu trữ dữ liệu", "Kho lịch sử như bot OKX: SQLite trên máy chủ, hoặc PostgreSQL dùng chung khi đặt DATABASE_URL "
+         "trên Botkeep. Xem và tải ở trang Dữ liệu & nhật ký."),
         ("ketnoi", "Kết nối & trang web", "Khoá và token chỉ đặt được trên Botkeep; trang này chỉ cho biết đã có hay chưa."),
     ))
 
@@ -172,6 +182,7 @@ SECRETS: tuple[tuple[str, str], ...] = (
     ("ROUTER9_API_KEY", "Khoá 9Router"), ("GROQ_API_KEY", "Khoá Groq"), ("OPENROUTER_API_KEY", "Khoá OpenRouter"),
     ("XAI_API_KEY", "Khoá xAI"), ("ZOOM_CLIENT_ID", "Zoom client id"), ("ZOOM_CLIENT_SECRET", "Zoom client secret"),
     ("ZOOM_SECRET_TOKEN", "Zoom secret token"), ("ZOOM_BOT_JID", "Zoom bot JID"), ("ZOOM_ACCOUNT_ID", "Zoom account id"),
+    ("DATABASE_URL", "PostgreSQL dùng chung (DATABASE_URL)"),
 )
 
 _FLAG_ON = ("1", "true", "yes", "on", "co", "có")

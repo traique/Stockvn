@@ -440,11 +440,17 @@ def calibrate(symbols: list[str], as_of: str, *, apply: bool = True, data: sim.D
                        f"(cần hơn bộ hiện tại {margin:.2f} điểm, mức nhiễu {report.holdout_noise:.2f}).")
 
     if report.accepted and apply:
-        qparams.save(report.accepted.params, note=f"{as_of} {strategy}: {report.accepted.name}")
+        _put_in_force(report.accepted.params, keys, f"{as_of} {strategy}: {report.accepted.name}")
         report.applied = True
         logger.info("Calibration %s: %s", as_of, report.accepted.name)
     _append_history(report)
     return report
+
+
+def _put_in_force(params: Params, keys: dict, note: str) -> None:
+    """Save the fields of ``keys`` (one strategy's) of ``params`` onto the set in force now:
+    a switch turned by hand while the night ran (the page /bot) stays as it was set."""
+    qparams.save(replace(qparams.active(), **{k: getattr(params, k) for k in keys}), note=note)
 
 
 def _append_history(report: Report) -> None:

@@ -720,13 +720,25 @@ LIVE["BUY"] = [{"symbol": "GEX", "side": "BUY", "day": "2026-10-22", "at": "2026
 T._now_vn = lambda: datetime(2026, 10, 22, 10, 30, tzinfo=vn_rules.VN_TZ)
 scan2 = bot.stv_scan()
 print(scan2)
-check("live view: a held stock's SELL goes to the holdings block, not final",
-      scan2 and "🟠 Sớm · FPT 1.150 cp · trang BÁN trong phiên lúc 10:25" in scan2
-      and "(tín hiệu trong phiên, có thể đổi khi đóng cửa)" in scan2, scan2)
+# 🟠 (a held stock's SELL seen in the session, not final) is not pushed since v1.5.0 (selling on it
+# was no better than waiting for the close): kept for its shadow result and the 15:30 report.
+check("live view: a held stock's early SELL (🟠) is kept, not pushed (INTRADAY_EARLY=0)",
+      scan2 and "TÀI SẢN CỦA ANH" not in scan2 and "FPT" not in scan2
+      and any(r["symbol"] == "FPT" and r["level"] == "early" for r in bot.taisan.state()["shadow"]), scan2)
 check("live view: the watchlist's changes, not the unfollowed stock",
       "👀 Đổi chiều trong phiên (chưa chốt, có thể đổi khi đóng cửa)" in scan2
       and "🔴 VNM\n   MUA → BÁN lúc 10:20 · giá 59.800" in scan2 and "🟢 GEX\n   BÁN → MUA lúc 10:10 · giá 24.100" in scan2
       and "ZZZ" not in scan2 and "HPG" not in scan2 and "Premium" in scan2, scan2)
+_sent = external.SellAlerts(DATA)._read()
+_sent.pop("FPT", None)                       # forget it, to see it with INTRADAY_EARLY=1
+external.SellAlerts(DATA).path.write_text(__import__("json").dumps(_sent), encoding="utf-8")
+_settings = bot.settings
+bot.settings = dataclasses.replace(bot.settings, intraday_early=True)
+early_on = bot.stv_scan()
+bot.settings = _settings
+check("INTRADAY_EARLY=1: it goes to the holdings block as before, said not final",
+      early_on and "🟠 Sớm · FPT 1.150 cp · trang BÁN trong phiên lúc 10:25" in early_on
+      and "(tín hiệu trong phiên, có thể đổi khi đóng cửa)" in early_on, early_on)
 check("a change says the company and the price against the reference when they are known",
       T._stock_head("🟢", "VJC", {"VJC": "Vietjet Air"}) == "🟢 VJC · Vietjet Air" and T._stock_head("🟢", "VJC", {}) == "🟢 VJC"
       and external.change(130_000, 128_400) == "+1,25%" and external.change(9_000, 10_000) == "-10,00%"
@@ -834,7 +846,10 @@ vn_rules.now_vn = svc_vn_now
 
 # shares bought before: recorded with their buy date, so they are sellable at once
 T._now_vn = lambda: datetime(2026, 10, 22, 10, 0, tzinfo=vn_rules.VN_TZ)
+_vn_now_t2 = vn_rules.now_vn
+vn_rules.now_vn = T._now_vn                  # Tài sản ages its lots by the same clock (not the real date)
 check("a fresh buy is not sellable before T+2", T._pending_lots(bot2.real("stv").positions["MSN"], "2026-10-22"))
+vn_rules.now_vn = _vn_now_t2
 msg_e = bot2.taisan.handle("/tsmua", "VNM 300 61000 2026-10-01")
 pv = bot2.real("stv").positions["VNM"]
 check("/tsmua with an old date: sellable now", pv.qty == 300 and pv.avg_price == 61_000 and not T._pending_lots(pv, "2026-10-22"),

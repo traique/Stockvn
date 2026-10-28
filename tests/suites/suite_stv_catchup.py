@@ -16,6 +16,7 @@ import vnbot.trader as T  # noqa: E402
 from tradingagents.trading import momentum  # noqa: E402
 from tradingagents.trading.ledger import Bar, Signal  # noqa: E402
 from tradingagents.dataflows.vendors import sieutinhieu as stv  # noqa: E402
+from vnbot import external  # noqa: E402
 
 SERIES = {"VNINDEX": [("2026-10-16", 1710), ("2026-10-19", 1705), ("2026-10-20", 1702)],
           "GEX": [("2026-10-16", 22_000), ("2026-10-19", 22_750), ("2026-10-20", 23_850)],
@@ -126,9 +127,10 @@ text = res.text
 check("report has the comparison section", "📡 SỔ ẢO SIÊU TÍN HIỆU" in text, text[-800:])
 check("section header", "📡 SỔ ẢO SIÊU TÍN HIỆU · phiên 20/10" in text, text[-800:])
 check("new signal listed with the bot's decision", "🟢 GEX 23.850 · mạnh 90% · bot: ĐỨNG NGOÀI" in text, text[-800:])
-check("bot BUY vs site SELL flagged", "⚠️ Bot MUA nhưng trang đang BÁN: FPT (từ 08/10)" in text, text[-800:])
-check("book plans the buy at the next open", "Lệnh phiên tới (giá mở cửa):\n🟢 MUA GEX 4.000 cp · tín hiệu 20/10 @ 23.850" in text,
-      text[-800:])
+# dd/mm as the bot writes it today (with the year once the scenario's year is past).
+check("bot BUY vs site SELL flagged", f"⚠️ Bot MUA nhưng trang đang BÁN: FPT (từ {external._ddmm('2026-10-08')})" in text, text[-800:])
+check("book plans the buy at the next open",
+      f"Lệnh phiên tới (giá mở cửa):\n🟢 MUA GEX 4.000 cp · tín hiệu {external._ddmm('2026-10-20')} @ 23.850" in text, text[-800:])
 check("bot run unaffected", res.day == "2026-10-20" and "(paper)" in text)
 
 # The site down: the bot's run still completes, the section says so.

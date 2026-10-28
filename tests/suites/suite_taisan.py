@@ -424,11 +424,12 @@ def post(path, data=None, **kw):
 t.ok("GET /taisan needs the password", web.get("/taisan").status_code == 401)
 page = web.get("/taisan", auth=AUTH)
 t.ok("empty page: how to start, the tab marked", page.status_code == 200 and "Bắt đầu theo dõi tài sản" in page.text
-     and 'href="/taisan" class="on" aria-current="page"' in page.text, page.status_code)
+     and 'href="/taisan" class="nav-item on" aria-current="page"' in page.text, page.status_code)
 t.ok("header: weekday, date and the lunar date (24/10/2026 = 15/09 ÂL), the market's phase",
      "Thứ 7 24/10" in page.text and "15/09 ÂL" in page.text and "Thị trường nghỉ" in page.text)
-t.ok("header: the Tiện ích menu holds the other pages", '<details class="dd">' in page.text
-     and 'href="/ai"' in page.text and 'href="/phienban"' in page.text and 'href="/zoom"' in page.text)
+nav = page.text.split('<nav aria-label="Điều hướng chính">', 1)[-1].split("</nav>", 1)[0]
+t.ok("sidebar: every other page one tap away", '<nav aria-label="Điều hướng chính">' in page.text
+     and all(f'href="{path}"' in nav for path in ("/", "/ai", "/thamdinh", "/caidat", "/phienban", "/zoom")), nav[:300])
 t.ok("one h1 and a skip link", page.text.count("<h1") == 1 and 'class="skip" href="#main"' in page.text)
 for path in ("/taisan/them", "/taisan/tien", "/taisan/khoptien", "/taisan/catlo", "/taisan/nguong", "/taisan/huy",
              "/taisan/nhap", "/taisan/nhap/xacnhan", "/taisan/nhap/huy", "/taisan/reset", "/taisan/lammoi",
@@ -477,7 +478,7 @@ for piece in ("Chào buổi sáng", "Tổng tài sản", "Tỷ trọng vị th�
               'href="/taisan/xuat.xlsx"', 'href="/taisan/xuat.csv"', "Cắt lỗ 25.000", "Mục tiêu 40.000"):
     t.ok(f"page shows {piece!r}", piece in page)
 t.ok("the stock card: price, change against the previous close, P&L", "GIÁ HIỆN TẠI".lower() in page.lower()
-     and 'class="sk-chg' in page and 'class="pnl ' in page)
+     and 'class="sk-chg' in page and '<div class="pnl"><div class="l">Lãi/lỗ</div>' in page)
 t.ok("news opens outside, safely", 'target="_blank" rel="noopener noreferrer"' in page)
 t.ok("the sections open from a link (#nhatky...) and close natively", '<details class="acc" id="nhatky">' in page
      and '<details class="acc" id="ghi">' in page)
@@ -490,7 +491,7 @@ t.ok("journal filtered by symbol and kind, the section open", '<details class="a
      and jr.count('<li class="jr') == 1 and "400 cp × 33.000" in jr and "Bỏ lọc" in jr)
 w.set_thresholds(10, 20)
 hot = web.get("/taisan", auth=AUTH).text
-t.ok("over the danger weight: the alert card and the to-do line", "Cảnh báo tỷ trọng — 1 mã" in hot
+t.ok("over the danger weight: the alert card and the to-do line", "Cảnh báo tỷ trọng · 1 mã" in hot
      and 'data-sym="FPT"' in hot and "Việc cần làm phiên 26/10" in hot and "⚠️ FPT chiếm" in hot)
 w.set_thresholds(22.5, 35)
 odd = web.get("/taisan?ma=%3Cx%3E&loai=zzz", auth=AUTH)

@@ -180,6 +180,7 @@ class DailyScheduler:
         self.critic_log = CriticLog(settings.data_dir)
         self._critic_llm = critic_llm
         self._screened: dict = {}
+        self._screen_errors: list[str] = []
         self._stamp = settings.data_dir / "last_daily_run.txt"          # the watchlist run
         self._trade_stamp = settings.data_dir / "last_trade_run.txt"    # the trading run
         self._cal_stamp = settings.data_dir / "last_calibration.txt"    # the session last calibrated
@@ -512,6 +513,9 @@ class DailyScheduler:
         removed = prune_cache(self.settings)
         codes = self._scan_codes()
         picked, text = self._screen(codes, day)
+        funnel = self._record_screen(day)
+        if funnel and text:
+            text += "\n\n" + funnel
         logger.info("Daily run %s: %d codes, AI (%s) for %s, %d stale cache files removed",
                     day, len(codes), self.settings.daily_ai_mode, ",".join(picked) or "none", removed)
         if self.settings.daily_ai_mode == "full":
@@ -522,6 +526,20 @@ class DailyScheduler:
             text += "\n\n" + self._critique(picked, day)
         if text:
             self.notify(text)
+
+    def _record_screen(self, day: str) -> str:
+        """Keep every decision of the screen in the history store (vnbot.chandoan), fill the
+        shadow results of the older ones; returns the "why no BUY" paragraph ("" without a store)."""
+        from vnbot import chandoan, store
+
+        db = store.current()
+        if db is None or not self._screened:
+            return ""
+        scan = store.safe("record screen", lambda: chandoan.record_screen(self._screened, self._screen_errors, store=db))
+        store.safe("shadow results", lambda: chandoan.resolve(day, store=db))
+        store.safe("prune", lambda: db.prune(day))
+        market = next(iter(store.safe("market", lambda: db.market(limit=1), []) or []), None)
+        return chandoan.funnel_line(scan, market) if scan else ""
 
     def _scan_codes(self) -> list[str]:
         """The watchlist, then the members of SCAN_UNIVERSE's index (VN30 when VN100 is unavailable)."""
@@ -572,6 +590,7 @@ class DailyScheduler:
         mode = self.settings.daily_ai_mode
         rows, errors = [], []
         self._screened = {}
+        self._screen_errors = errors
         for code in codes:
             try:
                 result = self._quick(code, day)

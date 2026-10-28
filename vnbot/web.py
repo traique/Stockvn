@@ -54,6 +54,7 @@ _T2_BADGE = '<span class="badge b-none">chờ T+2</span>'
 _TUNED_BADGE = '<span class="badge b-ok">đã hiệu chỉnh</span>'
 _CHANGED_BADGE = '<span class="badge b-ok">thay đổi</span> '
 _KEPT_BADGE = '<span class="badge b-none">giữ nguyên</span>'
+_HAND_BADGE = '<span class="badge b-none">đổi tay</span>'
 _UNSET_BADGE = '<span class="badge b-none">chưa cấu hình</span>'
 
 
@@ -364,6 +365,22 @@ def _capital_card(trader) -> str:
                    sub=f"Vốn khởi điểm hiện hành {ui.money(current)} đồng · tối thiểu 10.000.000 đồng", cls="accent-gold")
 
 
+def _breakout_card(current) -> str:
+    """The hand switch of the Quant Engine's breakout BUYs (Params.breakout_buy), with why."""
+    on = bool(current.breakout_buy)
+    state = '<span class="badge b-ok">đang bật</span>' if on else '<span class="badge b-none">đang tắt</span>'
+    button = ('<form method="post" action="/bot/breakout" style="margin:0">'
+              f'<input type="hidden" name="on" value="{0 if on else 1}">'
+              f'<button class="btn {"btn-ghost" if on else "btn-primary"}" type="submit">'
+              f'{"Tắt MUA breakout" if on else "Bật lại MUA breakout"}</button></form>')
+    body = (f"<p>MUA breakout (giá đóng cửa vượt kênh 20 phiên) {state}</p>"
+            '<p class="muted small">Dựng lại 03/2023 - 10/2026 trên VN100, đi theo kế hoạch như sổ ảo: 46 lệnh breakout, 5 chốt lời, '
+            "38 cắt lỗ, trung bình -0,68R mỗi lệnh; pullback hoà vốn (docs/chandoan_2026-10-28). Tắt: Quant Engine (sổ ảo, sàng lọc "
+            "15:30, tín hiệu thật nếu chọn Quant Engine) không mở MUA mới ở mã breakout, chỉ theo dõi; kết quả bóng của chúng ở trang "
+            "Vì sao chưa MUA, nhóm \"MUA breakout bị tắt\". Hiệu chỉnh đêm không bao giờ đổi công tắc này.</p>" + button)
+    return ui.card("Công tắc Quant Engine", body, cls="accent-peach")
+
+
 def _bot_page(trader, msg: str = "") -> str:
     from tradingagents.quant import params as qp
     from tradingagents.trading import calibrate as cal
@@ -402,16 +419,18 @@ def _bot_page(trader, msg: str = "") -> str:
     parts.append('<div class="mt"></div>')
     parts.append(ui.card("Danh mục Phòng thủ hiện tại", basket_html if basket else
                          '<span class="muted">Đang nắm giữ tiền mặt (VNINDEX dưới đường trung bình) hoặc chưa đến kỳ xếp hạng.</span>'))
+    parts.append('<div class="mt">' + _breakout_card(current) + "</div>")
     prow = []
-    groups = [(qp.FACTOR_FIXED, "Phòng thủ (cố định)"), (qp.MOMENTUM_TUNABLE, "Động lượng"), (qp.TUNABLE, "Engine")]
-    for k in list(qp.TUNABLE) + list(qp.MOMENTUM_TUNABLE) + list(qp.FACTOR_FIXED):
+    groups = [(qp.FACTOR_FIXED, "Phòng thủ (cố định)"), (qp.MOMENTUM_TUNABLE, "Động lượng"), (qp.TUNABLE, "Engine"),
+              (qp.MANUAL, "Engine (đổi tay)")]
+    for k in list(qp.TUNABLE) + list(qp.MANUAL) + list(qp.MOMENTUM_TUNABLE) + list(qp.FACTOR_FIXED):
         default, now = getattr(qp.DEFAULT, k), getattr(current, k)
         changed = default != now
         group = next(name for keys, name in groups if k in keys)
         prow.append(f'<tr class="{"changed" if changed else ""}"><td><code>{html.escape(k)}</code></td>'
                     f'<td class="muted small">{group}</td><td class="num muted">{default}</td>'
                     f'<td class="num"><b>{now}</b></td>'
-                    f'<td>{_TUNED_BADGE if changed else ""}</td></tr>')
+                    f'<td>{(_HAND_BADGE if k in qp.MANUAL else _TUNED_BADGE) if changed else ""}</td></tr>')
     reports = cal.last_reports(14)
     crow = [
         f'<tr><td class="num">{html.escape(r["as_of"])}</td>'
@@ -427,7 +446,7 @@ def _bot_page(trader, msg: str = "") -> str:
                  + ui.card("Bộ ngưỡng hiện hành",
                            ui.table([("Ngưỡng", ""), ("Nhóm", ""), ("Mặc định", "num"), ("Hiện hành", "num"), ("", "")],
                                     prow, ""),
-                           sub="Dòng được tô màu là ngưỡng bot đã tự hiệu chỉnh", flush=True)
+                           sub="Dòng được tô màu là ngưỡng bot đã tự hiệu chỉnh, hoặc công tắc đã đổi tay", flush=True)
                  + "</div>")
     if last.get("text"):
         parts.append('<div style="margin-top:16px">'
@@ -630,6 +649,12 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
 
     config_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
                         show_bot=lambda: trader is not None and settings.trade_mode != "off")
+
+    from vnbot import chandoan_web
+
+    chandoan_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
+                          show_bot=lambda: trader is not None and settings.trade_mode != "off",
+                          watchlist=watchlist.get, notify=getattr(trader, "notify", None))
 
     critic_llm: list = []        # the provider chain, built on the first web /critic
 
@@ -918,6 +943,23 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             msg = trader.reset_paper(amount, books or [])
         except ValueError as exc:
             msg = f"⚠️ {exc}"
+        return RedirectResponse(f"/bot?msg={quote(msg)}", status_code=303)
+
+    @app.post("/bot/breakout", dependencies=post_guard)
+    def bot_breakout(on: str = Form("1")):
+        """The Quant Engine's breakout BUYs on or off (Params.breakout_buy, kept in quant_params.json)."""
+        if trader is None or settings.trade_mode == "off":
+            raise HTTPException(404, "Bot giao dịch đang tắt (TRADE_MODE=off).")
+        from dataclasses import replace
+
+        from tradingagents.quant import params as qp
+
+        value = 1 if on == "1" else 0
+        qp.save(replace(qp.active(), breakout_buy=value), note=f"trang Bot giao dịch: MUA breakout {'bật' if value else 'tắt'}")
+        logger.info("Web: the Quant Engine's breakout BUYs switched %s", "on" if value else "off")
+        msg = ("✅ Đã bật lại MUA breakout của Quant Engine, từ lượt quyết định kế tiếp." if value else
+               "✅ Đã tắt MUA breakout: từ lượt quyết định kế tiếp Quant Engine không mở MUA mới ở mã breakout (lệnh mua đã "
+               "đặt cho phiên tới vẫn giữ); kết quả bóng của các mã đó ở trang Vì sao chưa MUA.")
         return RedirectResponse(f"/bot?msg={quote(msg)}", status_code=303)
 
     @app.post("/channels/{name}", dependencies=post_guard)

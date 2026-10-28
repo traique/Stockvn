@@ -85,6 +85,13 @@ class QuantResult:
     report: str = ""
     deterministic_summary: str = ""
     scenarios: list[dict] = field(default_factory=list)
+    # Why no new BUY (policy.Decision.gate/gates/bias), and the decision the same stock
+    # gets with the gate that can be lifted taken away (``lifted``: the market, or the
+    # breakout switch): recorded by vnbot.chandoan to measure the gates, never used to trade.
+    gate: str = ""
+    gates: list[str] = field(default_factory=list)
+    bias: str = ""
+    if_lifted: dict | None = None
 
     def to_state(self) -> dict:
         return asdict(self)
@@ -307,6 +314,27 @@ def load_flow_signals(code: str, as_of_date: str, vni_closes: list[float]):
     return stock, market, member
 
 
+def lifted(inputs: policy.PolicyInputs, decision: policy.Decision) -> dict | None:
+    """The decision for a new position with the gate that can be lifted taken away, when
+    that gate is a reason there is no BUY (None otherwise): the diagnosis's "BUY but for
+    ...". The market gate: VNINDEX taken as neutral, the stock's own gates still apply.
+    The breakout switch (``Params.breakout_buy`` = 0, gate "breakout", checked last so
+    the stock passed every other gate): the same decision with the switch on. Which one
+    it was is the decision's own gate."""
+    if "market" in decision.gates:
+        alt = policy.evaluate_policy(replace(inputs, is_holding=False), regime_override="neutral")
+    elif decision.gate == "breakout":
+        alt = policy.evaluate_policy(replace(inputs, is_holding=False, params=replace(inputs.params, breakout_buy=1)))
+    else:
+        return None
+    plan = alt.trade_plan
+    return {
+        "action": alt.action, "confidence": alt.confidence, "gate": alt.gate,
+        "stop": alt.stop_price, "target": alt.target_price, "rr": alt.rr_ratio,
+        "entry_low": plan.entry_low if plan else None, "entry_high": plan.entry_high if plan else None,
+    }
+
+
 def analyze(symbol: str, as_of_date: str, *, portfolio=None, params=None, flows: bool = True) -> QuantResult:
     """Run the full deterministic pipeline for ``symbol`` at ``as_of_date``.
 
@@ -335,6 +363,7 @@ def analyze(symbol: str, as_of_date: str, *, portfolio=None, params=None, flows:
         market_flows=market_flows, etf_member=member, params=params,
     )
     decision = policy.evaluate_policy(prep.inputs)
+    if_lifted = lifted(prep.inputs, decision)
     price, dates, stats, enhanced = prep.closes[-1], prep.dates, prep.stats, prep.enhanced
     ma_alignment, support_resistance, key_levels = prep.ma_alignment, prep.support_resistance, prep.key_levels
     liquidity, relative_strength, vni_closes = prep.liquidity, prep.relative_strength, prep.vni_closes
@@ -358,6 +387,7 @@ def analyze(symbol: str, as_of_date: str, *, portfolio=None, params=None, flows:
         position_size_pct=plan.position_size_pct if plan else None,
         suggested_shares=shares, ceiling=ceiling, floor=floor, is_holding=is_holding,
         scenarios=[{"name": s.name, "trigger": s.trigger, "action": s.action} for s in decision.scenarios],
+        gate=decision.gate, gates=list(decision.gates), bias=decision.bias, if_lifted=if_lifted,
     )
     result.deterministic_summary = render_summary(result, stats)
     result.report = render_report(
@@ -444,6 +474,8 @@ def render_summary(r: QuantResult, stats: feat.SignalStats | None = None) -> str
         )
     elif r.action == "NO_TRADE":
         plan = "Hệ thống chưa đủ lợi thế để đề xuất vùng giá - ưu tiên đứng ngoài quan sát."
+    elif r.gate == "breakout":
+        plan = "MUA breakout đang tắt (đổi ở trang Bot giao dịch) - chỉ theo dõi, không đề xuất vùng giá."
     else:
         plan = "Chưa đủ rõ xu hướng để đề xuất vùng giá cụ thể - theo dõi thêm."
     lines = [
