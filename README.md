@@ -211,7 +211,8 @@ Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, 
   **-3,4%** (thua VNINDEX 3,5 điểm %); đi theo kế hoạch như sổ ảo: 14 lệnh khớp, **13 chạm cắt lỗ**, trung bình -0,90R.
   **22 MUA bị chặn chỉ vì thị trường** cũng lỗ: 10 phiên sau **-4,4%**, thắng 27%; theo kế hoạch 19/22 chạm cắt lỗ, -0,64R.
   Mẫu nhỏ, rổ VN100 hôm nay (thiên lệch sống sót), nhưng năm qua bộ lọc thị trường **không làm mất lệnh tốt**: nới cổng lúc này
-  không có cơ sở; cùng chiều với backtest 23/10 (nới ngày phân phối, R:R 1,2, tin cậy 0,65/0,70 đều xấu hơn).
+  không có cơ sở; cùng chiều với backtest 23/10 (nới ngày phân phối, R:R 1,2, tin cậy 0,65/0,70 đều xấu hơn). Vì sao chính các lệnh
+  MUA lỗ (so với 2023-2025, theo setup): `docs/chandoan_2026-10-28/README.md`, mục **Bổ sung**.
 
 Vì vậy bot giờ **ghi lại và đo**, như bot OKX: mọi tín hiệu kể cả tín hiệu bị loại đều được theo dõi "bóng", và chỉ số đo mới được
 dùng để quyết định đổi luật.
