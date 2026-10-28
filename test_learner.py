@@ -52,9 +52,30 @@ print("✓ học đúng: chặn short quá bán, tăng trọng số pullback, gi
 assert lr.learn() == [], "phải có cooldown"
 print("✓ cooldown 24h hoạt động")
 
+# 3b) v3.2: không bao giờ chặn cả một phía dù nhóm đó thua rõ
+st.set("learn_last", {})
+for i in range(40): add("short", 55, "pullback", 6, -1.05, "ai_rejected")
+props2 = lr.learn()
+assert not any(p["key"] in ("short_side", "long_side") for p in props2), props2
+assert "short_side" not in LEARNED["blocks"]
+print("✓ v3.2: không chặn cả phía short dù 55 short thua")
+
 # 4) khôi phục mặc định
-lr.reset(); assert LEARNED["blocks"] == [] and LEARNED["min_score"] is None
+lr.reset(); assert LEARNED["blocks"] == [] and LEARNED["min_score"] is None and LEARNED["schema"] == Learner.LEARNED_SCHEMA
 print("✓ khôi phục mặc định")
+
+# 4b) v3.2: tham số bản cũ (schema 1) được đưa về mặc định khi khởi động, giữ ngưỡng phủ quyết AI
+st.set("learned", {"min_score": 5.5, "trigger_w": {"pullback": 1.2}, "blocks": ["short_side", "weak_adx"],
+                   "unblocked": [], "exit_mode": "trail", "ai_veto_conf": 55, "tp1_r": None})
+st.set("learn_last", {"rule:short_side": time.time(), "exit_mode": time.time(), "ai_veto_conf": time.time()})
+LEARNED.clear(); LEARNED.update({"min_score": None, "trigger_w": {}, "blocks": [], "unblocked": [], "exit_mode": None, "ai_veto_conf": None, "tp1_r": None})
+lr2 = Learner(st, None, None, notes.append)
+assert LEARNED["blocks"] == [] and LEARNED["exit_mode"] is None and LEARNED["min_score"] is None and LEARNED["trigger_w"] == {}
+assert LEARNED["ai_veto_conf"] == 55 and LEARNED["schema"] == Learner.LEARNED_SCHEMA
+assert "exit_mode" not in st.get("learn_last") and "ai_veto_conf" in st.get("learn_last")
+assert st.learn_log(1)[0]["kind"] == "migrate"
+lr3 = Learner(st, None, None, notes.append); assert st.learn_log(1)[0]["kind"] == "migrate" and len([r for r in st.learn_log(50) if r["kind"] == "migrate"]) == 1
+print("✓ v3.2: tham số bản cũ về mặc định 1 lần, giữ ai_veto_conf")
 
 # 5) chế độ suggest: tạo đề xuất chờ duyệt, áp dụng qua apply_pending
 st.set("learn_last", {}); lr.mode = "suggest"

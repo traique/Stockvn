@@ -25,7 +25,7 @@ class Telegram:
             requests.post(f"{self.base}/sendMessage", json={
                 "chat_id": cfg.TELEGRAM_CHAT_ID, "text": text[:4000]}, timeout=15)
         except Exception as e:
-            log.warning("Telegram send lỗi: %s", e)
+            log.warning("Telegram send lỗi: %s", type(e).__name__)     # không in URL (chứa token)
 
     def start(self):
         if not self.enabled:
@@ -56,5 +56,5 @@ class Telegram:
                         continue
                     self.send(self.bot.handle_command(text, source="Telegram"))
             except Exception as e:
-                log.warning("Telegram poll lỗi: %s", e)
+                log.warning("Telegram poll lỗi: %s", type(e).__name__)   # không in URL (chứa token)
                 time.sleep(5)

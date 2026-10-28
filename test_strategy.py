@@ -41,7 +41,7 @@ print("✓ SL cấu trúc: đáy xa → SL", round(sl, 2), "(diagnose sẽ bỏ 
 
 # 4) trigger động lượng không cộng trùng
 r = NS(ema9=3, ema21=2, ema50=1, close=1, ema200=5, adx=10, vol_ratio=1, close_pos=0.5, body_pct=0.3, vwap=9)
-h = NS(di_plus=0, di_minus=1, macd_hist=-1, rsi=40)
+h = NS(di_plus=0, di_minus=1, macd_hist=-1, rsi=40, adx=20)
 fr = NS(row=lambda i: r); hf = NS(row=lambda i: h)
 s_mom, _ = S._score(fr, hf, "long", ["MACD cắt lên", "EMA9 cắt lên EMA21"], 0, 0)
 s_one, _ = S._score(fr, hf, "long", ["MACD cắt lên"], 0, 0)
@@ -49,6 +49,24 @@ s_mix, _ = S._score(fr, hf, "long", ["MACD cắt lên", "Pullback EMA21 + nến 
 assert s_mom == s_one, (s_mom, s_one)             # MACD + EMA = chỉ 1 trigger
 assert s_mix == s_one + 1.5, (s_mix, s_one)       # động lượng + cấu trúc = 2 trigger
 print(f"✓ trigger: MACD+EMA = {s_mom} (bằng 1 trigger), MACD+Pullback = {s_mix}")
+
+# 4b) v3.2: volume cao trào & xu hướng 1h đã chạy lâu bị TRỪ điểm (không cộng)
+r_cl = NS(**{**vars(r), "vol_ratio": cfg.CLIMAX_VOL})
+s_cl, why_cl = S._score(NS(row=lambda i: r_cl), hf, "long", ["MACD cắt lên"], 0, 0)
+assert s_cl == s_one - 1 and any("cao trào" in w for w in why_cl), (s_cl, s_one)
+h_late = NS(**{**vars(h), "adx": cfg.LATE_TREND_ADX})
+s_late, why_late = S._score(fr, NS(row=lambda i: h_late), "long", ["MACD cắt lên"], 0, 0)
+assert s_late == s_one - 1 and any("chạy lâu" in w for w in why_late), (s_late, s_one)
+print("✓ v3.2: volume cao trào -1, ADX 1h ≥ 35 -1")
+
+# 4c) v3.2: cổng "ngược nhịp 1h của coin"
+assert "ngược nhịp 1h" in S._gates(row(), "long", 1, None, chg1h=-cfg.CHASE_1H_PCT)
+assert S._gates(row(), "long", 1, None, chg1h=-cfg.CHASE_1H_PCT + 0.1) == ""
+sh = row(close=99, open=100, ema21=99.5, rsi=40, close_pos=0.2)
+assert "ngược nhịp 1h" in S._gates(sh, "short", -1, None, chg1h=cfg.CHASE_1H_PCT)
+assert S._gates(sh, "short", -1, None, chg1h=-1.0) == ""
+assert S._gates(sh, "short", -1, {"btc_chg_1h": cfg.BTC_GATE_CHG + 0.01}) == "BTC đang xu hướng tăng"
+print("✓ v3.2: cổng ngược nhịp 1h; cổng BTC %.1f%%" % cfg.BTC_GATE_CHG)
 
 # 5) điểm dòng tiền
 def sig(side, **ctx):
@@ -75,8 +93,11 @@ print("✓ mô tả nến:", desc[-2])
 # 7) luật chặn sẵn & gỡ chặn
 from bot.learner import Learner
 S.LEARNED.update({"blocks": [], "unblocked": []})
-assert "afternoon_session" not in S.active_blocks() and "setup_range" in S.active_blocks()   # mặc định v2.9.2
-_saved = cfg.DEFAULT_BLOCKS; cfg.DEFAULT_BLOCKS = ["afternoon_session", "setup_range"]      # người dùng tự bật chặn
+assert {"afternoon_session", "setup_range", "night_session", "climax_volume"} <= S.active_blocks()   # mặc định v3.2
+S.LEARNED["blocks"] = ["short_side", "weak_adx"]
+assert "short_side" not in S.active_blocks() and "weak_adx" in S.active_blocks()   # không bao giờ chặn cả phía
+S.LEARNED["blocks"] = []
+_saved = cfg.DEFAULT_BLOCKS; cfg.DEFAULT_BLOCKS = ["afternoon_session", "setup_range"]
 assert "afternoon_session" in S.active_blocks()
 sg = S.Signal("X/USDT:USDT", "long", 6, 100, 1, 98, 104, [], {"hour": 15})
 assert "13h–19h" in S.blocked_by(sg)

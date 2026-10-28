@@ -45,8 +45,14 @@ RULES = {
     "night_session": ("Vào lệnh 0h–7h sáng (giờ VN, thanh khoản thấp)", lambda side, c: c.get("hour", 12) < 7),
     "afternoon_session": ("Vào lệnh 13h–19h (giờ VN, phiên chiều Á – hay phá vỡ giả)", lambda side, c: 13 <= c.get("hour", 12) < 19),
     "weak_adx": ("ADX 15m dưới 25", lambda side, c: c.get("adx", 30) < 25),
+    # v3.2: chỉ để thống kê – bộ tự học KHÔNG được chặn cả một phía (chặn theo regime 2 ngày = tự tắt bot)
     "long_side": ("Mọi lệnh LONG", lambda side, c: side == "long"),
     "short_side": ("Mọi lệnh SHORT", lambda side, c: side == "short"),
+    # v3.2: hai luật mới từ 211 tín hiệu bóng (23–27/10/2026)
+    "climax_volume": ("Nến tín hiệu volume cao trào (≥ 1.5× trung bình 20 nến)",
+                      lambda side, c: _v(c, "vol_ratio", 1) >= cfg.CLIMAX_VOL),
+    "late_trend": ("Vào muộn: ADX 1h ≥ 35 (xu hướng đã chạy lâu)",
+                   lambda side, c: _v(c, "htf_adx", 0) >= cfg.LATE_TREND_ADX),
     # ---- BTC dẫn dắt altcoin
     "long_btc_down": ("Long altcoin khi BTC 1h đang giảm (>0.5%)",
                       lambda side, c: side == "long" and _v(c, "btc_chg_1h", 0) < -0.5),
@@ -72,10 +78,13 @@ RULES = {
 }
 
 
+NEVER_BLOCK = {"long_side", "short_side"}   # v3.2: không bao giờ chặn cả một phía
+
+
 def active_blocks():
     """Luật đang chặn = bộ tự học chặn + luật chặn sẵn (DEFAULT_BLOCKS) mà bộ tự học chưa gỡ.
     Tín hiệu bị chặn vẫn được theo dõi bóng → nếu thực tế có lãi, bộ tự học tự gỡ chặn."""
-    learned = set(LEARNED.get("blocks") or [])
+    learned = set(LEARNED.get("blocks") or []) - NEVER_BLOCK
     unblocked = set(LEARNED.get("unblocked") or [])
     return learned | {r for r in cfg.DEFAULT_BLOCKS if r in RULES and r not in unblocked}
 
@@ -198,12 +207,17 @@ def _triggers(df, side):
     return out
 
 
-def _gates(r, side, trend, market=None):
-    """Các điều kiện bắt buộc. Trả về chuỗi lý do loại, hoặc '' nếu qua hết."""
+def _gates(r, side, trend, market=None, chg1h=None):
+    """Các điều kiện bắt buộc. Trả về chuỗi lý do loại, hoặc '' nếu qua hết.
+    chg1h: % giá đổi trong 4 nến 15m đã đóng gần nhất (nhịp 1h của chính coin)."""
     want = 1 if side == "long" else -1
     if trend != want:
         return "khung lớn không cùng hướng"
     m = market or {}
+    # v3.2: không bắt đỉnh/đáy của nhịp hồi 1h. Short khi coin vừa tăng ≥ CHASE_1H_PCT trong 1h (long: vừa giảm)
+    # → 56 tín hiệu bóng -0.72R, thắng 18%. Pullback hợp lệ là nhịp hồi NHỎ (< 0.5%) rồi gãy, không phải nhịp đảo chiều.
+    if chg1h is not None and cfg.CHASE_1H_PCT > 0 and -want * chg1h >= cfg.CHASE_1H_PCT:
+        return f"ngược nhịp 1h của coin ({chg1h:+.2f}%/1h)"
     # Cổng BTC bắt buộc: altcoin đi theo BTC, không đánh ngược xu hướng / động lượng BTC
     if side == "long" and (m.get("btc_trend_1h") == -1 or (m.get("btc_chg_1h") or 0) < -cfg.BTC_GATE_CHG):
         return "BTC đang xu hướng giảm"
@@ -267,9 +281,13 @@ def _score(df, htf, side, triggers, funding, change24h):
     # VWAP
     if (side == "long" and r.close > r.vwap) or (side == "short" and r.close < r.vwap):
         s += 0.5; why.append("Đúng phía VWAP")
-    # Volume mạnh
-    if r.vol_ratio >= 1.5:
-        s += 0.5; why.append(f"Volume x{r.vol_ratio:.1f}")
+    # Volume: v3.2 – volume cao trào trên nến tín hiệu là dấu hiệu cạn lực, KHÔNG cộng điểm mà trừ
+    # (31 tín hiệu bóng vol 1.5–2.5×: -0.68R, thắng 16%)
+    if r.vol_ratio >= cfg.CLIMAX_VOL:
+        s -= 1; why.append(f"Volume cao trào x{r.vol_ratio:.1f} (trừ điểm)")
+    # Xu hướng 1h đã chạy lâu (ADX 1h ≥ 35) → vào muộn, trừ điểm (76 short bóng: -0.44R)
+    if h.adx >= cfg.LATE_TREND_ADX:
+        s -= 1; why.append(f"ADX 1h {h.adx:.0f} – xu hướng đã chạy lâu (trừ điểm)")
     # Nến đóng mạnh
     if (side == "long" and r.close_pos >= 0.7 and r.body_pct >= 0.5) or (side == "short" and r.close_pos <= 0.3 and r.body_pct >= 0.5):
         s += 0.5; why.append("Nến đóng dứt khoát")
@@ -490,7 +508,9 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
         return None, why, info
     side = "long" if trend == 1 else "short"
     info["side"] = side
-    gate = _gates(r, side, trend, market)
+    chg1h = (r.close / df.close[-5] - 1) * 100 if df.n >= 5 and df.close[-5] else None
+    info["chg1h"] = round(chg1h, 2) if chg1h is not None else None
+    gate = _gates(r, side, trend, market, chg1h=chg1h)
     if gate:
         return None, gate, info
     triggers = _triggers(df, side)
