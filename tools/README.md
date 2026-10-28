@@ -46,3 +46,20 @@ Cần mạng tới OKX (nến lịch sử, API công khai) và HuggingFace (tả
 **Kết luận**: không có giá trị dự báo (hai bản ngược dấu, đều xa ý nghĩa thống kê); xác suất dự báo lệch thực tế
 (dự báo thắng < 35% nhưng thực tế ~40%). 80 mẫu chỉ đủ phát hiện chênh lệch lớn (~0,6R) → **chưa tích hợp vào bot**.
 Chạy lại khi có 200–300 tín hiệu mới của v3.1; chỉ tính chế độ bóng nếu tương quan có ý nghĩa (p < 0,05).
+
+## Backtest phiên / phá giả biên độ / Volume Profile (`backtest_sessions.py`)
+
+Chỉ dùng thư viện chuẩn + code của bot (`strategy.diagnose`, `exits.simulate`), nến 5m lịch sử OKX (API công khai, có cache).
+
+- **A. orb** – phá giả biên độ 4h đầu phiên (mốc 0h / 4h / 8h / 12h UTC): nến 5m đóng ngoài biên rồi đóng quay lại trong biên
+  → vào ngược hướng cú phá, SL ở cực trị cú phá. Thử 6 cách thoát: giữa biên, biên đối diện, 1R, 2R, trail, hybrid.
+- **B. bot** – chạy lại strategy của bot trên từng nến 15m, chia nhóm theo giờ VN (như bộ tự học) và theo phiên Á / London / NY.
+- **C. vp** – POC / VAH / VAL của 24h trước tín hiệu: vị trí giá so với vùng giá trị, khoảng trống tới POC, TP tại mức VP kế tiếp.
+
+Không có AI, OI, funding, long/short → đây là kết quả của tín hiệu kỹ thuật trước AI. Báo cáo có `t_ngày` (kiểm định trên
+R trung bình mỗi ngày) vì các tín hiệu cùng ngày tương quan mạnh; chỉ tin nhóm có `t_ngày` đủ lớn và cùng dấu ở cả hai nửa thời gian.
+
+```bash
+python tools/backtest_sessions.py --days 90 --top 30 --cache .bt_cache --out bt_result.json > bt_report.md
+python tools/backtest_sessions.py --report bt_result.json
+```
