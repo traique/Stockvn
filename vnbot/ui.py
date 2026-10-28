@@ -509,6 +509,8 @@ ICONS = {
     "shield": '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/>',
     "file": '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
     "eraser": '<path d="m4 15 9-9 6 6-6 6H8z"/><path d="M4 20h16"/>',
+    "funnel": '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+    "db": '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
 }
 
 
@@ -526,9 +528,9 @@ NONE = "chưa có"   # a figure that is missing (a zero is a zero)
 # The sidebar: the main screens, then the tools and the system pages (key, path, label, icon).
 NAV = (("home", "/", "Tổng quan", "home"), ("taisan", "/taisan", "Danh mục", "wallet"))
 TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("thamdinh", "/thamdinh", "AI thẩm định tín hiệu", "spark"),
-         ("bot", "/bot", "Bot giao dịch", "bot"))
-SYSTEM = (("caidat", "/caidat", "Cài đặt", "gear"), ("zoom", "/zoom", "Cấu hình Zoom", "video"),
-          ("phienban", "/phienban", "Phiên bản", "tag"))
+         ("tinhieu", "/tinhieu", "Vì sao chưa MUA", "funnel"), ("bot", "/bot", "Bot giao dịch", "bot"))
+SYSTEM = (("caidat", "/caidat", "Cài đặt", "gear"), ("dulieu", "/dulieu", "Dữ liệu & nhật ký", "db"),
+          ("zoom", "/zoom", "Cấu hình Zoom", "video"), ("phienban", "/phienban", "Phiên bản", "tag"))
 _WEEKDAY = ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật")
 _PHASE = {"closed": "Thị trường nghỉ", "pre_open": "Trước giờ mở cửa", "ato": "Phiên ATO", "continuous": "Đang khớp lệnh",
           "lunch": "Nghỉ trưa", "atc": "Phiên ATC", "put_through": "Thoả thuận", "after_close": "Đã đóng cửa"}

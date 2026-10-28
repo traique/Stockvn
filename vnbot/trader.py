@@ -761,11 +761,27 @@ class TradingBot:
                         "khi chờ nguồn giá: nếu hôm nay xếp hạng lại thì các mã này không được xét.")
         if head:
             text = "\n".join(head) + "\n\n" + text
+        self._record_history(target, {"engine": paper, "factor": fb_book, "momentum": mom_book},
+                             fb_decision, mom_decision)
         self._write_json("last_report.json", {"day": target, "text": text,
                                               "at": _now_vn().isoformat(timespec="minutes"),
                                               "sessions": done, "signal_strategy": self.settings.signal_strategy})
         # A rebuilt report (books done, report lost) was never sent either: it is new too.
         return RunResult(target, text, bool(done) or last.get("day") != target, done, waiting=waiting)
+
+    @staticmethod
+    def _record_history(day, books: dict, fb_decision, mom_decision) -> None:
+        """Each book's NAV and fills, and the market row with the books' own filter state, in
+        the history store (vnbot.chandoan); a store failure is logged, never raised."""
+        from vnbot import chandoan, store
+
+        db = store.current()
+        if db is None:
+            return
+        store.safe("record books", lambda: chandoan.record_books(
+            day, books, store=db, factor_on=getattr(fb_decision, "market_ok", None),
+            momentum_on=getattr(mom_decision, "market_ok", None)))
+        store.safe("shadow results", lambda: chandoan.resolve(day, store=db))
 
     @staticmethod
     def _fresh_gaps(sessions, market, books, real, *, only=None) -> list[str]:
@@ -1969,10 +1985,12 @@ class TradingBot:
         held_real = list(real.positions) if real is not None else []
         symbols = list(dict.fromkeys(list(universe) + list(paper.positions) + held_real))
         signals, real_only, errors, down = [], {}, [], []
+        results = {}
         book = paper.portfolio_context()
         for symbol in symbols:
             try:
                 result = engine.analyze(symbol, day, portfolio=book, params=params)
+                results[symbol] = result
                 signal = Signal.from_result(result)
                 if signal.action == "BUY" and str(getattr(result, "last_bar_date", day))[:10] != day:
                     # Decided on an older close (suspended, or the source is late): its entry zone
@@ -1996,6 +2014,10 @@ class TradingBot:
             raise RuntimeError(f"Nguồn giá không trả lời cho {len(down)}/{len(symbols)} mã "
                                f"({', '.join(down[:5])}{', ...' if len(down) > 5 else ''}) - phiên {day} "
                                "chưa lưu, sẽ chạy lại.")
+        from vnbot import chandoan, store
+
+        # The history store keeps every decision with the gate that kept it from BUY (vnbot.chandoan).
+        store.safe("record trade decisions", lambda: chandoan.record_screen(results, errors, kind="trade"))
         return signals, real_only, errors
 
     # ── on demand (/chay, the web button) ──

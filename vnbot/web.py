@@ -631,6 +631,12 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     config_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
                         show_bot=lambda: trader is not None and settings.trade_mode != "off")
 
+    from vnbot import chandoan_web
+
+    chandoan_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
+                          show_bot=lambda: trader is not None and settings.trade_mode != "off",
+                          watchlist=watchlist.get, notify=getattr(trader, "notify", None))
+
     critic_llm: list = []        # the provider chain, built on the first web /critic
 
     def _ai_today() -> tuple[dict, list[dict]]:

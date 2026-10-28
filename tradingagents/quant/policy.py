@@ -182,6 +182,30 @@ class Decision:
     data_quality: str  # ok / degraded / bad
     trade_plan: TradePlan | None = None
     scenarios: list[Scenario] = field(default_factory=list)
+    # Why there is no new BUY, for the record only (never read by the decision): the
+    # first gate of BUY_GATES it failed ("" = it passed every gate), and every gate
+    # it failed in the bullish check (a stock can fail confidence AND the market).
+    gate: str = ""
+    gates: tuple[str, ...] = ()
+    bias: str = ""  # bullish / bearish / conflict / flat ("" = not reached)
+
+
+# The gates a new BUY passes, in the order evaluate_policy checks them, and what each
+# means; Decision.gate names the first one a stock failed.
+BUY_GATES: dict[str, str] = {
+    "data": "dữ liệu chưa đủ tin cậy",
+    "gap": "gap quyền chưa điều chỉnh",
+    "bearish": "xu hướng giảm",
+    "conflict": "tín hiệu tăng/giảm mâu thuẫn",
+    "flat": "chưa có xu hướng rõ",
+    "confidence": "độ tin cậy dưới ngưỡng",
+    "market": "thị trường chung risk-off",
+    "session": "phiên rủi ro (phân phối/đạp mạnh)",
+    "stale": "dữ liệu giá cũ",
+    "levels": "không tính được stop/mục tiêu",
+    "resistance": "phá đỉnh, không còn kháng cự để đo R:R",
+    "rr": "R:R dưới ngưỡng",
+}
 
 
 @dataclass
@@ -806,7 +830,10 @@ def _build_scenarios(plan: TradePlan) -> list[Scenario]:
     return [base, bull, bear]
 
 
-def evaluate_policy(inputs: PolicyInputs) -> Decision:
+def evaluate_policy(inputs: PolicyInputs, *, regime_override: str | None = None) -> Decision:
+    """``regime_override``: decide as if VNINDEX were in that regime - the diagnosis
+    ("would it BUY if the market were not risk-off?", vnbot.chandoan); the bot's own
+    decisions never pass it."""
     quality = inputs.quality
     p = inputs.params
 
@@ -823,13 +850,18 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
             invalidation_reason="dữ liệu chưa đủ tin cậy - chờ dữ liệu tốt hơn",
             market_regime="unknown",
             data_quality=quality.status,
+            gate="data",
+            gates=("data",),
         )
 
     dist_days = distribution_count(inputs)
-    regime = classify_market_regime(
-        inputs.vnindex_multi_tf, inputs.vnindex_adx, dist_days, p.distribution_day_threshold,
-    )
-    regime, flow_regime_reasons = _flow_regime(regime, inputs)
+    if regime_override is None:
+        regime = classify_market_regime(
+            inputs.vnindex_multi_tf, inputs.vnindex_adx, dist_days, p.distribution_day_threshold,
+        )
+        regime, flow_regime_reasons = _flow_regime(regime, inputs)
+    else:
+        regime, flow_regime_reasons = regime_override, []
     holding = inputs.is_holding
 
     if inputs.unadjusted_gap:
@@ -856,6 +888,8 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
             invalidation_reason="chờ chuỗi giá được điều chỉnh theo sự kiện quyền (hoặc đủ phiên sau gap) rồi đánh giá lại",
             market_regime=regime,
             data_quality=quality.status,
+            gate="gap",
+            gates=("gap",),
         )
 
     session_flags = _evaluate_session(inputs.session, inputs.enhanced)
@@ -871,7 +905,7 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
     if quality.status == "degraded":
         reasons.extend(quality.reasons)
     reasons.extend(flow_regime_reasons)
-    if dist_days >= p.distribution_day_threshold:
+    if regime_override is None and dist_days >= p.distribution_day_threshold:
         reasons.append(
             f"VNINDEX có {dist_days} ngày phân phối trong 25 phiên gần nhất - dấu hiệu tổ chức lớn bán ra, ép thị trường chung về risk-off"
         )
@@ -883,6 +917,8 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
     direction = "watch"
     invalidation_reason = None
     buy_qualified = False
+    # The record of why there is no new BUY (Decision.gate); never read below.
+    gates: tuple[str, ...] = (bias.direction,) if bias.direction != "bullish" else ()
 
     if bias.direction == "bullish":
         # "unknown" (thiếu dữ liệu VNINDEX) cũng phải chặn BUY như risk_off:
@@ -895,6 +931,12 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
             and not session_flags.hard_no_buy
             and not quality.is_stale
         )
+        gates = tuple(name for name, failed in (
+            ("confidence", confidence < p.confidence_buy_min),
+            ("market", regime not in ("risk_on", "neutral")),
+            ("session", session_flags.hard_no_buy),
+            ("stale", quality.is_stale),
+        ) if failed)
         if can_buy:
             direction = "buy"  # BUY (mới) hay HOLD (đang giữ) chốt sau Gate D bên dưới
         elif confidence >= p.confidence_watch_min:
@@ -970,6 +1012,7 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
             action = "HOLD" if holding else "WATCH"
             reasons.append("không tính được stop/target hợp lệ - không đề xuất vùng giá")
             invalidation_reason = None
+            gates = ("levels",)
         elif "+resistance" not in basis and p.breakout_projected_ok and setup_type == "breakout":
             # A breakout to new highs has no resistance above by definition:
             # aim at a fixed multiple of the risk instead of refusing it.
@@ -988,6 +1031,7 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
                 ).replace(",", ".")
             else:
                 action = "HOLD" if holding else "WATCH"
+                gates = ("rr",) if rr_ratio is not None else ("levels",)
                 stop_price = target_price = rr_ratio = None
         elif "+resistance" not in basis:
             # Target suy ra từ reward_mult: R:R chỉ là chính hệ số đó (vòng
@@ -1000,8 +1044,10 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
             invalidation_reason = "chờ hình thành vùng kháng cự/hỗ trợ rõ để đo được R:R thật"
             # Không để target/R:R ước lượng lọt ra báo cáo như số thật.
             stop_price = target_price = rr_ratio = None
+            gates = ("resistance",)
         elif rr_ratio < p.min_rr_ratio:
             action = "HOLD" if holding else "WATCH"
+            gates = ("rr",)
             reasons.append(
                 f"risk/reward {rr_ratio} dưới ngưỡng tối thiểu {p.min_rr_ratio} - "
                 f"chưa {'mở thêm' if holding else 'vào mới'} dù setup ổn"
@@ -1082,4 +1128,7 @@ def evaluate_policy(inputs: PolicyInputs) -> Decision:
         data_quality=quality.status,
         trade_plan=trade_plan,
         scenarios=scenarios,
+        gate="" if buy_qualified else (gates[0] if gates else ""),
+        gates=() if buy_qualified else gates,
+        bias=bias.direction,
     )

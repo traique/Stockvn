@@ -100,6 +100,7 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/danhmuc` | Danh mục cả ba tài khoản ảo (và tài khoản thật ở chế độ `signal`) |
 | `/lenh` | Lệnh bot đặt cho phiên tới |
 | `/hieuchinh` | Ngưỡng Quant Engine đang dùng và kết quả tự hiệu chỉnh 5 đêm gần nhất |
+| `/vikhongmua` · `/vikhongmua FPT` · `/vikhongmua dunglai 120` | **Vì sao chưa có MUA**: thị trường (regime, ngày phân phối, lọc MA200/MA100 của Phòng thủ/Động lượng), cổng chặn MUA của từng mã, mã suýt MUA, kết quả bóng · lịch sử một mã · dựng lại 120 phiên đã qua (thêm `vn100` cho rổ VN100). Xem mục **Vì sao chưa có MUA & kho dữ liệu** |
 | `/chay` | Chạy ngay (kèm chạy bù) các phiên đã đóng mà bot chưa xử lý; phiên đã chạy thì bỏ qua. Trước 15:05 chỉ tính tới phiên hôm trước |
 | `/von 500000000` | Đặt tiền mặt tài khoản thật (chế độ `signal`) |
 | `/khop mua FPT 100 56300 [YYYY-MM-DD]` | Báo đã khớp lệnh thật (ngày mặc định hôm nay); bán: `/khop ban FPT 100 58000` (chế độ `signal`; bán được cả lô lẻ, ví dụ 1150 cp). Bot từ chối lệnh không thể xảy ra: không đủ tiền, bán cổ phiếu chưa về (mua phiên T bán được từ chiều T+2, đếm theo lịch giao dịch có ngày lễ), ngày tương lai/cuối tuần/ngày lễ, hoặc ngày trước lệnh đã ghi gần nhất |
@@ -191,6 +192,61 @@ Giao diện Coral (v1.7.0, thiết kế lại theo Hallmark): giấy xám ấm, 
 - **Cài đặt** (`/caidat`): các tham số của bot (giờ chạy, sàng lọc và hạn mức AI, cảnh báo trong phiên, bot giao dịch ảo, Siêu tín hiệu, ngân sách rủi ro Tài sản, AI thẩm định tín hiệu, kết nối), mỗi nhóm một nút Lưu. Giá trị lưu vào `data/settings.json`, được ưu tiên hơn biến môi trường trên Botkeep và giữ qua các lần khởi động lại; mỗi mục ghi rõ giá trị đang lấy từ đâu (web, biến môi trường, mặc định) và có hiệu lực ngay hay sau khi khởi động lại. Khoá và token (Telegram, 9Router, Zoom, mật khẩu web) chỉ hiện "đã đặt / chưa đặt", không sửa được trên web: đặt trên Botkeep rồi khởi động lại.
 - **AI thẩm định tín hiệu** (`/thamdinh`): xem mục **AI thẩm định tín hiệu**.
 - **Bot giao dịch** (`/bot`): biểu đồ NAV, các danh mục ảo, ngưỡng và lịch sử hiệu chỉnh; nút **Chạy phiên ngay** như `/chay`.
+- **Vì sao chưa MUA** (`/tinhieu`, trong Công cụ) và **Dữ liệu & nhật ký** (`/dulieu`, trong Hệ thống): xem mục **Vì sao chưa có MUA & kho dữ liệu**.
+
+### Vì sao chưa có MUA & kho dữ liệu (v1.13.0, học từ bot OKX)
+
+**Chẩn đoán ngày 28/10/2026 (dữ liệu thật tới phiên 27/10, code của bot):** chưa có MUA không phải lỗi, mà là ba lớp lọc cùng chặn:
+
+- **Thị trường:** 250 phiên gần nhất (24/10/2025 - 27/10/2026) Quant Engine xếp VNINDEX vào **risk-off 213 phiên (85%)**, và
+  phiên risk-off nào cũng có từ 4 ngày phân phối trở lên trong 25 phiên (116 phiên risk-off chỉ vì ngày phân phối). Phiên 27/10:
+  9 ngày phân phối (ngưỡng 4). Risk-off chặn mọi lệnh MUA mới của engine và trừ 0,15 độ tin cậy.
+- **Phòng thủ** (chiến lược mặc định của tín hiệu thật) chỉ đầu tư khi VNINDEX trên MA200, kiểm tra cuối tuần: VNINDEX dưới MA200
+  từ 24/9 (27/10: 1.761,87 so với MA200 1.796,41, -1,9%) nên giữ tiền mặt. **Động lượng** dưới MA100 (1.783,30) cũng giữ tiền mặt.
+- **Cổng của từng mã:** 20 phiên gần nhất trên VN100, 58% cặp (mã, phiên) đang xu hướng giảm; kể cả khi coi thị trường là trung
+  tính, **không mã nào** đạt MUA: 405/600 cặp xu hướng tăng thiếu độ tin cậy 0,75, 159 cặp có R:R tới kháng cự gần nhất dưới 1,5
+  (nhịp hồi trong xu hướng tăng thường nằm sát đỉnh cũ), 33 cặp phá đỉnh không còn kháng cự để đo R:R. Sàn cắt lỗ 3% (23/10) gần
+  như không liên quan: bỏ nó, 250 phiên chỉ thêm 2 MUA.
+- **Các cổng có đang làm mất tiền không?** Trên VN100, 250 phiên: engine ra **15 MUA** (trên 24.750 cặp), 10 phiên sau trung bình
+  **-3,4%** (thua VNINDEX 3,5 điểm %); đi theo kế hoạch như sổ ảo: 14 lệnh khớp, **13 chạm cắt lỗ**, trung bình -0,90R.
+  **22 MUA bị chặn chỉ vì thị trường** cũng lỗ: 10 phiên sau **-4,4%**, thắng 27%; theo kế hoạch 19/22 chạm cắt lỗ, -0,64R.
+  Mẫu nhỏ, rổ VN100 hôm nay (thiên lệch sống sót), nhưng năm qua bộ lọc thị trường **không làm mất lệnh tốt**: nới cổng lúc này
+  không có cơ sở; cùng chiều với backtest 23/10 (nới ngày phân phối, R:R 1,2, tin cậy 0,65/0,70 đều xấu hơn).
+
+Vì vậy bot giờ **ghi lại và đo**, như bot OKX: mọi tín hiệu kể cả tín hiệu bị loại đều được theo dõi "bóng", và chỉ số đo mới được
+dùng để quyết định đổi luật.
+
+- **Kho dữ liệu** (`vnbot/store.py`): SQLite `data/bot.db` trên máy chủ (mặc định), hoặc **PostgreSQL dùng chung** khi đặt
+  `DATABASE_URL` (Supabase/Neon free, chuỗi "Session pooler"): dữ liệu nằm ngoài máy chủ, không mất khi máy chủ bị xoá. Kiểm tra
+  trước bằng `python check_db.py`. Không kết nối được thì bot tự dùng SQLite và báo trên trang `/dulieu`; kho lỗi không bao giờ làm
+  dừng bot. Các file JSON (sổ ảo, Tài sản, cài đặt) vẫn là nguồn chính như trước. Bảng: `signals` (quyết định từng mã mỗi lượt quét),
+  `scans` (phễu của mỗi lượt), `market` (VNINDEX mỗi phiên), `equity` và `fills` (NAV và lệnh khớp các sổ, không bị cắt ở 500 lệnh),
+  `events` (nhật ký hoạt động), `kv`.
+- **Cổng chặn MUA** (`policy.BUY_GATES`): mỗi quyết định ghi cổng đầu tiên mã trượt (xu hướng giảm, mâu thuẫn, chưa rõ xu hướng, độ tin
+  cậy, thị trường risk-off, phiên rủi ro, dữ liệu cũ, không tính được stop, phá đỉnh chưa đo được R:R, R:R dưới ngưỡng) và mọi cổng nó
+  trượt, cùng **quyết định nếu thị trường trung tính** (cùng code, chỉ nhấc cổng thị trường). Chỉ để ghi: quyết định, lệnh và mức giá
+  của bot không đổi (đã so 4.000 quyết định trên dữ liệu thật, cả mã đang giữ và chưa giữ: giống hệt bản cũ).
+- **Suýt MUA:** chỉ vướng thị trường; hoặc độ tin cậy cách ngưỡng ≤ 0,05; R:R cách ngưỡng ≤ 0,3; hoặc phá đỉnh chưa đo được R:R.
+- **Kết quả bóng** (`vnbot/chandoan.py`): mỗi tối, mã-phiên đủ phiên được chấm: giá 5/10/20 phiên sau tính từ giá mở cửa phiên kế
+  tiếp, so với VNINDEX cùng khoảng; lệnh MUA (và MUA bị chặn vì thị trường) đi theo kế hoạch như sổ ảo: lệnh giới hạn tại cận trên
+  vùng mua một phiên, bán được từ T+2, cắt lỗ (giá mở cửa dưới cắt lỗ thì bán ở giá mở cửa) hoặc mục tiêu, tối đa 30 phiên, tính bằng
+  R sau phí (1R = từ cận trên vùng mua tới cắt lỗ, khoảng sổ ảo dùng để tính khối lượng). Thống kê theo nhóm (MUA thật, bị chặn vì thị trường, suýt MUA khác, theo cổng) kèm **t**: một nhóm chỉ nói lên điều gì
+  khi có ≥ 30 mẫu và |t| ≥ 2 (bài học của bot OKX: học trên 13-20 mẫu là học nhiễu). **Bot không tự nới cổng nào.**
+- **Dựng lại lịch sử:** trang `/dulieu` hoặc `/vikhongmua dunglai 120 [vn100]`: engine quyết định lại từng mã ở từng phiên đã qua
+  (tối đa 250 phiên; giá điều chỉnh tới hôm nay, rổ mã hôm nay, không tin tức/dòng tiền), ghi với nguồn `replay` rồi chấm kết quả
+  bóng, để có số đo ngay ngày đầu. VN30 120 phiên khoảng 1-3 phút.
+- **Lượt sàng lọc 15:30** thêm một đoạn "🔎 Vì sao chưa có MUA": thị trường, cổng chặn nhiều nhất, mã suýt MUA.
+- **Trang `/tinhieu`:** phễu của lượt mới nhất, thị trường 8 phiên, mã suýt MUA, kết quả bóng theo nhóm và theo cổng, quyết định
+  từng mã, các lượt quét gần đây. **Trang `/dulieu`:** dung lượng, tải CSV (mở bằng Excel, đúng tiếng Việt) hoặc JSON từng bảng và
+  bản sao lưu toàn bộ, dựng lại lịch sử, **nhật ký hoạt động** (lọc theo mức và chữ).
+- **Che bí mật trong mọi dòng log** (console, kho, file tải về): token Telegram, khoá AI, mật khẩu web, `DATABASE_URL` và mật khẩu
+  của nó, Bearer, `sk-...` - bot OKX từng lộ token qua file sao lưu log nên bản này che ngay từ dòng log đầu tiên.
+- Biến: `DATABASE_URL` (bí mật, chỉ đặt trên Botkeep), `STORE` (1; 0 = tắt hẳn), `STORE_KEEP_DAYS` (730), `EVENTS_KEEP_DAYS` (14);
+  ba biến sau sửa được ở `/caidat`, nhóm **Lưu trữ dữ liệu**.
+
+**Những gì của bot OKX chưa đưa sang** (không hợp với bot ngày cho cổ phiếu VN hoặc cần đo trước): khoá leader cho hai máy chạy song
+song (Render + Botkeep), tự điều chỉnh tham số (bot này đã có hiệu chỉnh đêm thận trọng hơn), AI rút bài học sau mỗi lệnh, đổi chặn
+cứng thành giảm khối lượng (cần số đo kết quả bóng trước).
 
 ### Báo cáo tự động
 
@@ -449,6 +505,10 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `AI_PICK_BOT` | 1 | Thêm vào ứng viên các mã bot ước tính vừa đổi sang MUA (300 mã, cần `STV_MARKET=1`) |
 | `AI_PICK_ALERTS` | 5 | Số lần tối đa mỗi ngày AI xem tin khi có cảnh báo ⛔/🔴/🟠 cho mã đang giữ (0 = tắt) |
 | `AI_PICK_WEEKLY` | 1 | Tổng kết tuần sau phiên cuối tuần (0 = tắt) |
+| `DATABASE_URL` | - | PostgreSQL dùng chung cho kho dữ liệu (Supabase "Session pooler"); trống = SQLite `data/bot.db`. Kiểm tra: `python check_db.py` |
+| `STORE` | 1 | 0 = tắt kho dữ liệu (không ghi quyết định, kết quả bóng, nhật ký) |
+| `STORE_KEEP_DAYS` | 730 | Số ngày giữ quyết định, lượt quét, VNINDEX, NAV |
+| `EVENTS_KEEP_DAYS` | 14 | Số ngày giữ nhật ký hoạt động trên trang `/dulieu` |
 
 ## 10. Giới hạn và xử lý sự cố
 
@@ -468,7 +528,8 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `/khop` báo sổ tài khoản thật bị hỏng | File `real.json` hỏng đã được chuyển sang `real.json.corrupt-...` (không xoá). Đổi tên lại thành `real.json` sau khi sửa, hoặc xoá file đó để bắt đầu sổ mới |
 | Link báo cáo trong Telegram thiếu | Đặt `PUBLIC_URL` |
 | `/hieuchinh` báo "chưa chạy" | Hiệu chỉnh chạy sau phiên đầu tiên lúc `TRADE_TIME`; cần đủ 80 phiên lịch sử |
-| Bot không đặt lệnh nhiều ngày | Bình thường khi VNINDEX risk-off; xem lý do bằng `/nhanh MÃ` |
+| Bot không đặt lệnh nhiều ngày | Bình thường khi VNINDEX risk-off hoặc dưới MA200; xem `/vikhongmua` (thị trường, cổng chặn, mã suýt MUA, kết quả bóng) hoặc trang `/tinhieu`; một mã: `/nhanh MÃ` |
+| Trang `/dulieu` báo dùng SQLite dù đã đặt `DATABASE_URL` | Chuỗi kết nối sai hoặc Supabase đang tạm dừng: chạy `python check_db.py`, lấy chuỗi "Session pooler" (không phải Direct connection), mã hoá URL ký tự đặc biệt của mật khẩu |
 
 ## 11. Phiên bản
 
@@ -505,6 +566,7 @@ Kết quả `18/18 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `stv`, `stv_catchup`, `stv_morning` | Siêu tín hiệu: lấy tín hiệu lịch sự, sổ ảo so sánh, bản tin sáng, tài khoản thật riêng, gửi Zoom rồi Telegram |
 | `version` | Số phiên bản trên web và Telegram/Zoom, mã bản dựng, báo khi cập nhật |
 | `review_2026_10_23` | Các lỗi sửa ngày 23/10/2026 (xem `BAO_CAO_RA_SOAT_2026-10-23.md`): Output Guard, khối ngoại khớp lệnh, cache giá ngày nghỉ, chấm điểm bộ nhớ, hạn mức AI, Zoom |
+| `store` | Kho dữ liệu (SQLite, migration, chọn dòng cho thống kê), cổng chặn MUA và quyết định khi nhấc cổng thị trường, kế hoạch bóng (T+2, khoảng trống giá, không khớp), kết quả 5/10/20 phiên, thống kê và t, che bí mật trong log, trang `/tinhieu` `/dulieu`, tải CSV/JSON, lệnh `/vikhongmua` |
 | `web`, `security_web`, `security_zoom`, `security_telegram` | Mật khẩu web, chặn POST chéo trang, giới hạn kích thước request, chữ ký Zoom, ghép đôi Zoom, chỉ người được phép mới ra lệnh Telegram, token không lộ trong log |
 
 Một số kiểm tra so với **số đã ghi lại** (ví dụ kết quả chiến lược Phòng thủ trên dữ liệu giả lập). Sửa chiến lược **có chủ đích** thì kiểm tra đó báo đổi: xem lại số mới rồi cập nhật trong file bộ kiểm thử. Bot không bao giờ chạy bộ kiểm thử; script tạo gói Botkeep bỏ thư mục `tests/` ra (có upload kèm cũng không sao).
