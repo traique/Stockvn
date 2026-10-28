@@ -326,7 +326,12 @@ check("/stv MÃ: header and latest signal with the plan below",
       and rep.split("\n")[2].startswith("   mục tiêu "), rep)
 check("/stv MÃ: both results, one per bullet", "• Theo giá tín hiệu: " in rep and "• Làm được thật: " in rep
       and "lệnh gần nhất (trang → thật):" in rep, rep)
-check("/stv MÃ: regenerated history flagged", "⚠️ Lịch sử tới 03/10 do trang tạo lại" in rep, rep)
+check("/stv MÃ: regenerated history flagged", f"⚠️ Lịch sử tới {external._ddmm('2026-10-03')} do trang tạo lại" in rep, rep)
+_now = external._now
+external._now = lambda: datetime(2026, 10, 28, 20, 0, tzinfo=vn_rules.VN_TZ)
+check("dd/mm: the year only for another year (a year-old signal must not read as recent)",
+      external._ddmm("2026-10-03") == "03/10" and external._ddmm("2025-10-03") == "03/10/25")
+external._now = _now
 check("/stv MÃ: says whether it is in the watchlist", "👀 Có trong watchlist Siêu tín hiệu." in rep, rep)
 check("/stv MÃ: short lines", max(len(line) for line in rep.splitlines()) <= 90, max(rep.splitlines(), key=len))
 
