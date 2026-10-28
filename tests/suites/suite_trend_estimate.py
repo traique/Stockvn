@@ -1,6 +1,7 @@
 """The bot's estimate of sieutinhieu.vn's in-session trend changes (vnbot.trend_estimate):
 the levels, the rule, the real levels of 22/10/2026, the scan's alerts (holdings, watchlist,
 one alert a stock and side, the close that does not keep a change), /stvdoichieu (offline)."""
+import dataclasses
 import json
 import os
 import tempfile
@@ -198,6 +199,15 @@ t.ok("FPT test series: the rule agrees with the site (SELL)", fpt_lv["rule"] == 
 FPT_STILL, FPT_UP = int(fpt_lv["buy_above"]) - 300, int(fpt_lv["buy_above"]) + 300
 PRICES.update({"HDB": 21_950, "MSR": 63_300, "FPT": FPT_STILL, "GEX": 13_700})
 at(9, 54)
+# 🟠 (a held stock past its level, the bot's own estimate) is not pushed by default since v1.5.0:
+# kept for its shadow result. The rest of this scenario runs with INTRADAY_EARLY=1, which pushes it.
+quiet = bot.stv_scan()
+t.ok("scan, INTRADAY_EARLY=0: the held stock's estimate is kept for its shadow result, not pushed",
+     quiet is None and any(r["symbol"] == "HDB" and r["level"] == "early" for r in bot.taisan.state()["shadow"]), quiet)
+_sent = external.SellAlerts(DATA)._read()
+_sent.pop("HDB", None)
+external.SellAlerts(DATA).path.write_text(json.dumps(_sent), encoding="utf-8")
+bot.settings = dataclasses.replace(bot.settings, intraday_early=True)
 scan1 = bot.stv_scan()
 print(scan1)
 t.ok("scan: a held stock past its level -> the holdings block, as the bot's estimate",
@@ -225,10 +235,11 @@ PRICES.update({"MSR": 61_800, "FPT": FPT_UP})
 at(10, 15)
 scan2 = bot.stv_scan()
 print(scan2)
-t.ok("scan: the watchlist's estimates in their own block, both sides",
+t.ok("scan: the watchlist's estimates in their own block, both sides (price, % on the reference, level)",
      scan2 and "🧮 Bot ước tính đổi chiều trong phiên (giá đã qua mức đổi chiều; chưa chốt)" in scan2
-     and "🔴 MSR MUA → BÁN · giá 61.800 < mức 61.942" in scan2
-     and f"🟢 FPT BÁN → MUA · giá {T._fmt(FPT_UP)} > mức {T._fmt(fpt_lv['buy_above'])}" in scan2
+     and "🔴 MSR\n   MUA → BÁN · giá 61.800 (-" in scan2 and "%) · mức đổi chiều 61.942" in scan2
+     and f"🟢 FPT\n   BÁN → MUA · giá {T._fmt(FPT_UP)} (+" in scan2
+     and f"%) · mức đổi chiều {T._fmt(fpt_lv['buy_above'])}" in scan2
      and "chi tiết: /stvdoichieu" in scan2 and "HDB" not in scan2, scan2)
 LIVE["SELL"] = [{"symbol": "MSR", "side": "SELL", "day": "2026-10-22", "at": "2026-10-22T10:01", "price": 61_800,
                  "now": 61_700, "from": "BUY", "stage": "intraday"}]

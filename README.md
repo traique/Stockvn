@@ -555,7 +555,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `18/18 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `21/21 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
