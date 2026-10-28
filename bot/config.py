@@ -80,7 +80,10 @@ class Config:
     RISK_PER_TRADE = _f("RISK_PER_TRADE", 0.03)        # % vốn mất khi chạm SL (lệnh chất lượng chuẩn)
     RISK_MAX_MULT = _f("RISK_MAX_MULT", 1.5)           # lệnh rất đẹp (AI ≥ 80, điểm ≥ 7) được tối đa 1.5× rủi ro cơ bản
     RISK_MIN_MULT = _f("RISK_MIN_MULT", 0.35)          # không bao giờ xuống dưới 35% rủi ro cơ bản
-    LOSS_STREAK_CUT = _f("LOSS_STREAK_CUT", 0.7)       # mỗi lệnh thua liên tiếp (từ lệnh thứ 2) nhân rủi ro với 0.7
+    LOSS_STREAK_CUT = _f("LOSS_STREAK_CUT", 0.7)       # mỗi lệnh thua liên tiếp (từ lệnh thứ LOSS_STREAK_FROM) nhân rủi ro với 0.7
+    # v3.2: co từ lệnh thua thứ 3 (trước: thứ 2). 4 lệnh thua liên tiếp là bình thường với tỉ lệ thắng ~40%; co quá sớm
+    # làm bot vào rất nhỏ đúng lúc thị trường đổi chiều (5 ngày chạy ảo: 2 lệnh long cuối chỉ còn 0.35× rủi ro).
+    LOSS_STREAK_FROM = _i("LOSS_STREAK_FROM", 3)
     MAX_OPEN_POSITIONS = _i("MAX_OPEN_POSITIONS", 2)   # tối đa 2 lệnh, nhưng tổng rủi ro đang mở ≤ MAX_TOTAL_RISK
     MAX_TOTAL_RISK = _f("MAX_TOTAL_RISK", 0.05)        # tổng % vốn có thể mất nếu mọi lệnh đang mở chạm SL
     MIN_LOT_RISK_MULT = _f("MIN_LOT_RISK_MULT", 2.0)   # lot tối thiểu của sàn làm rủi ro vượt 2× dự tính → bỏ tín hiệu
@@ -129,11 +132,22 @@ class Config:
     BREAKOUT_VOL = _f("BREAKOUT_VOL", 1.5)
     MAX_EXT_ATR = _f("MAX_EXT_ATR", 1.0)               # giá cách EMA21 tối đa (ATR) – chống đuổi giá (backtest: >1 ATR lỗ)
     MAX_SL_ATR = _f("MAX_SL_ATR", 3.0)                 # SL theo cấu trúc xa hơn mức này → bỏ tín hiệu
-    BTC_GATE_CHG = _f("BTC_GATE_CHG", 0.6)             # BTC giảm/tăng quá % này trong 1h → cấm long/short altcoin
+    # v3.2: 0.6 → 0.3. 211 tín hiệu bóng: short khi BTC đang +0.3%/1h trở lên cho -0.60R (n=27, thắng 22%).
+    BTC_GATE_CHG = _f("BTC_GATE_CHG", 0.3)             # BTC giảm/tăng quá % này trong 1h → cấm long/short altcoin
+    # v3.2: không đánh ngược nhịp 1h của chính coin – short khi coin vừa tăng ≥0.5% trong 1h (hoặc long khi vừa giảm)
+    # là "bắt đỉnh của nhịp hồi": 56 tín hiệu bóng cho -0.72R, thắng 18%; nhóm còn lại -0.13R.
+    CHASE_1H_PCT = _f("CHASE_1H_PCT", 0.5)
+    # v3.2: volume nến tín hiệu ≥ 1.5× trung bình là cao trào (climax), không phải xác nhận: 31 tín hiệu bóng -0.68R,
+    # thắng 16% (volume < 1.5×: -0.16R). Trừ điểm thay vì cộng, và luật climax_volume chặn sẵn.
+    CLIMAX_VOL = _f("CLIMAX_VOL", 1.5)
+    # v3.2: ADX 1h ≥ 35 = xu hướng đã chạy lâu, vào lúc này là vào muộn: 76 short bóng -0.44R (ADX 1h < 35: -0.22R).
+    LATE_TREND_ADX = _f("LATE_TREND_ADX", 35)
     WICK_CLOSE_POS = _f("WICK_CLOSE_POS", 0.6)         # long: nến tín hiệu đóng >= 60% biên độ (short: <= 40%)
     # Luật chặn sẵn từ đầu (bộ tự học vẫn theo dõi bóng và tự gỡ nếu thực tế có lãi)
     # v3.1: chặn thêm phiên 0h–7h (giờ VN): 14 tín hiệu bóng chỉ thắng 1, kỳ vọng -0.89R. Bộ tự học sẽ gỡ nếu bóng có lãi.
-    DEFAULT_BLOCKS = [x.strip() for x in os.getenv("DEFAULT_BLOCKS", "setup_range,night_session").split(",") if x.strip()]
+    # v3.2: chặn thêm 13h–19h VN (06–12 UTC): lỗ ở backtest 10 ngày lẫn 5 ngày chạy ảo (-0.33..-0.76R mỗi khung 2h),
+    # và nến volume cao trào (climax_volume). 14h–16h UTC (21h–23h VN, Mỹ mở cửa) là khung duy nhất có lãi rõ (+0.42R, n=27).
+    DEFAULT_BLOCKS = [x.strip() for x in os.getenv("DEFAULT_BLOCKS", "setup_range,night_session,afternoon_session,climax_volume").split(",") if x.strip()]
     # Setup RANGE: đảo chiều tại biên Bollinger khi 1h đi ngang (có lệnh cả lúc thị trường sideway)
     RANGE_ENABLED = _b("RANGE_ENABLED", "true")
     RANGE_MAX_HTF_ADX = _f("RANGE_MAX_HTF_ADX", 25)      # ADX 1h phải dưới mức này
@@ -193,7 +207,10 @@ class Config:
     # ---- Tự học ----
     LEARN_MODE = os.getenv("LEARN_MODE", "").strip().lower()  # auto | suggest | off (trống: paper=auto, live=suggest)
     LEARN_MIN_SAMPLES = _i("LEARN_MIN_SAMPLES", 30)           # số tín hiệu tối thiểu trước khi thay đổi gì
-    LEARN_MIN_T = _f("LEARN_MIN_T", 1.3)                      # |kỳ vọng| / sai số chuẩn ≥ 1.3 (≈90%) mới coi là khác 0
+    # v3.2: 1.3 → 2.0. Với t ≥ 1.3 (p một phía ≈ 0.10) và ~25 nhóm được so cùng lúc, bộ tự học "học" nhiễu rồi đảo ngược
+    # sau 48h (5 ngày chạy ảo: trọng số pullback 1.0→1.2→1.0, vwap 1.0→1.17→0.97, chặn cả phía short sau 2 ngày xấu).
+    LEARN_MIN_T = _f("LEARN_MIN_T", 2.0)                      # |kỳ vọng| / sai số chuẩn ≥ 2.0 (≈97.5% một phía) mới coi là khác 0
+    LEARN_EXIT_MIN_SAMPLES = _i("LEARN_EXIT_MIN_SAMPLES", 60)  # đổi cách thoát lệnh cần ≥ 60 tín hiệu so theo cặp
     LEARN_COOLDOWN_H = _f("LEARN_COOLDOWN_H", 48)             # mỗi tham số đổi tối đa 1 lần / 48h (chống nhảy qua lại)
     LEARN_WINDOW_DAYS = _i("LEARN_WINDOW_DAYS", 21)           # chỉ học từ dữ liệu N ngày gần nhất
 

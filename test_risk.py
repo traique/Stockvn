@@ -12,21 +12,22 @@ sig = Signal("X/USDT:USDT", "long", 6.0, 100.0, 1.0, 97.0, 106.0, [], {})
 
 # 1) hệ số chất lượng
 assert R.quality_mult(sig, {"confidence": 70}) == 1.0
-assert R.quality_mult(Signal("X", "long", 7.5, 100, 1, 97, 106), {"confidence": 85}) == 1.25 * 1.2
+assert R.quality_mult(Signal("X", "long", 7.5, 100, 1, 97, 106), {"confidence": 85}) == 1.2      # v3.2: điểm KT không tăng rủi ro
 assert R.quality_mult(sig, {"confidence": 55, "weak": True}) == 0.5
 assert R.quality_mult(sig, {"confidence": 40, "override": True}) == 0.5
 assert R.quality_mult(sig, {"fallback": True}) == 0.6
-assert R.quality_mult(Signal("X", "long", 5.0, 100, 1, 97, 106), {"confidence": 62}) == 0.8 * 0.85
-print("✓ hệ số chất lượng (điểm KT × AI)")
+assert R.quality_mult(Signal("X", "long", 5.0, 100, 1, 97, 106), {"confidence": 62}) == 0.85    # v3.2: điểm thấp không giảm
+print("✓ hệ số chất lượng (chỉ AI, không theo điểm KT)")
 
-# 2) chuỗi thua: lệnh thua thứ 2 trở đi mới co
+# 2) chuỗi thua: v3.2 – lệnh thua thứ LOSS_STREAK_FROM (3) trở đi mới co
 L, W = {"pnl": -1}, {"pnl": 1}
+assert cfg.LOSS_STREAK_FROM == 3
 assert R.streak_mult([W, L, L]) == 1.0
-assert R.streak_mult([L]) == 1.0
-assert abs(R.streak_mult([L, L]) - cfg.LOSS_STREAK_CUT) < 1e-9
-assert abs(R.streak_mult([L, L, L, W, L]) - cfg.LOSS_STREAK_CUT ** 2) < 1e-9
-assert R.risk_mult(sig, {"confidence": 40, "override": True}, [L] * 6) == cfg.RISK_MIN_MULT      # kẹp sàn
-assert R.risk_mult(Signal("X", "long", 8, 100, 1, 97, 106), {"confidence": 90}, []) == cfg.RISK_MAX_MULT  # kẹp trần
+assert R.streak_mult([L]) == 1.0 and R.streak_mult([L, L]) == 1.0
+assert abs(R.streak_mult([L, L, L]) - cfg.LOSS_STREAK_CUT) < 1e-9
+assert abs(R.streak_mult([L, L, L, L, W, L]) - cfg.LOSS_STREAK_CUT ** 2) < 1e-9
+assert R.risk_mult(sig, {"confidence": 40, "override": True}, [L] * 7) == cfg.RISK_MIN_MULT      # kẹp sàn
+assert R.risk_mult(Signal("X", "long", 8, 100, 1, 97, 106), {"confidence": 90}, []) == 1.2          # AI ≥ 80 → 1.2×
 print("✓ chuỗi thua & kẹp [%.2f, %.2f]" % (cfg.RISK_MIN_MULT, cfg.RISK_MAX_MULT))
 
 # 3) khối lượng: chạm SL mất đúng RISK × mult × vốn (gồm phí)

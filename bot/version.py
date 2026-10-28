@@ -16,13 +16,21 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.1.0"
-RELEASED = "2026-10-23"
-RELEASE_BUILD = "fbe3095"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.2.0"
+RELEASED = "2026-10-28"
+RELEASE_BUILD = "380dfca"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.2.0", "2026-10-28", (
+        "Rút từ 211 tín hiệu bóng 23–27/10: cổng mới không đánh ngược nhịp 1h của coin (short khi vừa tăng ≥0.5%/1h: -0.72R, thắng 18%)",
+        "Volume cao trào ≥1.5× và ADX 1h ≥35 bị TRỪ điểm thay vì cộng; chặn sẵn phiên 13h–19h VN và nến cao trào; cổng BTC 0.3%",
+        "Rủi ro không tăng theo điểm hợp lưu (điểm ≥7 thua nặng nhất); co rủi ro từ lệnh thua thứ 3 thay vì thứ 2",
+        "Bộ tự học: cần t ≥ 2.0 (trước 1.3), không bao giờ chặn cả một phía, đổi cách thoát cần ≥60 cặp, thống kê nhóm theo mốc hybrid cố định",
+        "Tham số bộ tự học của bản cũ (chặn short, exit trail, MIN_SCORE 5.5, trọng số trigger) tự về mặc định 1 lần khi khởi động",
+        "Bảo mật: che token/khoá/mật khẩu DB trong mọi dòng log và file sao lưu (bản cũ lộ token Telegram khi lỗi mạng) – hãy đổi token Telegram",
+    )),
     ("3.1.0", "2026-10-23", (
         "Rủi ro 3%/lệnh × hệ số chất lượng (điểm KT, AI, chuỗi thua), tối đa 2 lệnh – tổng rủi ro ≤ 5%, cầu dao 12%/ngày, 30% DD",
         "Bắt nhạy hơn: điểm tối thiểu 5.0, volume 0.7, quét 50 coin, hỏi AI 3 ứng viên, trigger bật tại VWAP",

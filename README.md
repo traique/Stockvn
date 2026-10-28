@@ -17,6 +17,8 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 | Đủ biến động | ATR ≥ 0.35% giá |
 | Có volume | Volume nến tín hiệu ≥ trung bình 20 nến |
 | Không đuổi giá | Giá cách EMA21 không quá 2 ATR |
+| Không ngược nhịp 1h (v3.2) | Short khi coin vừa tăng ≥ 0.5% trong 1h (long: vừa giảm) → loại. 56 tín hiệu bóng kiểu này: −0.72R, thắng 18% |
+| Cổng BTC (v3.2) | BTC đang tăng/giảm ≥ 0.3%/1h hoặc xu hướng 1h ngược → cấm short/long altcoin |
 | RSI hợp lý | Long: 45–70, Short: 30–55 |
 | Nến tín hiệu đúng màu | Long phải là nến tăng, Short phải là nến giảm |
 
@@ -132,7 +134,7 @@ python run.py
    - bật/tắt luật chặn trong danh mục cố định (vd. "short khi RSI 1h < 32") – chặn ở bộ lọc thì không tốn lượt AI;
    - trọng số từng trigger (0,6 – 1,4);
    - ngưỡng điểm MIN_SCORE (4,0 – 7,0, mỗi lần ±0,5).
-   Mỗi tham số chỉ đổi tối đa 1 lần/48h (`LEARN_COOLDOWN_H`). Luật đã chặn vẫn được theo dõi bóng, nên nếu nhóm đó tốt lên bot sẽ tự bỏ chặn. (v3.1: trước đây 13–20 mẫu đã đổi, trọng số trigger nhảy qua lại trong 1 ngày – nay không còn.)
+   Mỗi tham số chỉ đổi tối đa 1 lần/48h (`LEARN_COOLDOWN_H`). v3.2: `LEARN_MIN_T` = 2,0; không bao giờ chặn cả một phía (long_side/short_side chỉ để thống kê); cách thoát lệnh cần ≥ `LEARN_EXIT_MIN_SAMPLES` = 60 cặp. Luật đã chặn vẫn được theo dõi bóng, nên nếu nhóm đó tốt lên bot sẽ tự bỏ chặn. (v3.1: trước đây 13–20 mẫu đã đổi, trọng số trigger nhảy qua lại trong 1 ngày – nay không còn.)
 3. Mỗi sáng (7h) AI đọc thống kê, viết nhận xét và gợi ý – **không tự áp dụng**, anh bấm "Áp dụng" nếu đồng ý. Tốn 1 lượt AI/ngày.
 4. Chạy ảo: tự áp dụng. Chạy thật: chỉ đề xuất, anh duyệt trên web hoặc gõ `/apply` trên Telegram. Nút "Khôi phục mặc định" đưa mọi thứ về ban đầu.
 
@@ -230,6 +232,28 @@ Mục tiêu là **lợi nhuận kỳ vọng** = tỉ lệ thắng × lãi trung 
 - **Nhiều cơ hội hơn**: quét `TOP_N_COINS=50`; AI từ chối ứng viên #1 thì hỏi #2, #3 (`AI_CANDIDATES_PER_SCAN=3`).
 - **Setup range** (đảo chiều tại biên Bollinger khi 1h đi ngang, TP = dải giữa): đã có, nhưng chặn sẵn (`setup_range`) vì chưa đủ dữ liệu chứng minh có lãi; bộ tự học gỡ khi có lãi.
 - **AI**: đánh giá theo lợi nhuận kỳ vọng; `confidence` khi đồng ý = điểm chất lượng (50 = trung bình), duyệt khi ≥ `AI_MIN_CONFIDENCE` = 60.
+
+## Học từ 5 ngày chạy ảo (v3.2)
+Rút từ 211 tín hiệu bóng có kết quả (23–27/10/2026, v3.1): kỳ vọng chung −0,24R, thắng 38%; 190 short / 21 long; lệnh thật +9,3%
+chỉ nhờ 2 ngày giảm mạnh đầu tiên, 3 ngày sau short thua 24%. Những gì dữ liệu nói rõ (n ≥ 27, khoảng tin cậy 90% không chứa 0):
+- **Short khi coin vừa tăng ≥ 0.5%/1h** (bắt đỉnh nhịp hồi): −0,72R, thắng 18% (n=56); nhóm còn lại −0,13R → **cổng mới `CHASE_1H_PCT`**.
+- **Volume nến tín hiệu 1,5–2,5×**: −0,68R, thắng 16% (n=31); dưới 1,5×: −0,16R → **trừ điểm + luật `climax_volume` chặn sẵn** (trước đây được CỘNG điểm).
+- **ADX 1h ≥ 35** (xu hướng đã chạy lâu): short −0,44R (n=76) so với −0,22R → **trừ 1 điểm** (trước đây "ADX mạnh" được cộng).
+- **Short khi BTC đang +0,3%/1h trở lên**: −0,60R (n=27) → **`BTC_GATE_CHG` 0,6 → 0,3**.
+- **13h–19h VN** (06–12 UTC) lỗ ở mọi khung 2h; **21h–23h VN** (Mỹ mở cửa) là khung duy nhất lãi rõ (+0,42R, n=27) → **chặn sẵn `afternoon_session`**.
+- **Điểm hợp lưu ngược dự báo**: điểm ≥ 7 thua nặng nhất (−0,33R, thắng 25%, n=20), điểm < 5 gần hoà → **rủi ro không còn tăng theo điểm** (`risk.quality_mult` chỉ theo AI).
+- **Bộ tự học tự thắt cổ bot**: với t ≥ 1,3 nó đổi trọng số trigger rồi đảo ngược sau 48h, chuyển hybrid→trail trên 31 mẫu (trên 211 mẫu hybrid vẫn hơn), rồi **chặn toàn bộ short** sau 2 ngày xấu → bot đứng im 2,5 ngày. Nay: `LEARN_MIN_T` 2,0, không bao giờ chặn cả một phía, đổi cách thoát cần ≥ 60 cặp, thống kê nhóm theo mốc hybrid cố định. Tham số học bằng ngưỡng cũ được **đưa về mặc định một lần** khi khởi động bản 3.2 (giữ ngưỡng phủ quyết AI).
+- **Chuỗi thua**: co rủi ro từ lệnh thua thứ 3 thay vì thứ 2 (4 lệnh thua liên tiếp là bình thường với tỉ lệ thắng 40%; co sớm làm bot vào 0,35× đúng lúc thị trường đổi chiều).
+
+Áp lại 4 bộ lọc mới lên chính 173 tín hiệu trend đó (R theo hybrid): còn 78 tín hiệu, +0,36R/tín hiệu, thắng 72%; 95 tín hiệu bị loại
+có −0,58R. Đây là kết quả **trên cùng dữ liệu dùng để chọn lọc** nên lạc quan hơn thực tế; nửa sau (25–27/10) chỉ từ −0,50R
+lên −0,13R. Cần chạy ảo thêm ≥ 2 tuần (≥ 150 tín hiệu bóng) trước khi tin.
+
+**Bảo mật**: bản cũ in nguyên URL Telegram (có token) khi lỗi mạng và file "sao lưu toàn bộ" kèm log đó. v3.2 che token / khoá API /
+mật khẩu DB trong mọi dòng log. Nếu anh đã chia sẻ file sao lưu của bản cũ: **đổi token qua @BotFather (`/revoke`)**.
+
+**Giới hạn vốn**: với 10 USDT, rủi ro 3%/lệnh là 0,30 USDT; kỳ vọng +0,3R và 1,5 lệnh/ngày cho ~4 USDT/tháng dù bot chạy đúng.
+Vốn 10 USDT chỉ để kiểm tra hệ thống, không để đo "hiệu quả đầu tư".
 
 ## Nhạy hơn nhưng ít rủi ro hơn (v3.1)
 Rút từ 2,8 ngày chạy ảo (80 tín hiệu bóng có kết quả, 4 lệnh đóng): điểm hợp lưu gần như không dự báo kết quả (điểm 6.x thua điểm 4.x), AI từ chối 90% nhưng không chọn tốt hơn ngẫu nhiên, phiên 0–7h thắng 1/14, bộ tự học đổi tham số trên 13–20 mẫu rồi đổi ngược lại.

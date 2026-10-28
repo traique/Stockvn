@@ -54,11 +54,19 @@ def _tstat(vals):
     return se, max(-99.0, min(99.0, m / se))
 
 
+def _ref_r(row):
+    """R dùng để so sánh các NHÓM tín hiệu: luôn theo cách thoát hybrid (mô phỏng song song trên mọi tín hiệu).
+    v3.2: outcome_r được gán theo cách thoát ĐANG DÙNG lúc có kết quả, nên khi bộ tự học đổi cách thoát giữa chừng
+    thì thống kê theo luật/trigger/điểm trộn hai cách thoát. Một mốc cố định mới so được."""
+    v = row.get("r_hybrid")
+    return v if v is not None else (row.get("outcome_r") or 0)
+
+
 def _agg(rows):
     n = len(rows)
     if not n:
         return {"n": 0, "win": 0, "winrate": 0, "exp_r": 0, "sum_r": 0, "se": 0, "t": 0}
-    rs = [r["outcome_r"] or 0 for r in rows]
+    rs = [_ref_r(r) for r in rows]
     wins = sum(1 for x in rs if x > 0)
     se, t = _tstat(rs)
     return {"n": n, "win": wins, "winrate": round(100 * wins / n, 1), "exp_r": round(sum(rs) / n, 3),
@@ -111,9 +119,35 @@ class Learner:
         saved = store.get("learned")
         if saved:
             strategy.LEARNED.update(saved)
+        self._migrate()
         self.last_stats = store.get("learn_stats")
         self.last_resolve = 0
         self.last_learn = 0
+
+    LEARNED_SCHEMA = 2
+
+    def _migrate(self):
+        """v3.2: tham số do bản cũ học với ngưỡng t ≥ 1.3 (học nhiễu) được đưa về mặc định một lần:
+        bỏ chặn cả phía (short_side/long_side), bỏ chặn luật học được, trả cách thoát / ngưỡng điểm / trọng số trigger
+        về mặc định. Giữ ngưỡng phủ quyết AI (được học nhất quán cả 2 lần) và TP1."""
+        L = strategy.LEARNED
+        if int(L.get("schema") or 1) >= self.LEARNED_SCHEMA:
+            return
+        old = {k: L.get(k) for k in ("blocks", "unblocked", "exit_mode", "min_score", "trigger_w")}
+        changed = any(old[k] for k in old)
+        L.update({"blocks": [], "unblocked": [], "exit_mode": None, "min_score": None, "trigger_w": {},
+                  "schema": self.LEARNED_SCHEMA})
+        self.store.set("learned", L)
+        if changed:
+            last = self.store.get("learn_last") or {}
+            for k in list(last):
+                if k.startswith(("rule:", "trig:")) or k in ("exit_mode", "min_score"):
+                    last.pop(k)
+            self.store.set("learn_last", last)
+            self.store.add_learn("migrate", "v3.2", old, {k: L[k] for k in old},
+                                 "v3.2: đưa tham số học bằng ngưỡng cũ (t ≥ 1.3) về mặc định; từ nay cần t ≥ 2.0 và "
+                                 "không chặn cả một phía", 0, 0, "applied")
+            log.info("Tự học: đã đưa tham số bản cũ về mặc định (v3.2): %s", old)
 
     # ================================================================ 1. kết quả bóng
     def resolve_pending(self):
@@ -319,7 +353,9 @@ class Learner:
         # a) luật lọc
         blocks = strategy.active_blocks()
         for k, v in st["by_rule"].items():
-            need = N * 2 if k in ("long_side", "short_side") else N
+            if k in strategy.NEVER_BLOCK:        # v3.2: không chặn cả phía – đó là regime, không phải luật
+                continue
+            need = N
             if v["n"] < need or self._cool("rule:" + k):
                 continue
             if k not in blocks and _confident(v, -0.25, need):
@@ -360,10 +396,13 @@ class Learner:
         # d) cách thoát lệnh (chỉ khi EXIT_MODE=auto)
         ec = st.get("exit_compare") or {}
         both = [r for r in tech if all(r.get(f"r_{m}") is not None for m in exits.MODES)]
-        if cfg.EXIT_MODE == "auto" and len(both) >= max(N, 30) and not self._cool("exit_mode"):
+        # v3.2: cần ≥ LEARN_EXIT_MIN_SAMPLES (60) cặp – bản cũ đổi hybrid→trail trên 31 tín hiệu của 2 ngày thuận,
+        # trong khi trên 211 tín hiệu hybrid vẫn nhỉnh hơn trail.
+        need_exit = max(N, cfg.LEARN_EXIT_MIN_SAMPLES)
+        if cfg.EXIT_MODE == "auto" and len(both) >= need_exit and not self._cool("exit_mode"):
             cur = L.get("exit_mode") or "hybrid"
             best = max(exits.MODES, key=lambda m: ec["modes"][m]["exp_r"])
-            ok, _ = _paired([r[f"r_{best}"] - r[f"r_{cur}"] for r in both], 0.25, max(N, 30))
+            ok, _ = _paired([r[f"r_{best}"] - r[f"r_{cur}"] for r in both], 0.25, need_exit)
             if best != cur and ok:
                 proposals.append(dict(kind="exit_mode", key="exit_mode", old=cur, new=best, n=ec["n"], exp=ec["modes"][best]["exp_r"],
                                       reason=f"Cách thoát \"{EXIT_NAMES[best]}\" cho {ec['modes'][best]['exp_r']:+.2f}R/tín hiệu so với \"{EXIT_NAMES[cur]}\" {ec['modes'][cur]['exp_r']:+.2f}R trên {ec['n']} tín hiệu → chuyển"))
@@ -481,7 +520,7 @@ class Learner:
         old = dict(strategy.LEARNED)
         strategy.LEARNED.clear()
         strategy.LEARNED.update({"min_score": None, "trigger_w": {}, "blocks": [], "unblocked": [], "exit_mode": None,
-                                 "ai_veto_conf": None, "tp1_r": None})
+                                 "ai_veto_conf": None, "tp1_r": None, "schema": self.LEARNED_SCHEMA})
         self.store.set("learned", strategy.LEARNED)
         self.store.set("learn_last", {})
         self.store.add_learn("reset", "all", old, strategy.LEARNED, "Khôi phục tham số mặc định (thủ công)", 0, 0, "applied")

@@ -8,14 +8,11 @@ from .config import cfg
 
 
 def quality_mult(sig, ai):
-    """Hệ số rủi ro theo chất lượng tín hiệu (1.0 = lệnh chuẩn: điểm ~6, AI đồng ý ≥ AI_MIN_CONFIDENCE)."""
+    """Hệ số rủi ro theo chất lượng tín hiệu (1.0 = lệnh chuẩn: AI đồng ý ≥ AI_MIN_CONFIDENCE).
+    v3.2: KHÔNG tăng rủi ro theo điểm hợp lưu nữa – 211 tín hiệu bóng: điểm ≥ 7 thua nặng nhất (-0.33R, thắng 25%),
+    điểm < 5 gần hoà (-0.05R). Điểm cao = xu hướng đã rõ với mọi người = vào muộn. Chỉ còn AI và chuỗi thua điều tiết."""
     ai = ai or {}
     m = 1.0
-    score = float(getattr(sig, "score", 0) or 0)
-    if score >= 7.0:
-        m *= 1.25
-    elif score < 5.5:
-        m *= 0.8
     conf = ai.get("confidence")
     if ai.get("fallback"):                       # AI lỗi – vào theo điểm KT
         m *= 0.6
@@ -34,7 +31,7 @@ def quality_mult(sig, ai):
 
 
 def streak_mult(closed_recent):
-    """Giảm rủi ro sau chuỗi thua: lệnh thua liên tiếp thứ 2 trở đi nhân LOSS_STREAK_CUT mỗi lệnh.
+    """Giảm rủi ro sau chuỗi thua: từ lệnh thua liên tiếp thứ LOSS_STREAK_FROM trở đi nhân LOSS_STREAK_CUT mỗi lệnh.
     closed_recent: các lệnh đã đóng, MỚI NHẤT TRƯỚC."""
     streak = 0
     for t in closed_recent or []:
@@ -42,7 +39,7 @@ def streak_mult(closed_recent):
             streak += 1
         else:
             break
-    return cfg.LOSS_STREAK_CUT ** max(0, streak - 1)
+    return cfg.LOSS_STREAK_CUT ** max(0, streak - (cfg.LOSS_STREAK_FROM - 1))
 
 
 def risk_mult(sig, ai, closed_recent=None):
