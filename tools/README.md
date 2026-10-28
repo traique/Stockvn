@@ -63,3 +63,15 @@ R trung bình mỗi ngày) vì các tín hiệu cùng ngày tương quan mạnh;
 python tools/backtest_sessions.py --days 90 --top 30 --cache .bt_cache --out bt_result.json > bt_report.md
 python tools/backtest_sessions.py --report bt_result.json
 ```
+
+### Kết quả lần 1 (28/10/2026 – 30/07 → 28/10/2026, 30 coin, phí + trượt 0,15%/lệnh, bot v3.1.0)
+
+| | n | R/lệnh | t_ngày | Kết luận |
+|---|---|---|---|---|
+| A. Phá giả biên 4h – cách thoát tốt nhất (trail) | 7491 | −0,33 | −11,7 | **Không dùng.** Âm ở mọi mốc giờ, mọi phiên, mọi cách thoát, cả 2 nửa thời gian |
+| B. Tín hiệu bot đạt điểm, thoát trail | 1316 | +0,05 | −0,9 | Gần hoà vốn trước AI; trail > hybrid (−0,01) ≈ fixed (+0,01) |
+| B. LONG / SHORT (trail) | 646 / 670 | +0,17 / −0,08 | +0,5 / −2,7 | SHORT yếu ổn định theo ngày |
+| B. Giờ VN 13h–19h (bộ tự học đang chặn) | 334 | +0,04 | −0,6 | Không tệ hơn các khung khác → luật chặn là nhiễu 31 mẫu |
+| B. 21–24h UTC (4h–7h VN) | 135 | −0,20 | −1,3 | Khung yếu nhất – nằm trong luật chặn đêm sẵn có |
+| C. Vị trí so với vùng giá trị / khoảng tới POC | | ±0,1 | \|t\| < 1,6 | Không tách được tín hiệu tốt/xấu |
+| C. TP tại mức VP kế tiếp vs trail (cùng 249 tín hiệu) | 249 | +0,05 vs +0,17 | | TP theo VP kém hơn trail |
