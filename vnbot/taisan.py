@@ -55,10 +55,14 @@ ALERT_LEVELS = {
     "dat": ("🔺", "Vào vùng Đắt", "giá ≥ Bull của thẻ định giá anh nhập"),
 }
 UP_IS_RIGHT = ("re",)        # right when the price is higher 10 sessions later; every other level when lower
+ZONE_LEVELS = ("re", "dat")  # the valuation cards' zones (stocks often not held), kept apart from the holdings' alerts
+SHADOW_ROWS = 500            # shadow rows kept, the newest, for the holdings' alerts and for the zones each
 SHADOW_SESSIONS = (5, 10)
 MAX_VALUATIONS = 30          # valuation cards kept: each one is a price read at every intraday check
 ZONE_BUFFER_PCT = 0.5        # a zone alerted is left only this far back past its level: no alert ping-pong
-EX_LOOKBACK_DAYS = 60        # VCI's event filter is not the ex-date: ask from this long before the card
+EX_LOOKBACK_DAYS = 60        # VCI's event filter is the publicDate, not the ex-date: ask from this long before the card
+CARD_EVENTS_TIMEOUT = 5.0    # seconds of the one try at a card's events (VCI answers in 0,3-1,5 s)
+CARD_EVENTS_RETRY_SECONDS = 3600   # a card whose events failed is asked again after this long, not at every look
 SPARK_SESSIONS = 62          # about three months of closes on the page's stock cards
 
 KINDS = ("BUY", "SELL", "BONUS", "DEPOSIT", "WITHDRAW", "DIVIDEND", "ADJUST", "VOID")
@@ -381,6 +385,16 @@ class VendorMarket:
 
         return vci.fetch_events(symbol, start, end, codes="DIV,ISS")
 
+    def card_events(self, symbol: str, start: str, end: str) -> list[dict]:
+        """``events`` for a valuation card's ex-dates (``TaiSan.valuation_status``): one short try behind
+        the shared VCI breaker (``money_flows._guarded``), so VCI down costs an intraday check, a page
+        view or /tsdinhgia a few seconds, not 33 s a card."""
+        from tradingagents.dataflows import money_flows
+        from tradingagents.dataflows.vendors import vci
+
+        return money_flows._guarded("VCI", lambda: vci.fetch_events(symbol, start, end, codes="DIV,ISS",
+                                                                    timeout=CARD_EVENTS_TIMEOUT, retries=0))
+
     def exchange(self, symbol: str) -> str | None:
         from vnbot.intraday import exchange
 
@@ -410,20 +424,28 @@ def parse_event(raw: dict) -> dict | None:
     return None
 
 
+_RIGHTS = re.compile(r"quyền mua|quyen mua", re.IGNORECASE)
+
+
 def ex_event(raw: dict) -> dict | None:
-    """Any ex-date of a VCI DIV/ISS event, the card's "cần cập nhật": {ex, what} for a cash or
-    stock dividend, bonus shares, rights (ESOP and private placements have no ex-date)."""
+    """The ex-date of a VCI DIV/ISS event that re-prices the stock, the card's "cần cập nhật": {ex,
+    what} for a cash or stock dividend, bonus shares, rights to buy. None for an issue the exchange does
+    not adjust the reference price for - ESOP ("CBCNV"), a private placement, a bond conversion - though
+    VCI gives these an exrightDate too (FPT CBCNV 0,1% 24/06/2026, SHB riêng lẻ 4,4% 20/04/2026)."""
     ev = parse_event(raw)
     if ev:
         what = (f"cổ tức tiền {vnd(ev['value'])} đ/cp" if ev["kind"] == "CASH"
                 else f"cổ phiếu thưởng/cổ tức bằng cổ phiếu {_ratio(ev['ratio'])}")
         return {"ex": ev["ex"], "what": what}
     ex = str(raw.get("exrightDate") or "")[:10]
-    if raw.get("eventCode") not in ("DIV", "ISS") or len(ex) != 10:
+    title, code = str(raw.get("eventTitleVi") or raw.get("eventNameVi") or ""), raw.get("eventCode")
+    what = ("quyền mua" if code == "ISS" and _RIGHTS.search(title)
+            else "cổ phiếu thưởng/cổ tức bằng cổ phiếu" if code == "ISS" and _FREE_SHARES.search(title)
+            else "cổ tức" if code == "DIV" else None)
+    if len(ex) != 10 or what is None:
         return None
     ratio = float(raw["exerciseRatio"]) if _finite(raw.get("exerciseRatio")) and float(raw["exerciseRatio"]) > 0 else 0
-    return {"ex": ex, "what": ("cổ tức" if raw["eventCode"] == "DIV" else "phát hành thêm")
-            + (f" {_ratio(ratio)}" if ratio else "")}
+    return {"ex": ex, "what": what + (f" {_ratio(ratio)}" if ratio else "")}
 
 
 def _ratio(value: float) -> str:
@@ -523,7 +545,8 @@ class TaiSan:
         # (symbol, day, price) -> (stop, target): the site's plan for a new buy (sieutinhieu.vn)
         self.site = site if site is not None else self.site_plan
         self._lock = threading.RLock()
-        self._live: tuple[float, dict] = (0.0, {})
+        self._live: tuple[float, dict, set] = (0.0, {}, set())    # (when, live prices, the symbols asked)
+        self._events_failed: dict[str, float] = {}         # symbol -> when its card's events last failed
         self.rebuilding = False
         self._bad_lines: set[str] = set()
         # (level, symbol, price, day) on a new alert: the AI's look at the news (vnbot.ai_pick), set by main
@@ -794,7 +817,7 @@ class TaiSan:
 
     # ── prices ──
     def _forget_live(self) -> None:
-        self._live = (0.0, {})
+        self._live = (0.0, {}, set())
 
     def closes(self) -> dict[str, dict[str, float]]:
         return _read_json(self.prices_path, {})
@@ -827,10 +850,10 @@ class TaiSan:
         phase = vn_rules.session_phase(now)
         out, label = {}, ""
         if vn_rules.is_session_day(day) and phase not in ("closed", "pre_open"):
-            stamp, cached = self._live
-            if time.time() - stamp > 60 or not set(symbols) <= set(cached):
+            stamp, cached, asked = self._live
+            if time.time() - stamp > 60 or not set(symbols) <= asked:      # a symbol with no match yet is not asked again
                 cached = self.market.live(symbols, day)
-                self._live = (time.time(), cached)
+                self._live = (time.time(), cached, set(symbols))
             out = {s: cached[s] for s in symbols if s in cached}
             label = "đóng cửa hôm nay" if phase == "after_close" else f"khớp {now.strftime('%H:%M')}"
         saved = self.closes()
@@ -1129,7 +1152,10 @@ class TaiSan:
                 return
             rows.append({"day": day, "at": at or now_vn().strftime("%H:%M"), "symbol": symbol, "level": level,
                          "price": float(price) if price else None})
-            del rows[:-500]
+            # trimmed per kind: up to 60 zone rows a day must not push out the stop/sell rows _tag_sell reads
+            zone = level in ZONE_LEVELS
+            if sum(1 for r in rows if (r.get("level") in ZONE_LEVELS) == zone) > SHADOW_ROWS:
+                rows.remove(next(r for r in rows if (r.get("level") in ZONE_LEVELS) == zone))
             added.append(True)
         self._update_state(change)
         if added and hook and self.on_alert is not None:
@@ -1267,6 +1293,8 @@ class TaiSan:
         card = {"bear": bear, "base": base, "bull": bull, "eab": float(eab) if eab is not None else None,
                 "expires": expires or "", "note": (note or "").strip()[:200], "day": today,
                 "at": now_vn().isoformat(timespec="seconds"), "source": source}
+        price = self.current_prices([symbol])[0].get(symbol)
+        card["zone"] = card_zone(card, price) if price else None   # the zone the reply shows: the intraday alerts start there
 
         def change(s):
             if symbol not in s["valuations"] and len(s["valuations"]) >= MAX_VALUATIONS:
@@ -1284,17 +1312,22 @@ class TaiSan:
 
     def valuation_status(self, symbol: str, card: dict, day: str | None = None) -> dict:
         """{"expired": past the card's own date, "stale": the first ex-date ({ex, what}) after the day
-        it was entered, up to ``day`` - its per-share levels are then on the old basis}. The events
-        are asked once a day per card and kept in it (asked again at the next look after a failure)."""
+        it was entered, up to ``day`` - its per-share levels are then on the old basis, "checked": the
+        events were read today}. Asked once a day per card; every ex-date announced after the card is
+        kept in it, coming ones too (VCI lists an event from its publicDate, days before the ex-date), so
+        an ex-date morning with VCI down still reads stale. A failed look is asked again only after
+        ``CARD_EVENTS_RETRY_SECONDS``, not at every intraday check, page view or /tsdinhgia."""
         day = day or today_vn()
-        if card.get("checked") != day:
+        if card.get("checked") != day and time.time() - self._events_failed.get(symbol, 0.0) >= CARD_EVENTS_RETRY_SECONDS:
             start = (_date.fromisoformat(card["day"]) - timedelta(days=EX_LOOKBACK_DAYS)).isoformat()
             try:
-                found = sorted({(ev["ex"], ev["what"]) for raw in self.market.events(symbol, start, day)
-                                if (ev := ex_event(raw)) and card["day"] < ev["ex"] <= day})
-            except Exception as exc:  # noqa: BLE001 - the last list kept; asked again at the next look
+                found = sorted({(ev["ex"], ev["what"]) for raw in self.market.card_events(symbol, start, day)
+                                if (ev := ex_event(raw)) and card["day"] < ev["ex"]})
+            except Exception as exc:  # noqa: BLE001 - the ex-dates kept; asked again after an hour
+                self._events_failed[symbol] = time.time()
                 logger.warning("Tài sản: events of %s for its valuation card unavailable: %s", symbol, exc)
             else:
+                self._events_failed.pop(symbol, None)
                 ex = [{"ex": d, "what": w} for d, w in found]
 
                 def change(s):
@@ -1304,11 +1337,19 @@ class TaiSan:
                 self._update_state(change)
                 card = {**card, "checked": day, "ex": ex}
         return {"expired": bool(card.get("expires")) and card["expires"] < day,
-                "stale": (card.get("ex") or [None])[0]}
+                "stale": next((x for x in card.get("ex") or [] if x["ex"] <= day), None),
+                "checked": card.get("checked") == day}
 
     def valuation_line(self, symbol: str, card: dict, price: float | None, status: dict) -> str:
-        """One card: its levels, today's zone and MOS, its date, and HẾT HẠN / cần cập nhật."""
-        now = f" → giá {vnd(price)}: {card_zone(card, price)}, {mos_text(card, price)}" if price else " → chưa có giá"
+        """One card: its levels, today's zone and MOS, its date, and HẾT HẠN / cần cập nhật. Past an ex-date
+        the levels are on the old basis and today's price on the new one: no zone or MOS then."""
+        if not price:
+            now = " → chưa có giá"
+        elif status.get("stale"):
+            now = f" → giá {vnd(price)}: vùng/MOS không còn đúng, cần nhập lại"
+        else:
+            now = (f" → giá {vnd(price)}: {card_zone(card, price)}, {mos_text(card, price)}"
+                   + (" (theo thẻ cũ)" if status.get("expired") else ""))
         flags = []
         if status.get("stale"):
             flags.append(f"⚠️ cần cập nhật: GDKHQ {ddmmyyyy(status['stale']['ex'])} ({status['stale']['what']})")

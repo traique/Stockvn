@@ -12,8 +12,10 @@ the valuation cards the owner enters (any stock: today's zone and MOS, the bot's
 of a bank next to it), the assistant, the evening report, the Excel import and the
 thresholds; last, the reset.
 
-The page reads the saved closes and state; only the live prices of the holdings during
-the session are fetched (cached a minute). Every form posts and comes back here.
+The page reads the saved closes and state; only the live prices of the holdings and the
+cards during the session are fetched (cached a minute), and a card's ex-dates once a day
+(one short VCI try, an hour apart after a failure); the bot's card of a bank is built in
+the background, never in the request. Every form posts and comes back here.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from __future__ import annotations
 import html
 import logging
 import threading
+import time
 from urllib.parse import quote
 
 from fastapi import File, Form, UploadFile
@@ -749,18 +752,41 @@ def _levels_form(book: ts.Book, levels: dict) -> str:
 BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own (a bank's card): flagged
 
 
+_bot_cards: dict[str, tuple[float, object | None, str]] = {}   # symbol -> (looked at, the bot's card, why none)
+_bot_lock = threading.Lock()
+
+
 def _bot_card(symbol: str) -> tuple[object | None, str]:
-    """(the bot's own card of a bank, ``vn_valuation.card``: kept an hour there; why there is none)."""
+    """(the bot's own card of a bank, why there is none) as the last look found it. Never looked at
+    in the request: a card not kept yet is five VCI calls (more while VCI times out), so a look older
+    than ``money_flows.BREAKER_SECONDS`` starts in the background for the next view
+    (``vn_valuation.card`` keeps a card an hour: a look in between costs nothing)."""
+    from tradingagents.dataflows import money_flows
+
+    with _bot_lock:
+        at, found, why = _bot_cards.get(symbol, (0.0, None, "đang tính, tải lại trang sau"))
+        due = time.time() - at >= money_flows.BREAKER_SECONDS
+        if due:
+            _bot_cards[symbol] = (time.time(), found, why)
+    if due:
+        threading.Thread(target=_look_bot_card, args=(symbol,), name=f"bot-card-{symbol}", daemon=True).start()
+    return found, why
+
+
+def _look_bot_card(symbol: str) -> None:
     from tradingagents.dataflows import vn_valuation as vv
 
     try:
         if not vv.is_bank(symbol):
-            return None, "chỉ có cho ngân hàng"
-        found = vv.card(symbol, None)
+            found, why = None, "chỉ có cho ngân hàng"
+        else:
+            found = vv.card(symbol, None)
+            why = "" if found else "chưa đủ dữ liệu"
     except Exception as exc:  # noqa: BLE001 - the owner's card is shown alone
         logger.warning("Tài sản web: the bot's valuation card of %s: %s", symbol, exc)
-        return None, "chưa tính được"
-    return found, "" if found else "chưa đủ dữ liệu"
+        found, why = None, "chưa tính được"
+    with _bot_lock:
+        _bot_cards[symbol] = (_bot_cards.get(symbol, (time.time(),))[0], found, why)
 
 
 def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
@@ -774,8 +800,9 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
         for sym, card in sorted(cards.items()):
             price = prices.get(sym)
             status = account.valuation_status(sym, card, day)
-            zone = ts.card_zone(card, price) if price else None
-            mos = ts.card_mos(card, price) if price else None
+            # past an ex-date the levels are on the old basis, the price on the new one: no zone, MOS or gap
+            zone = ts.card_zone(card, price) if price and not status["stale"] else None
+            mos = ts.card_mos(card, price) if price and not status["stale"] else None
             chips = []
             if status["stale"]:
                 chips.append(ui.chip(e(f"cần cập nhật · GDKHQ {ts.ddmm(status['stale']['ex'])}"), "amber")
@@ -789,23 +816,33 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
             mine = (f"nhập {ts.ddmmyyyy(card['day'])}" + (f" · nguồn: {card['note']}" if card.get("note") else ""))
             bot, why = _bot_card(sym)
             if bot is not None:
-                gap = (float(card["base"]) / bot.base - 1) * 100
+                gap = (float(card["base"]) / bot.base - 1) * 100 if not status["stale"] else None
                 theirs = (f'<div class="small num">Bear {ui.money(bot.bear)} · Base {ui.money(bot.base)} · Bull {ui.money(bot.bull)}</div>'
                           f'<div class="muted small">BCTC {e(bot.period)} · Ke {f"{bot.assumptions.ke * 100:g}".replace(".", ",")}% '
                           "đặt tay</div>")
-                gap_cell = (ui.chip(e(f"lệch {ui.pct(gap)}"), "neg") + f'<div class="muted small">quá {BOT_GAP_PCT:g}%: xem lại giả định</div>'
-                            if abs(gap) > BOT_GAP_PCT else f'<span class="num">{ui.pct(gap)}</span>')
+                if gap is None:
+                    gap_cell = "—"
+                elif abs(gap) > BOT_GAP_PCT:
+                    gap_cell = (ui.chip(e(f"lệch {ui.pct(gap)}"), "neg")
+                                + f'<div class="muted small">quá {BOT_GAP_PCT:g}%: xem lại giả định</div>')
+                else:
+                    gap_cell = f'<span class="num">{ui.pct(gap)}</span>'
             else:
                 theirs, gap_cell = f'<span class="muted small">{e(why)}</span>', ui.NONE
             held = ' <span class="badge b-info">đang giữ</span>' if sym in book.holdings else ""
-            zone_chip = ui.chip(e(zone), {"Rẻ": "pos", "Đắt": "neg"}.get(zone, "")) if zone else ui.NONE
+            if status["stale"]:
+                zone_chip = '<span class="muted small">— mốc theo giá cũ, cần nhập lại</span>' if price else ui.NONE
+            elif status["expired"] and zone:            # no new basis, but the owner's assumptions are past their date
+                zone_chip = ui.chip(e(zone)) + '<div class="muted small">theo thẻ cũ</div>'
+            else:
+                zone_chip = ui.chip(e(zone), {"Rẻ": "pos", "Đắt": "neg"}.get(zone, "")) if zone else ui.NONE
             rows.append(
                 f'<tr><td data-label="Mã"><b>{e(sym)}</b>{held}</td>'
                 f'<td data-label="Thẻ anh nhập"><div class="small num">{e(ts.card_levels(card))}</div>'
                 f'<div class="muted small">{e(mine)}</div></td>'
                 f'<td data-label="Giá" class="num">{ui.money(price) if price else ui.NONE}</td>'
                 f'<td data-label="Vùng hôm nay">{zone_chip}</td>'
-                f'<td data-label="MOS" class="num {ui.tone(mos)}">{ui.pct(mos)}</td>'
+                f'<td data-label="MOS" class="num {ui.tone(mos)}">{"—" if status["stale"] and price else ui.pct(mos)}</td>'
                 f'<td data-label="Hạn dùng"><div class="chips">{"".join(chips)}</div></td>'
                 f'<td data-label="Thẻ của bot">{theirs}</td><td data-label="Lệch Base">{gap_cell}</td>'
                 f'<td><form method="post" action="/taisan/dinhgia" class="inline" onsubmit="return confirm(\'Xoá thẻ {e(sym)}?\')">'
@@ -835,7 +872,8 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
   </div>
   <div class="row mt">
     <button class="btn btn-primary" type="submit" name="action" value="save">Lưu thẻ</button>
-    <button class="btn btn-ghost" type="submit" name="action" value="clear" formnovalidate>Xoá thẻ của mã</button>
+    <button class="btn btn-ghost" type="submit" name="action" value="clear" formnovalidate
+      onclick="return confirm('Xoá thẻ định giá của mã này?')">Xoá thẻ của mã</button>
   </div>
   <p class="muted small" style="margin:12px 0 0">Giá theo đồng: 30164, 30.164 hoặc 30,164 (dấu chấm/phẩy chỉ ngăn hàng nghìn).
   Cần Bear &lt; Base &lt; Bull. Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. Bot báo trong phiên khi giá vào Rẻ hoặc
@@ -1119,7 +1157,7 @@ def register(app, account: ts.TaiSan, *, guard, post_guard, show_bot=lambda: Tru
         return run(act, "catlo")
 
     @app.post("/taisan/dinhgia", dependencies=post_guard)
-    def taisan_valuation(symbol: str = Form(...), bear: str = Form(""), base: str = Form(""), bull: str = Form(""),
+    def taisan_valuation(symbol: str = Form(""), bear: str = Form(""), base: str = Form(""), bull: str = Form(""),
                          eab: str = Form(""), han: str = Form(""), nguon: str = Form(""), action: str = Form("save")):
         def act():
             sym = _code(symbol)

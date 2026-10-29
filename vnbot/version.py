@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.16.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "37e1a41"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "62c8e5f"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -45,7 +45,7 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Thẻ: sổ sách/cp đúng ngày, ROE trung vị 5 năm, Ke 12% (VALUATION_KE_BANK) và ±2 điểm, nhãn FACT/THỐNG KÊ",
         "Cổ tức tiền tính trên số cp trước GDKHQ; báo phát hành riêng lẻ/ESOP/quyền mua sau ngày khoá sổ",
         "Output Guard: giá trị hợp lý AI nêu phải khớp thẻ (±0,5%); không bắt nhầm stop/T1/hỗ trợ của Quant",
-        "Thẻ anh nhập: /tsdinhgia MÃ BEAR BASE BULL (cả trang /taisan); báo trong phiên khi giá vào vùng Rẻ/Đắt",
+        "Thẻ anh nhập: /tsdinhgia MÃ BEAR BASE BULL (cả /taisan); báo trong phiên khi vào Rẻ/Đắt, sau ⛔/🎯",
         "Chỉ là thông tin: không đổi quyết định, stop/target của Quant Engine",
     )),
     ("v1.15.0", "2026-10-29", (

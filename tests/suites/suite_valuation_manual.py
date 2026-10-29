@@ -1,10 +1,14 @@
 """Valuation cards entered by hand (/tsdinhgia, the /taisan page): the command and its number
-formats, the store that outlives a sale, the zone alerts in the session (once per entry, a
-buffer, a memory that survives a restart), expiry and ex-dates, the shadow results of the
-"re" and "dat" alerts, the web form behind the password (offline, prices from a fake market)."""
+formats, the store that outlives a sale, the zone alerts in the session (once per entry and per
+session, a buffer, a memory that survives a restart, sent after the stop alerts), expiry and
+ex-dates (VCI's events of 29/10/2026: ESOP and private placements are not ex-dates), VCI down,
+the shadow results of the "re" and "dat" alerts, the web form behind the password (offline,
+prices from a fake market)."""
 import json
 import os
+import re
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +24,8 @@ from vnbot import settings as settings_module  # noqa: E402
 
 SETTINGS = settings_module.load()
 
+from tradingagents.dataflows import money_flows  # noqa: E402
+from tradingagents.dataflows.errors import VendorUnavailableError  # noqa: E402
 from tradingagents.market import vn_rules  # noqa: E402
 from tradingagents.trading.ledger import Ledger  # noqa: E402
 from vnbot import taisan as ts  # noqa: E402
@@ -27,6 +33,7 @@ from vnbot.intraday import IntradayMonitor  # noqa: E402
 from vnbot.taisan import TaiSan  # noqa: E402
 
 t = _common.Checks()
+FX = json.loads((_common.FIXTURES / "vci_events_2026-10-29.json").read_text(encoding="utf-8"))   # VCI live, DIV/ISS
 NOW = {"t": datetime(2026, 10, 29, 10, 0, tzinfo=vn_rules.VN_TZ)}      # Thursday, in the session
 vn_rules.now_vn = lambda: NOW["t"]
 
@@ -46,7 +53,8 @@ while _d.isoformat() <= "2026-12-31":
 
 
 class FakeMarket:
-    """Live prices from ``price``; closes rising 0.1% a session up to ``last``; events per symbol."""
+    """Live prices from ``price``; closes rising 0.1% a session up to ``last``; events per symbol, in
+    VCI's window: the publicDate (the ex-date for a test event without one)."""
 
     def __init__(self):
         self.price = {"CTG": 30_700.0, "FPT": 100_000.0, "VCB": 60_000.0, "VNINDEX": 1_250.0}
@@ -60,13 +68,16 @@ class FakeMarket:
         return {d: v for d, v in self.daily_closes(symbol, end).items() if d >= start}
 
     def live(self, symbols, day):
+        self.calls.append(("live", tuple(symbols)))
         return {s: self.price[s] for s in symbols if s in self.price}
 
     def events(self, symbol, start, end):
         self.calls.append(("events", symbol, start, end))
         if self.fail:
-            raise OSError("VCI down")
-        return [e for e in self.ev.get(symbol, []) if not e["exrightDate"] or start <= e["exrightDate"][:10] <= end]
+            raise VendorUnavailableError("VCI down")
+        return [e for e in self.ev.get(symbol, []) if start <= (e.get("publicDate") or e["exrightDate"] or "")[:10] <= end]
+
+    card_events = events
 
     def exchange(self, symbol):
         return "HOSE"
@@ -231,32 +242,55 @@ t.ok("the memory is its own file: the last zone of the card", json.loads((DIR / 
     encoding="utf-8"))["CTG"]["zone"] == "Đắt")
 t.ok("the next day, still Đắt: no repeat (the day's keys are not the memory)", path([33_500], day="2026-10-30") == [[]])
 got = path([30_100, 30_300, 30_150, 30_316, 30_100], day="2026-10-30")
-t.ok("around Base: one Rẻ, held inside the buffer, again only after leaving it", [len(x) for x in got] == [1, 0, 0, 0, 1], got)
+t.ok("around Base: one Rẻ, held inside the buffer; left and entered again (0,72% range): not said twice a session",
+     [len(x) for x in got] == [1, 0, 0, 0, 0] and json.loads((DIR / "valuation_zones.json").read_text(
+         encoding="utf-8"))["CTG"]["zone"] == "Rẻ", got)
 st = z.state()["shadow"]
 t.ok("kept in the shadow results as re/dat, once a day per level, no AI hook",
      [(r["day"], r["level"], r["price"]) for r in st] == [("2026-10-29", "re", 30_100.0), ("2026-10-29", "dat", 33_400.0),
                                                           ("2026-10-30", "re", 30_100.0)], st)
 hooked = []
 z.on_alert = lambda *args: hooked.append(args)
+z._forget_live()
+z.market.price["CTG"] = 30_100                     # what the save reply shows
 z.set_valuation("CTG", 27_000, 30_200, 33_000)
-t.ok("a card entered again starts afresh (price already in Rẻ: said)", path([30_100], day="2026-11-02") != [[]] and hooked == [])
+t.ok("a card entered again starts from the zone its reply showed: already Rẻ, not said as entering it",
+     z.valuations()["CTG"]["zone"] == "Rẻ" and path([30_100], day="2026-11-02") == [[]])
+z._forget_live()
+z.market.price["CTG"] = 31_000
+z.set_valuation("CTG", 27_000, 30_150, 33_000)
+t.ok("... from Hợp lý, entering Rẻ is said (no AI hook)", z.valuations()["CTG"]["zone"] == "Hợp lý"
+     and path([30_100], day="2026-11-02") != [[]] and hooked == [])
 z.clear_valuation("CTG")
 t.ok("no card: no zone alert, the memory emptied", path([25_000], day="2026-11-02") == [[]]
      and json.loads((DIR / "valuation_zones.json").read_text(encoding="utf-8")) == {})
 
-# a stock not held, next to a holding whose stop is hit: both alerts, the old one unchanged
+# a stock not held, next to a holding whose stop is hit: both alerts, the old one unchanged and first
 h = account("held")
 h.set_valuation("CTG", 27_904, 30_164, 33_309)
+h._update_state(lambda s: s["valuations"].__setitem__("BAD", {"day": "2026-11-02", "at": "x"}))   # a damaged card
 book = Ledger(cash=1e9, start_cash=1e9)
 book.record_fill("BUY", "BBB", 1000, 60_000, "2026-10-15", stop=55_000, target1=68_000)
-SETTINGS_SIGNAL = settings_module.Settings(**{**ISETTINGS.__dict__, "trade_mode": "signal", "data_dir": ROOT / "signal"})
-(ROOT / "signal").mkdir()
-PRICE.update({"CTG": 30_000, "BBB": 54_000})
-mon = IntradayMonitor(SETTINGS_SIGNAL, FakeTrader(h, book), notes.append, price=lambda code, day: PRICE.get(code),
+
+
+def signal_settings(name):
+    (ROOT / name).mkdir()
+    return settings_module.Settings(**{**ISETTINGS.__dict__, "trade_mode": "signal", "data_dir": ROOT / name})
+
+
+PRICE.update({"CTG": 30_000, "BBB": 54_000, "BAD": 1_000})
+mon = IntradayMonitor(signal_settings("signal"), FakeTrader(h, book), notes.append, price=lambda code, day: PRICE.get(code),
                       index_change=lambda day: None, exchange_of=lambda code: "HOSE")
+asked_at = []
+h.market.card_events = lambda symbol, start, end: asked_at.append((symbol, len(notes))) or []
+n0 = len(notes)
 out = mon.check("2026-11-02", now=at("2026-11-02", "10:30"))
 t.ok("a card of a stock not held alerts; the stop alert of a book is as before",
      any(x.startswith("⛔ 💼 Thật BBB: giá 54.000 ≤ stop 55.000") for x in out) and any(x.startswith("🟢 CTG") for x in out), out)
+t.ok("the stop alert is notified before any card is looked at; the zone alert in a message of its own; a damaged "
+     "card skips only itself", asked_at == [("BAD", n0 + 1), ("CTG", n0 + 1)] and len(notes) == n0 + 2
+     and notes[n0].split("\n")[1].startswith("⛔ 💼 Thật BBB") and "🟢" not in notes[n0]
+     and notes[n0 + 1].split("\n")[1].startswith("🟢 CTG vào vùng Rẻ"), (asked_at, notes[n0:]))
 out = mon.check("2026-11-02", now=at("2026-11-02", "10:40"))
 t.ok("... and neither repeats in the next pass", out == [], out)
 
@@ -287,27 +321,134 @@ t.ok("an ex-date since the card: cần cập nhật, said once, no Đắt alert"
 t.ok("then silent", monitor(e).check("2026-11-03", now=at("2026-11-03", "11:00")) == []
      and monitor(e).check("2026-11-04", now=at("2026-11-04", "10:00")) == [])
 listing = e.handle("/tsdinhgia", "")
-t.ok("the list marks both", "· ⌛ HẾT HẠN 30/10/2026" in listing
-     and "· ⚠️ cần cập nhật: GDKHQ 03/11/2026 (cổ tức tiền 450 đ/cp)" in listing, listing)
+t.ok("the list marks both; past the ex-date no zone or MOS (old levels, new price); expired: the zone of the old card",
+     "· ⌛ HẾT HẠN 30/10/2026" in listing and "· ⚠️ cần cập nhật: GDKHQ 03/11/2026 (cổ tức tiền 450 đ/cp)" in listing
+     and "• VCB Bear 50.000 · Base 58.000 · Bull 70.000 → giá 60.000: vùng/MOS không còn đúng, cần nhập lại · nhập" in listing
+     and "→ giá 30.700: Hợp lý, MOS -1,8% (theo thẻ cũ) · nhập 29/10/2026" in listing, listing)
 e.set_valuation("VCB", 49_000, 57_000, 69_000)
 t.ok("a card entered after the ex-date is current again", not e.valuation_status("VCB", e.valuations()["VCB"])["stale"])
 f = account("fail")
 NOW["t"] = at("2026-11-04")
 f.set_valuation("MBB", 20_000, 24_000, 28_000)
-f.market.ev["MBB"] = [{"eventCode": "ISS", "exrightDate": "2026-11-05T00:00:00", "exerciseRatio": 0.1,
-                       "eventTitleVi": "Phát hành cổ phiếu - Quyền mua CP cho Cổ đông hiện hữu tỉ lệ 10.0%"},
-                      {"eventCode": "ISS", "exrightDate": None, "exerciseRatio": 0.03, "eventTitleVi": "Phát hành cho CBCNV"}]
+f.market.ev["MBB"] = [{"eventCode": "ISS", "publicDate": "2026-10-30T00:00:00", "exrightDate": "2026-11-05T00:00:00",
+                       "exerciseRatio": 0.1, "eventTitleVi": "Phát hành cổ phiếu - Quyền mua CP cho Cổ đông hiện hữu tỉ lệ 10.0%"}]
 f.market.fail = True
 NOW["t"] = at("2026-11-05")
-t.ok("events unavailable: not stale, asked again at the next look",
-     not f.valuation_status("MBB", f.valuations()["MBB"])["stale"] and "checked" not in f.valuations()["MBB"])
+asked = len(f.market.calls)
+t.ok("events unavailable at the first look: nothing known, not confirmed today, asked again only after an hour",
+     f.valuation_status("MBB", f.valuations()["MBB"]) == {"expired": False, "stale": None, "checked": False}
+     and "checked" not in f.valuations()["MBB"] and f.valuation_status("MBB", f.valuations()["MBB"])["checked"] is False
+     and len(f.market.calls) == asked + 1, f.market.calls[asked:])
 f.market.fail = False
-t.ok("rights to buy are an ex-date too (ESOP without one is not)",
-     f.valuation_status("MBB", f.valuations()["MBB"])["stale"] == {"ex": "2026-11-05", "what": "phát hành thêm 10%"})
+f._events_failed = {k: v - ts.CARD_EVENTS_RETRY_SECONDS for k, v in f._events_failed.items()}
+t.ok("an hour later, VCI back: rights to buy are an ex-date",
+     f.valuation_status("MBB", f.valuations()["MBB"])["stale"] == {"ex": "2026-11-05", "what": "quyền mua 10%"})
 t.ok("a stock dividend and bonus shares read as such", ts.ex_event(
     {"eventCode": "ISS", "exrightDate": "2025-12-17T00:00:00", "exerciseRatio": 0.44636584,
      "eventTitleVi": "Phát hành cổ phiếu - Trả Cổ tức bằng Cổ phiếu tỉ lệ 44.6%"})
     == {"ex": "2025-12-17", "what": "cổ phiếu thưởng/cổ tức bằng cổ phiếu 44,6%"})
+
+# VCI's events of 29/10/2026 (live, trimmed): an ESOP, a private placement or a bond conversion carries an
+# exrightDate too, but the exchange does not cut the reference price for it
+paid = [e for sym, rows in FX.items() if sym != "recorded" for e in rows
+        if e["exrightDate"] and re.search("CBCNV|riêng lẻ|chuyển đổi", e["eventTitleVi"])]
+others = [e for sym, rows in FX.items() if sym != "recorded" for e in rows
+          if e["exrightDate"] and not re.search("CBCNV|riêng lẻ|chuyển đổi", e["eventTitleVi"])]
+t.ok("live: 12 ESOP/private placement/bond conversion events with an exrightDate, none an ex-date; every bonus, "
+     "stock or cash dividend and rights issue is one", len(paid) == 12 and all(ts.ex_event(e) is None for e in paid)
+     and len(others) == 26 and all(ts.ex_event(e) for e in others), [e["eventTitleVi"] for e in paid])
+esop = account("esop")
+esop.market.ev["FPT"] = FX["FPT"]
+NOW["t"] = at("2026-06-22")
+esop.set_valuation("FPT", 90_000, 100_000, 120_000)
+t.ok("FPT CBCNV 0,1% and 0,5% (exrightDate 24/06/2026, published 29/06): the card stays current",
+     esop.valuation_status("FPT", esop.valuations()["FPT"], "2026-07-01") == {"expired": False, "stale": None, "checked": True}
+     and esop.valuations()["FPT"]["ex"] == [], esop.valuations()["FPT"])
+t.ok("... its bonus 10% (21/09/2026) is", esop.valuation_status("FPT", esop.valuations()["FPT"], "2026-09-21")["stale"]
+     == {"ex": "2026-09-21", "what": "cổ phiếu thưởng/cổ tức bằng cổ phiếu 10%"})
+
+# an ex-date announced before it comes is kept: the morning of it, VCI down, the card is still stale
+b = account("bonus")
+b.market.ev["CTG"] = FX["CTG"]
+NOW["t"] = at("2025-12-10")
+b.set_valuation("CTG", 42_000, 46_000, 52_000)
+st = b.valuation_status("CTG", b.valuations()["CTG"], "2025-12-16")
+t.ok("CTG 44,6% (published 10/12/2025, ex 17/12): kept on 16/12, not stale yet",
+     not st["stale"] and st["checked"] and b.valuations()["CTG"]["ex"]
+     == [{"ex": "2025-12-17", "what": "cổ phiếu thưởng/cổ tức bằng cổ phiếu 44,6%"}], (st, b.valuations()["CTG"]))
+b.market.fail = True
+PRICE["CTG"] = 34_700                                        # 51.000 before the bonus
+NOW["t"] = at("2025-12-17")
+out = monitor(b).check("2025-12-17", now=NOW["t"])
+t.ok("17/12, VCI down: cần cập nhật from what was kept, no false 'vào vùng Rẻ', no 're' row",
+     len(out) == 1 and out[0].startswith("⚠️ CTG: thẻ định giá cần cập nhật - GDKHQ 17/12/2025 (cổ phiếu thưởng/cổ tức bằng "
+                                         "cổ phiếu 44,6%) sau ngày anh nhập 10/12/2025")
+     and not [r for r in b.state()["shadow"] if r["level"] == "re"], out)
+
+# ───────────── 4b. VCI down: the old alerts first and at once, each card asked again only after an hour ─────────────
+
+
+class DownVCI(FakeMarket):
+    def card_events(self, symbol, start, end):
+        self.calls.append(("card", symbol, len(notes)))
+        raise VendorUnavailableError("VCI refused")
+
+
+o = TaiSan(ROOT / "outage", market=DownVCI(), site=None)
+NOW["t"] = at("2026-11-05", "09:00")
+for sym in ("CTG", "VCB", "FPT", "MBB", "HPG"):
+    o.market.price[sym] = 500_000.0                      # Hợp lý when saved; every price below is under Base: Rẻ
+    o.set_valuation(sym, 1_000, 200_000, 1_000_000)
+book2 = Ledger(cash=1e9, start_cash=1e9)
+book2.record_fill("BUY", "BBB", 1000, 60_000, "2026-10-15", stop=55_000, target1=68_000)
+PRICE.update({"CTG": 30_000, "VCB": 57_000, "FPT": 100_000, "MBB": 20_000, "HPG": 25_000, "BBB": 54_000})
+mon = IntradayMonitor(signal_settings("outage_mon"), FakeTrader(o, book2), notes.append, price=lambda code, day: PRICE.get(code),
+                      index_change=lambda day: None, exchange_of=lambda code: "HOSE")
+
+
+def card_calls():
+    return [c for c in o.market.calls if c[0] in ("card", "events")]
+
+
+n0 = len(notes)
+out = mon.check("2026-11-05", now=at("2026-11-05", "09:15"))
+t.ok("VCI down: the ⛔ stop alert is notified before any card's events are asked",
+     len(card_calls()) == 5 and all(c[2] == n0 + 1 for c in card_calls())
+     and notes[n0].split("\n")[1].startswith("⛔ 💼 Thật BBB: giá 54.000 ≤ stop 55.000"), (card_calls(), notes[n0:]))
+t.ok("... no zone alert from a card whose ex-dates could not be read today",
+     len(out) == 2 and all(x.startswith("⛔") for x in out) and len(notes) == n0 + 1, out)
+out = mon.check("2026-11-05", now=at("2026-11-05", "09:30"))
+o.handle("/tsdinhgia", "")
+t.ok("the next pass and /tsdinhgia in the hour: VCI not asked again, nothing to send", out == [] and len(card_calls()) == 5,
+     card_calls())
+o._events_failed = {k: v - ts.CARD_EVENTS_RETRY_SECONDS for k, v in o._events_failed.items()}
+o.market.card_events = o.market.events                      # VCI back
+out = mon.check("2026-11-05", now=at("2026-11-05", "10:15"))
+t.ok("an hour later VCI is asked again; back, the zone alerts go out", len(card_calls()) == 10
+     and sorted(x[:5] for x in out) == ["🟢 CTG", "🟢 FPT", "🟢 HPG", "🟢 MBB", "🟢 VCB"], out)
+
+seen_kwargs = []
+
+
+def refused(symbol, start, end, codes="", size=50, **kwargs):
+    seen_kwargs.append(kwargs)
+    raise VendorUnavailableError("VCI refused")
+
+
+from tradingagents.dataflows.vendors import vci  # noqa: E402
+
+real_fetch_events, vci.fetch_events = vci.fetch_events, refused
+money_flows.reset_breaker()
+errors = []
+for sym in ("CTG", "VCB"):
+    try:
+        ts.VendorMarket().card_events(sym, "2026-09-01", "2026-11-05")
+    except VendorUnavailableError as exc:
+        errors.append(str(exc))
+t.ok("the vendor: one try of 5 s with no retry, behind the shared VCI breaker (the next card fails at once)",
+     seen_kwargs == [{"timeout": 5.0, "retries": 0}] and len(errors) == 2 and "not asked again" in errors[1], (seen_kwargs, errors))
+vci.fetch_events = real_fetch_events
+money_flows.reset_breaker()
 
 # ───────────── 5. shadow results: the direction of each level ─────────────
 s = account("shadow")
@@ -326,6 +467,15 @@ for level in ("re", "dat"):
 s2.settle_shadow("2026-10-30")
 stats = {x["level"]: x for x in s2.shadow_stats()}
 t.ok("prices falling: Đắt right, Rẻ wrong", stats["dat"]["right"] == 100 and stats["re"]["right"] == 0, stats)
+cap = account("cap")
+cap.record_alert("stop", "AAA", 10_000, "2026-01-02", hook=False)
+cap.record_alert("sell", "AAA", 10_000, "2026-01-05", hook=False)
+for i in range(ts.SHADOW_ROWS + 30):
+    cap.record_alert("re" if i % 2 else "dat", f"Z{i % 30:02d}", 10_000, f"2026-{i // 28 % 12 + 1:02d}-{i % 28 + 1:02d}", hook=False)
+rows = cap.state()["shadow"]
+t.ok(f"zone rows have their own {ts.SHADOW_ROWS}: 530 of them do not push out the stop/sell rows _tag_sell reads",
+     [r["level"] for r in rows[:2]] == ["stop", "sell"] and sum(1 for r in rows if r["level"] in ts.ZONE_LEVELS) == ts.SHADOW_ROWS,
+     (len(rows), rows[:3]))
 lines = "\n".join(s._shadow_lines())
 t.ok("the weekly lines say which way is right", "🟢 Vào vùng Rẻ: 1 lần" in lines and "giá cao hơn 100% số lần" in lines
      and "🔺 Vào vùng Đắt: 1 lần" in lines and "sau 🟢 Rẻ: giá tăng là đúng" in lines, lines)
@@ -358,9 +508,24 @@ class BotCard:
         self.bear, self.base, self.bull, self.period, self.assumptions = base * 0.95, base, base * 1.02, "Q2/2026", PROFILES["banking"]
 
 
-BOT = {"CTG": BotCard(27_643.0), "VCB": BotCard(52_000.0)}
-vn_valuation.is_bank = lambda symbol: symbol in ("CTG", "VCB", "TCB")
-vn_valuation.card = lambda symbol, as_of: BOT.get(symbol)
+BOT = {"CTG": BotCard(27_643.0), "VCB": BotCard(52_000.0), "BID": BotCard(40_000.0)}
+built_in = []
+
+
+def bot_card(symbol, as_of):
+    built_in.append(threading.current_thread().name)
+    return BOT.get(symbol)
+
+
+def looked():
+    """Wait for the page's background looks at the bot's cards."""
+    for th in threading.enumerate():
+        if th.name.startswith("bot-card-"):
+            th.join(10)
+
+
+vn_valuation.is_bank = lambda symbol: symbol in ("CTG", "VCB", "TCB", "BID")
+vn_valuation.card = bot_card
 NOW["t"] = at("2026-10-29")
 app = create_app(SETTINGS, JobQueue(SETTINGS), Watchlist(SETTINGS), switches=Switches(SETTINGS.data_dir, {}))
 w = app.state.taisan
@@ -396,20 +561,39 @@ t.ok("a bad card: the message back, nothing saved", "⚠️ Cần Bear < Base < 
 code, loc = post({"symbol": "HPG", "bear": "27,9", "base": "30000", "bull": "35000"})
 t.ok("a number in thousands refused", "⚠️ Bear không hợp lệ" in loc, loc)
 w.market.ev["FPT"] = [{"eventCode": "DIV", "exrightDate": "2026-10-30T00:00:00", "valuePerShare": 1000.0}]
+w.market.ev["BID"] = [{"eventCode": "DIV", "exrightDate": "2026-10-30T00:00:00", "valuePerShare": 450.0}]
 w.set_valuation("TCB", 20_000, 30_000, 40_000, expires="2026-10-29")
+w.set_valuation("BID", 30_000, 50_000, 60_000)
 NOW["t"] = at("2026-10-30")
 page = web.get("/taisan", auth=AUTH).text
+t.ok("the bot's cards are not looked at in the request: the first view says so",
+     page.count("đang tính, tải lại trang sau") == 5, page.count("đang tính"))
+looked()
+page = web.get("/taisan", auth=AUTH).text
+t.ok("... they are built in the background, once, for the next view",
+     sorted(built_in) == ["bot-card-BID", "bot-card-CTG", "bot-card-TCB", "bot-card-VCB"], built_in)
 section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
-row = {sym: section.split(f"<b>{sym}</b>", 1)[-1].split("</tr>", 1)[0] for sym in ("CTG", "VCB", "FPT", "TCB")}
+row = {sym: section.split(f"<b>{sym}</b>", 1)[-1].split("</tr>", 1)[0] for sym in ("CTG", "VCB", "FPT", "TCB", "BID")}
 t.ok("CTG: zone, MOS, expiry, the bot's card beside it, the gap under 10% not flagged",
      'chip-neg">Đắt</span>' not in row["CTG"] and ">Hợp lý</span>" in row["CTG"] and "-1,78%" in row["CTG"]
      and "hạn 30/12/2026" in row["CTG"] and "Base 27.643" in row["CTG"] and "+9,12%" in row["CTG"]
      and "lệch" not in row["CTG"] and "Ke 12% đặt tay" in row["CTG"], row["CTG"])
 t.ok("VCB: Base 15% over the bot's: flagged", "lệch +15,38%" in row["VCB"] and "chip-neg" in row["VCB"]
      and "quá 10%: xem lại giả định" in row["VCB"], row["VCB"])
-t.ok("FPT: not a bank, no bot card; an ex-date since the card: cần cập nhật",
-     "chỉ có cho ngân hàng" in row["FPT"] and "cần cập nhật · GDKHQ 30/10" in row["FPT"], row["FPT"])
-t.ok("TCB: HẾT HẠN, Rẻ", "HẾT HẠN 29/10/2026" in row["TCB"] and 'chip-pos">Rẻ</span>' in row["TCB"], row["TCB"])
+t.ok("FPT: not a bank, no bot card; an ex-date since the card: cần cập nhật, no zone or MOS on the old levels",
+     "chỉ có cho ngân hàng" in row["FPT"] and "cần cập nhật · GDKHQ 30/10" in row["FPT"]
+     and "mốc theo giá cũ, cần nhập lại" in row["FPT"] and not re.search(">(Rẻ|Hợp lý|Đắt)<", row["FPT"])
+     and 'data-label="MOS" class="num ">—</td>' in row["FPT"], row["FPT"])
+t.ok("BID: stale, so no gap to the bot's re-based card (25% would be flagged)", "Base 40.000" in row["BID"]
+     and "lệch" not in row["BID"] and 'data-label="Lệch Base">—</td>' in row["BID"], row["BID"])
+t.ok("TCB: HẾT HẠN, its zone kept but neutral, 'theo thẻ cũ'", "HẾT HẠN 29/10/2026" in row["TCB"]
+     and '<span class="chip">Rẻ</span><div class="muted small">theo thẻ cũ</div>' in row["TCB"] and "chip-pos" not in row["TCB"],
+     row["TCB"])
+lives = sum(1 for c in w.market.calls if c[0] == "live")
+w.current_prices(["CTG", "ZZZ"])
+w.current_prices(["CTG", "ZZZ"])
+t.ok("live prices: a symbol with no match is not fetched again within the minute",
+     sum(1 for c in w.market.calls if c[0] == "live") == lives + 1, w.market.calls[-3:])
 t.ok("the source text escaped", "<script>alert(1)</script>" not in page and "&lt;script&gt;" in section)
 w.add("DEPOSIT", "2026-10-01", amount=100_000_000)
 w.add("BUY", "2026-10-02", symbol="CTG", qty=100, price=29_000)
@@ -418,11 +602,20 @@ section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
 t.ok("full page: the section, a held stock marked", "<b>CTG</b> <span class=\"badge b-info\">đang giữ</span>" in section
      and '<option value="CTG">' in section)
 t.ok("the shadow table names both directions", "Kết quả cảnh báo bán và vùng định giá" in page and "Đúng hướng" in page)
+from vnbot import taisan_web  # noqa: E402
+
 vn_valuation.card = lambda symbol, as_of: (_ for _ in ()).throw(RuntimeError("VCI down"))
+taisan_web._bot_cards.clear()
+web.get("/taisan", auth=AUTH)
+looked()
 page = web.get("/taisan", auth=AUTH)
 t.ok("the bot's card failing costs only its cell", page.status_code == 200 and "chưa tính được" in page.text)
 code, loc = post({"symbol": "VCB", "action": "clear"})
 t.ok("the form removes a card", "✅ Đã xoá thẻ định giá VCB." in loc and "VCB" not in w.valuations(), loc)
+code, loc = post({"symbol": "", "action": "clear"})
+t.ok("'Xoá thẻ của mã' with Mã empty: the Vietnamese message back, not a 422", code == 303 and "⚠️ Mã không hợp lệ" in loc, loc)
+t.ok("... and it asks before deleting", "onclick=\"return confirm('Xoá thẻ định giá của mã này?')\">Xoá thẻ của mã</button>"
+     in page.text)
 
 # ───────────── 7. informational only ─────────────
 repo = _common.REPO

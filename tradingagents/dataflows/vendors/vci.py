@@ -240,11 +240,13 @@ def fetch_metric_labels(symbol: str) -> dict[str, list[dict]]:
 
 def fetch_events(
     symbol: str, from_date: str, to_date: str, codes: str = "DIV,ISS,DDIND,DDINS,DDRP,AGME,AGMR,EGME",
-    size: int = 50,
+    size: int = 50, *, timeout: float = http.DEFAULT_TIMEOUT, retries: int = 2,
 ) -> list[dict]:
-    """Corporate events between two dates (YYYY-MM-DD), newest first.
+    """Corporate events published between two dates (YYYY-MM-DD), newest first.
 
-    Codes: DIV dividends, ISS share issues, DDIND/DDINS/DDRP insider and
+    The window is the ``publicDate``, not the ex-date (checked live 29/10/2026: CTG's 44,6%
+    stock dividend, published 10/12/2025 and ex on 17/12, is in 17/10-16/12 and not in
+    11/12-16/12). Codes: DIV dividends, ISS share issues, DDIND/DDINS/DDRP insider and
     major-holder deals, AGME/AGMR/EGME shareholder meetings.
     """
     def fetch():
@@ -258,6 +260,8 @@ def fetch_events(
                 "page": 0,
                 "size": size,
             },
+            timeout=timeout,
+            retries=retries,
         )
         data = payload.get("data") if isinstance(payload, dict) else None
         return (data or {}).get("content") or [] if isinstance(data, dict) else []
