@@ -593,7 +593,7 @@ Bot ghi số phiên bản ở một chỗ (`vnbot/version.py`) và hiện ở:
 
 **Mã bản dựng** (7 ký tự, ví dụ `1a2b3c4`) là dấu vân tay của toàn bộ code đang chạy. Cùng một bộ file cho cùng một mã trên mọi máy, nên bot biết server có chạy **đúng bản phát hành** không. Báo **khác bản phát hành** nghĩa là upload thiếu file, lẫn file của bản cũ, hoặc code đã bị sửa: hãy upload lại đủ gói.
 
-Bot Altcoin có phiên bản riêng (`altcoin/bot/version.py`, hiện 3.2.1): xem ở `/altcoin/phienban` hoặc `/alt phienban`, đóng dấu bằng `cd altcoin && python -m bot.version --stamp`.
+Bot Altcoin có phiên bản riêng (`altcoin/bot/version.py`, hiện 3.2.1; mã bản dựng của nó tính `altcoin/bot/` và `altcoin/run.py`): xem ở `/altcoin/phienban` hoặc `/alt phienban`, đóng dấu bằng `cd altcoin && python -m bot.version --stamp`. File nối `altcoin/hosted.py` nằm trong mã bản dựng của Cổ phiếu (`/phienban`).
 
 Số phiên bản theo dạng `vMAJOR.MINOR.PATCH` (bản đầu tiên `v1.0.0`, lịch sử trước đó đã bỏ). Khi tự sửa code và muốn đánh số bản mới: tăng `VERSION`, thêm dòng vào `NOTES` trong `vnbot/version.py`, rồi chạy `python -m vnbot.version --stamp` để ghi mã bản dựng mới.
 

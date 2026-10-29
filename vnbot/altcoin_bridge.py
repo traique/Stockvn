@@ -23,6 +23,8 @@ with a summary a minute after the first one), then sends "🪙 Altcoin › <text
 stock's own notifications go (TelegramBot.alt_broadcast: its switches, plus the "altcoin"
 switch). A long notification or answer goes as parts that each carry the header, "(2/3)",
 short enough that no channel cuts them again. Before the stock is up, the last 50 wait.
+At shutdown (the supervisor's stop(), the child gone) ``flush`` waits, a few seconds at most,
+for what is still queued here and in the stock's Zoom queue to be sent.
 Counters: the supervisor's ``bridge`` (/altcoin/hub.json).
 """
 
@@ -111,7 +113,7 @@ class Bridge:
         self._last = self._started = self._summary_at = -1e9
         self._skipped = 0
         self._now, self._sleep = time.monotonic, time.sleep      # the tests' clock
-        supervisor.on_notify = self.put
+        supervisor.on_notify, supervisor.drain = self.put, self.flush
         if supervisor.enabled:
             threading.Thread(target=self._loop, name="altcoin-notify", daemon=True).start()
 
@@ -253,9 +255,9 @@ class Bridge:
     def _loop(self) -> None:
         while True:
             try:
-                text = self._queue.get(timeout=5)
+                text, got = self._queue.get(timeout=5), True
             except queue.Empty:
-                text = None
+                text, got = None, False
             try:
                 if self._sink is None:
                     if text is not None:
@@ -268,6 +270,19 @@ class Bridge:
                 self._summary()
             except Exception:  # noqa: BLE001 - one bad notification must not stop the thread
                 logger.exception("Altcoin: gửi thông báo lỗi")
+            finally:
+                if got:                          # flush(): this one is done (sent, held or dropped)
+                    self._queue.task_done()
+
+    def flush(self, timeout: float) -> None:
+        """Wait, at most ``timeout`` s, until every notification queued here is handled and the
+        stock's Zoom sender has sent what it holds (Telegram sends from this thread)."""
+        if not self.enabled:
+            return
+        zoom = getattr(getattr(self._sink, "zoom", None), "queue", None)
+        end = time.monotonic() + timeout
+        while time.monotonic() < end and (self._queue.unfinished_tasks or getattr(zoom, "unfinished_tasks", 0)):
+            time.sleep(0.05)
 
     def _hold(self, text: str) -> None:
         if len(self._early) >= EARLY_KEPT:

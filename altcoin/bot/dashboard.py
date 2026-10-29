@@ -99,7 +99,7 @@ function renderAI(a){
   if(!a.enabled){sub.textContent='tắt';last.textContent='AI đang tắt (AI_ENABLED=false hoặc chưa cấu hình provider) – bot vào lệnh thuần kỹ thuật.';el.innerHTML='';return}
   sub.innerHTML=`${a.calls_today}/${a.budget} hôm nay · ngưỡng ${a.min_confidence}% · thứ tự: ${(a.order||[]).join(' → ')} · khi AI lỗi: ${a.fail_policy==='skip'?'bỏ qua':a.fail_policy==='score'?'vào theo điểm KT':'tự động'}`;
   if(a.last_result){const r=a.last_result,ok=r.decision===r.side.toUpperCase()&&r.confidence>=a.min_confidence;
-    last.innerHTML=`<b>Quyết định gần nhất</b> · ${t(r.ts)} — ${sideTag(r.side)} ${r.symbol.split('/')[0]} (điểm ${r.score}) → <b class="${ok?'up':'dn'}">${r.decision} ${r.confidence}%</b> <span style="color:var(--mut)">${(r.model||'').split('/').slice(-1)[0]}</span><br>${r.reason||''}`}
+    last.innerHTML=`<b>Quyết định gần nhất</b> · ${t(r.ts)} — ${sideTag(r.side)} ${r.symbol.split('/')[0]} (điểm ${r.score}) → <b class="${ok?'up':'dn'}">${esc(r.decision)} ${r.confidence}%</b> <span style="color:var(--mut)">${(r.model||'').split('/').slice(-1)[0]}</span><br>${esc(r.reason)}`}
   else last.innerHTML='Chưa có tín hiệu nào được gửi cho AI – bộ lọc kỹ thuật chưa tìm thấy ứng viên đủ điều kiện.';
   if(a.last_error)last.innerHTML+=`<br><span class="dn">⚠ Lần hỏi gần nhất không model nào trả lời: ${esc(a.last_error)}</span>`;
   const provs=(a.providers||[]).map(p=>`<span class="pill">${p.name}: ${p.models.length} model</span>`).join(' ');
@@ -108,7 +108,7 @@ function renderAI(a){
    (rows.length?rows.map(m=>{const rate=m.calls?Math.round(100*m.ok/m.calls):0;
     return `<div class="row"><div class="t">${m.model.split('/').slice(-1)[0]} <span class="pill" style="font-size:10px">${m.model.split('/')[0]}</span>${m.cooldown?'<span class="pill" style="color:var(--dn)">nghỉ</span>':''}</div>
     <div class="r">${m.calls} lượt<small>${m.ok} ok · ${m.fail} lỗi · ${rate}%</small></div>
-    <div class="m">${m.analyze} phân tích · ${m.review} tổng kết${m.avg_ms?` · ~${(m.avg_ms/1000).toFixed(1)}s/lượt`:''} · dùng lần cuối ${ago(m.last_ts)} trước${m.last_error?`<br><span class="dn">Lỗi cuối: ${m.last_error}</span>`:''}</div></div>`}).join('')
+    <div class="m">${m.analyze} phân tích · ${m.review} tổng kết${m.avg_ms?` · ~${(m.avg_ms/1000).toFixed(1)}s/lượt`:''} · dùng lần cuối ${ago(m.last_ts)} trước${m.last_error?`<br><span class="dn">Lỗi cuối: ${esc(m.last_error)}</span>`:''}</div></div>`}).join('')
    :'<div class="empty">Chưa gọi model nào.</div>');
 }
 const SRC={taken:'Đã vào lệnh',ai_override:'Vào dù AI phản đối yếu',ai_rejected:'AI từ chối',ai_error:'AI lỗi/hết lượt',not_sent:'Không gửi AI',blocked:'Luật tự học chặn',below_score:'Suýt đạt'};
@@ -192,12 +192,12 @@ function renderLog(){
     el.innerHTML=rows.length?rows.map(x=>{const o=x.outcome||'';const rr=x.outcome_r;let fe={};try{fe=JSON.parse(x.features||'{}')}catch(e){}
       return `<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span style="color:var(--mut);font-weight:500;font-size:12px">${t(x.ts)} · điểm ${x.score}</span></div>
       <div class="r">${o?`<span class="out ${o}">${OUT[o]||o}${rr!=null&&o!=='PENDING'?' '+(rr>=0?'+':'')+f(rr,2)+'R':''}</span>`:''}<small>${SRC[x.source]||(x.taken?'Đã vào':'Bỏ qua')}</small></div>
-      <div class="m">${x.ai_decision?`AI ${x.ai_decision} ${x.ai_conf??''}% · `:''}${fe.rejected?fe.rejected+' · ':''}${x.ai_reason||''}</div></div>`}).join(''):'<div class="empty">Chưa có tín hiệu nào qua bộ lọc.</div>'}
+      <div class="m">${x.ai_decision?`AI ${esc(x.ai_decision)} ${x.ai_conf??''}% · `:''}${fe.rejected?fe.rejected+' · ':''}${esc(x.ai_reason)}</div></div>`}).join(''):'<div class="empty">Chưa có tín hiệu nào qua bộ lọc.</div>'}
   else if(tab==='events'){renderEvents();return}
   else if(tab==='scans'){renderScans();return}
   else{rows=D.reviews||[];$('histN').textContent='';
-    el.innerHTML=rows.length?rows.map(x=>`<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span class="pill">${x.verdict||''}</span></div>
-      <div class="r ${x.pnl>=0?'up':'dn'}">${x.pnl>=0?'+':''}${f(x.pnl,4)}</div><div class="m">${x.lesson||''}${x.tags?` <span style="color:var(--mut)">#${x.tags.split(',').join(' #')}</span>`:''}</div></div>`).join(''):'<div class="empty">AI sẽ tổng kết sau mỗi lệnh đóng.</div>'}
+    el.innerHTML=rows.length?rows.map(x=>`<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span class="pill">${esc(x.verdict)}</span></div>
+      <div class="r ${x.pnl>=0?'up':'dn'}">${x.pnl>=0?'+':''}${f(x.pnl,4)}</div><div class="m">${esc(x.lesson)}${x.tags?` <span style="color:var(--mut)">#${esc(x.tags).split(',').join(' #')}</span>`:''}</div></div>`).join(''):'<div class="empty">AI sẽ tổng kết sau mỗi lệnh đóng.</div>'}
 }
 
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));b.setAttribute('aria-selected','true');tab=b.dataset.t;renderLog()});

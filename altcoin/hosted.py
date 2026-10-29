@@ -6,8 +6,9 @@ nothing in ``bot/`` is patched for the merge, everything it needs is done here.
         --mode paper|live --instance NAME [--deny-db FP] [--allow-empty-db] [--check]
 
 1. Dies with the stock process (PR_SET_PDEATHSIG, and a parent check every 5 s) and before
-   it when memory runs out (oom_score_adj 800). HUB_FD, HUB_TOKEN and HUB_CMD_TOKEN leave
-   the environment at once, and the pipe is not inherited by any process started here.
+   it when memory runs out (oom_score_adj 800). HUB_FD, HUB_TOKEN, HUB_CMD_TOKEN and
+   HUB_DROPPED (the ALT_ keys the stock dropped as masked) leave the environment at once, and
+   the pipe is not inherited by any process started here.
 2. Reads only altcoin/.env and altcoin/bot.env (the working folder is this one, whatever
    the caller's), then checks the real timezone of the process: the strategy's session
    hours follow ``time.localtime()`` (tzdata's zone file as a fallback, else exit 78).
@@ -20,7 +21,7 @@ nothing in ``bot/`` is patched for the merge, everything it needs is done here.
      (``__BOTKEEP_KEEP_SECRET_<NAME>__``) are dropped.
 4. The mode is the supervisor's alone: paper drops the OKX keys; live takes them from the
    panel and passes the two checks of ``bot.main.main()`` here (exit 78), never there.
-5. Read only, before the bot opens its store: the stock's database (same URL, or its tables
+5. Read (SELECTs only), before the bot opens its store: the stock's database (same URL, or its tables
    market/fills), an empty database (--allow-empty-db: paper only, and never in a data
    folder that has run on a database with data: <DATA_DIR>/hosted.funded) and open trades
    of the other mode (paper would close live trades on paper, live would manage paper
@@ -29,14 +30,16 @@ nothing in ``bot/`` is patched for the merge, everything it needs is done here.
    supervisor retries later).
 6. ``bot.main.Telegram`` is HubChannel: every notification goes to the stock process,
    which sends it with its own Telegram/Zoom and switches. One thread ("hub-notify") writes
-   JSON lines on HUB_FD: {"t": "state", ...} (newest first) and {"t": "notify", ...}.
+   JSON lines on HUB_FD: {"t": "state", ...} (newest first) and {"t": "notify", ...}; at
+   exit, what is still queued is written first (at most FLUSH_WAIT s).
    While the bot runs, it also reads ``heartbeats``: this instance name alive on another
    host (the old server started again: same name, same leader lock, both would trade)
    stops this child with exit 75.
 7. The web pages, served by the stock's Hub under /altcoin/ (vnbot/hub.py): only a request
    carrying HUB_TOKEN gets in (HUB_CMD_TOKEN for /_hub/*; GET /health is the supervisor's
    probe); "/x" links and redirects get the prefix; the section switch (Cổ phiếu / Altcoin)
-   heads every page; the channel cards of /caidat become one "Kênh do Stock quản lý" card.
+   heads every page; the channel cards of /caidat become one "Kênh do Stock quản lý" card;
+   seam_ok false or a dropped masked value: a banner on every page.
 8. POST /_hub/command: the stock's "/alt <lệnh>" (vnbot/altcoin_bridge.py), an allowlist of
    ``handle_command``; a write command only on the leader and one at a time (409 otherwise).
 
@@ -61,13 +64,14 @@ import sys
 import threading
 import time
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
 EXIT_CONFIG, EXIT_WAIT = 78, 75
-HUB_ENV = ("HUB_FD", "HUB_TOKEN", "HUB_CMD_TOKEN")
+HUB_ENV = ("HUB_FD", "HUB_TOKEN", "HUB_CMD_TOKEN", "HUB_DROPPED")
 KEEP_SECRET = "__BOTKEEP_KEEP_SECRET_"
 # Emptied in cfg (bot/config.py), and their environment names removed: 10 cfg.ZOOM_*, 11
 # ZOOM_* names (ZOOM_BOT_SECRET_TOKEN is only an alias folded into cfg.ZOOM_SECRET_TOKEN).
@@ -81,6 +85,7 @@ OKX_KEYS = ("OKX_API_KEY", "OKX_API_SECRET", "OKX_PASSPHRASE")
 FRAME_LIMIT = 60 * 1024        # bytes of one JSON line on the pipe, newline included
 STATE_EVERY = 5.0              # seconds between two looks at the bot's state
 RIVAL_EVERY = 15.0             # seconds between two reads of heartbeats while the bot runs
+FLUSH_WAIT = 5.0               # seconds, at exit: the notifications still queued go to the pipe
 FUNDED = "hosted.funded"       # in DATA_DIR: written once the bot has run on a database with data
 OPEN_OTHER = {"paper": "DB có lệnh live đang mở – chạy paper sẽ đóng ảo chúng, lệnh thật trên OKX bị bỏ mặc: "
                        "bật lại live hoặc đóng lệnh trước",
@@ -101,6 +106,7 @@ STOCK_CHANNELS = ('Thông báo Altcoin đi qua bot Telegram và app Zoom của C
                   'trên Telegram, <code>alt status</code> trên Zoom (gõ <code>/alt</code> để xem lệnh).')
 STOCK_CARD_TITLE = "Kênh do Stock quản lý"
 TOKENS: dict[str, str] = {}    # HUB_TOKEN / HUB_CMD_TOKEN, for the web proxy and the /alt commands
+STOCK_DROPPED: list[str] = []  # HUB_DROPPED: the panel's ALT_ keys whose masked value the stock dropped
 # The /alt commands (vnbot/altcoin_bridge.py READ + WRITE); the writes run one at a time
 COMMANDS = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version",
             "pause", "resume", "close", "apply")
@@ -172,10 +178,11 @@ def lower_oom_priority() -> None:
 
 
 def take_hub() -> int | None:
-    """HUB_FD (the pipe to the stock process) and the two tokens, out of the environment at
-    once: a process started from here (os.system, close_fds=False) gets none of them."""
+    """HUB_FD (the pipe to the stock process), the two tokens and HUB_DROPPED, out of the
+    environment at once: a process started from here (os.system, close_fds=False) gets none of them."""
     fd = os.environ.pop("HUB_FD", "")
     TOKENS.update(hub=os.environ.pop("HUB_TOKEN", ""), cmd=os.environ.pop("HUB_CMD_TOKEN", ""))
+    STOCK_DROPPED[:] = [k for k in os.environ.pop("HUB_DROPPED", "").split(",") if k]
     try:
         fd = int(fd)
         os.set_inheritable(fd, False)
@@ -275,8 +282,10 @@ def set_mode(cfg, args, panel: dict) -> str | None:
 
 
 def read_db(url: str, path: Path) -> dict | None:
-    """What the guards need, read only: the tables, whether the bot has started on it
-    (kv start_equity / paper_balance) and the heartbeats. None: no SQLite file yet."""
+    """What the guards need (SELECTs only): the tables, whether the bot has started on it
+    (kv start_equity / paper_balance) and the heartbeats. None: no SQLite file yet. The file
+    is opened read-write, never created: a hot journal left by a kill (OOM, SIGKILL) is
+    rolled back as the bot's own connection would; a read-only one fails on it."""
     def facts(tables, query, mark) -> dict:
         funded = "kv" in tables and bool(query(f"SELECT k FROM kv WHERE k IN ({mark}, {mark})",
                                                ("start_equity", "paper_balance")))
@@ -298,7 +307,7 @@ def read_db(url: str, path: Path) -> dict | None:
             return facts(tables, query, "%s")
     if not path.is_file():
         return None
-    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True)
     try:
         def query(sql, params=()):
             return conn.execute(sql, params).fetchall()
@@ -322,7 +331,8 @@ def guard(cfg, args) -> tuple[int, str] | None:
     funded = bool(facts and facts["funded"])
     if not funded and (data / FUNDED).exists():
         return EXIT_CONFIG, ("DB rỗng, nhưng thư mục dữ liệu này đã chạy trên DB có dữ liệu: DB bị đổi (ALT_DATABASE_URL "
-                             f"bị che, mất bot.db)? Sửa DB, hoặc xoá {FUNDED} nếu thật sự muốn bắt đầu mới")
+                             f"bị che, mất bot.db)? Sửa DB. Chỉ khi thật sự muốn bắt đầu mới: xoá {data / FUNDED} "
+                             "và đặt ALTCOIN_FRESH_START=1 (chỉ paper), khởi động lại, rồi bỏ biến này")
     if not funded and not (args.allow_empty_db and args.mode == "paper"):
         return EXIT_CONFIG, "DB rỗng – chép DB cũ hoặc đặt ALTCOIN_FRESH_START=1" + (
             " (chỉ cho paper)" if args.allow_empty_db else "")
@@ -368,6 +378,14 @@ class Hub:
             self.queue.put_nowait((time.time(), text))
         except queue.Full:
             self.dropped += 1
+
+    def flush(self, timeout: float = FLUSH_WAIT) -> None:
+        """At exit (SIGTERM included): wait, at most ``timeout`` s, for the "hub-notify" thread to
+        write what is queued, so the notices of the bot's last moments (a trade opened or closed
+        in the critical region of a live order) reach the stock."""
+        end = time.monotonic() + timeout
+        while self.queue.unfinished_tasks and time.monotonic() < end:
+            time.sleep(0.05)
 
     def rival(self) -> str | None:
         """'<name>@<host>' when this instance name is alive in heartbeats on another host;
@@ -448,6 +466,8 @@ class Hub:
                 self.errors += 1
                 if self.errors == 1:
                     log.exception("hub-notify: lỗi, bỏ qua khung này")
+            if item:
+                self.queue.task_done()
             try:
                 item = self.queue.get(timeout=STATE_EVERY)
             except queue.Empty:
@@ -547,6 +567,20 @@ def command_route(app, bot) -> None:
     app.add_api_route("/_hub/command", hub_command, methods=["POST"])
 
 
+def alert() -> str:
+    """The banner of every page while the notifications cannot reach the stock (seam_ok false)
+    or a masked value was dropped (here or by the stock); empty otherwise."""
+    if HUB is None:
+        return ""
+    lines = []
+    if HUB.seam_ok is False or (HUB.sent or {}).get("seam_ok") is False:
+        lines.append("Thông báo Altcoin không tới được Telegram/Zoom của Cổ phiếu (lỗi kênh): xem log Botkeep.")
+    if HUB.base.get("dropped_secrets"):
+        lines.append(f"Đã bỏ giá trị bị che (__BOTKEEP_KEEP_SECRET_…) của {', '.join(HUB.base['dropped_secrets'])}: "
+                     "nhập lại giá trị thật rồi khởi động lại.")
+    return f'<div class="alert alert-err" role="alert">{"<br>".join(map(escape, lines))}</div>' if lines else ""
+
+
 def adapt() -> list[str]:
     """Steps 7 and 8 of the docstring, by wrapping bot.ui.page, bot.ui.card and bot.dashboard.build_app
     (looked up when called). Returns the seams that are gone, each logged: the pages still work
@@ -576,6 +610,7 @@ def adapt() -> list[str]:
             if kw.get("active") == "settings" and STOCK_CARD_TITLE not in html:     # the card seam is gone
                 html = html.replace('<main id="main">',
                                     f'<main id="main"><div class="alert alert-info" role="status">{STOCK_CHANNELS}</div>', 1)
+            html = html.replace('<main id="main">', '<main id="main">' + alert(), 1)
             html = re.sub(r'\b(href|action|formaction)="/(?!/)', rf'\1="{PREFIX}/', html)
             html = html.replace('="@stock/', '="/')
             html = html.replace("</style></head>", SECTIONS_CSS + "</style></head>", 1)
@@ -636,7 +671,8 @@ def main(argv=None) -> int:
     from bot import version as ver
 
     HUB = Hub(fd, {"mode": cfg.MODE, "version": ver.VERSION, "build": ver.build(), "instance": args.instance,
-                   "ignored_keys": ignored, "dropped_secrets": dropped}, Path(cfg.DATA_DIR) / FUNDED, cfg.LEADER_TTL)
+                   "ignored_keys": ignored, "dropped_secrets": sorted({*dropped, *STOCK_DROPPED})},
+              Path(cfg.DATA_DIR) / FUNDED, cfg.LEADER_TTL)
     if tz is None:
         refused = f"múi giờ {cfg.TIMEZONE}: giờ của máy lệch và không có gói tzdata"
     if args.check:
@@ -657,7 +693,10 @@ def main(argv=None) -> int:
         (log.error if code == EXIT_CONFIG else log.warning)("Altcoin không chạy: %s", reason)
         return code
     threading.Thread(target=HUB.run, name="hub-notify", daemon=True).start()
-    launch()
+    try:
+        launch()
+    finally:
+        HUB.flush()
     return EXIT_WAIT if HUB.stop_reason else 0
 
 

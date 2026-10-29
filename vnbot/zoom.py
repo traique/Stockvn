@@ -310,6 +310,7 @@ class ZoomChannel:
                     on_fail()
                 except Exception:  # noqa: BLE001
                     logger.exception("Zoom: fallback of an undelivered notification failed")
+            self.queue.task_done()      # vnbot.altcoin_bridge flush(): waits for unfinished_tasks at shutdown
 
     def deliver(self, item) -> bool:
         """Send one queued item; for a notification, True when a Zoom channel took it."""

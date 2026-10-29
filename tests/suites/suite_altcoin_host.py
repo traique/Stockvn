@@ -7,10 +7,12 @@ and altcoin/hosted.py (the child).
 - the live gate (supervisor, then the child) up to a stubbed Bot(); a real Bot() whose
   "Telegram" is HubChannel and that reaches no Telegram/Zoom address;
 - sealing against a decoy bot.env, precedence, the database guards (the stock's URL or tables,
-  an empty database, hosted.lock, heartbeats), the pipe (frames, limits, newest state first),
+  an empty database, a hot journal, hosted.lock, heartbeats), the pipe (frames, limits, newest
+  state first, the last notifications written before exit, HUB_DROPPED),
   the timezone (tzdata fallback), ``hosted.py --check`` from / with a decoy stock .env;
 - the supervisor with a fake child: exit 78/75/-9, backoff, readiness timeout on a new port,
-  stop() (SIGKILL fallback, /health fast meanwhile), main_botkeep's SIGTERM handler, masking.
+  stop() (SIGKILL fallback, /health fast meanwhile, the pipe read to its end then drain()),
+  main_botkeep's SIGTERM handler, masking.
 """
 import contextlib
 import io
@@ -162,6 +164,24 @@ def launch():
                 report(cfg)
             def run(self):
                 out["ran"] = True
+        bm.Bot = Bot
+        bm.main()
+    elif kind == "lastword":
+        import bot.main as bm
+        hosted.install_seams(bm)
+        write = hosted.Hub.write
+        def slow(self, frame):                      # a slow pipe: still queued when main() returns
+            if frame.get("t") == "notify":
+                time.sleep(0.2)
+            write(self, frame)
+        hosted.Hub.write = slow
+        class Bot:
+            def __init__(self):
+                self.tg = bm.Telegram(self)
+                report(cfg)
+            def run(self):
+                for i in range(5):
+                    self.tg.send(f"📉 ĐÓNG LỆNH {i}")
         bm.Bot = Bot
         bm.main()
     elif kind == "rival":
@@ -476,6 +496,16 @@ t.ok("while running: 'crypto' alive on another host (the old server started agai
      code == 75 and res and res.get("stopped_by_sigterm") and states and states[-1]["state"] == "waiting"
      and "crypto@old-server" in (states[-1]["reason"] or "") and "cũng chạy trên host khác" in out,
      (code, states[-2:], out[-800:]))
+alt = tree("lastword")
+code, out, res, frames = child(alt, "lastword", {"HUB_DROPPED": "ALT_OKX_API_SECRET,ALT_NINEROUTER_API_KEY"},
+                               "--instance", "crypto", "--data-dir", str(alt_db(TMP / "lastword-data")))
+notes = [f["text"] for f in frames if f["t"] == "notify"]
+t.ok("the bot's last notifications, still queued when main() returns (a slow pipe): all written before exit",
+     code == 0 and notes == [f"📉 ĐÓNG LỆNH {i}" for i in range(5)], (code, notes, out[-600:]))
+states = [f for f in frames if f["t"] == "state"]
+t.ok("HUB_DROPPED (the ALT_ keys the stock dropped, names only): out of the environment, in dropped_secrets",
+     res and res["hub_env_left"] == [] and states and all(
+         {"ALT_OKX_API_SECRET", "ALT_NINEROUTER_API_KEY"} <= set(f["dropped_secrets"]) for f in states), states[-1:])
 alt = tree("live-nokey")
 code, out, res, frames = child(alt, "stub", {}, "--mode", "live", "--instance", "crypto",
                                "--data-dir", str(alt_db(TMP / "live-nokey-data")))
@@ -509,6 +539,25 @@ t.ok("ALTCOIN_FRESH_START left on, then an empty database where one with data ra
 code, out, res, frames = guard_run("fresh-funded", alt_db(TMP / "g-fresh-funded-data"), "--allow-empty-db")
 t.ok("ALTCOIN_FRESH_START on a database with data → starts, WARNING 'không còn tác dụng'", code == 0 and res is not None
      and "không còn tác dụng" in out, out[-600:])
+hot = alt_db(TMP / "g-hot-data", tables=("junk",))
+with contextlib.closing(sqlite3.connect(hot / "bot.db")) as con:
+    con.executemany("INSERT INTO junk VALUES(?)", [("a" * 500,)] * 200)
+    con.commit()
+subprocess.run([PY, "-c", "import os, signal, sqlite3, sys; con = sqlite3.connect(sys.argv[1], isolation_level=None); "
+                "con.execute('PRAGMA cache_size=1'); con.execute('BEGIN'); con.execute(\"UPDATE junk SET x = 'b' || x\"); "
+                "os.kill(os.getpid(), signal.SIGKILL)", str(hot / "bot.db")], check=False)
+try:                                              # the journal is hot: a read-only connection cannot roll it back
+    with contextlib.closing(sqlite3.connect(f"{(hot / 'bot.db').as_uri()}?mode=ro", uri=True)) as con:
+        con.execute("SELECT name FROM sqlite_master").fetchall()
+    hot_ro = "opened"
+except sqlite3.OperationalError as exc:
+    hot_ro = str(exc)
+code, out, res, frames = guard_run("hot", hot)
+with contextlib.closing(sqlite3.connect(hot / "bot.db")) as con:
+    changed = con.execute("SELECT count(*) FROM junk WHERE x LIKE 'b%'").fetchone()[0]
+t.ok("a hot journal (the bot killed mid-write: OOM, SIGKILL after STOP_WAIT) → rolled back, starts; never a crash loop",
+     hot_ro == "attempt to write a readonly database" and code == 0 and res is not None and changed == 0
+     and not (hot / "bot.db-journal").exists(), (hot_ro, code, out[-600:]))
 code, out, res, frames = guard_run("stocktables", alt_db(TMP / "g-stock-data", tables=("market", "fills")))
 t.ok("the stock's tables (market, fills) in the altcoin's SQLite → 78", code == 78
      and "fills, market" in frames[-1]["reason"], frames[-1:])
@@ -760,7 +809,8 @@ def note(text):
             f.write(text + "\n")
     except OSError:
         pass
-note(f"start {os.getpid()} {port} " + json.dumps({"env": sorted(os.environ), "args": args, "cwd": os.getcwd()}))
+note(f"start {os.getpid()} {port} " + json.dumps({"env": sorted(os.environ), "args": args, "cwd": os.getcwd(),
+                                                   "dropped": os.environ.get("HUB_DROPPED")}))
 behave = os.environ.get("FAKE", "ok")
 if behave.startswith("seq:"):
     steps = behave[4:].split(",")
@@ -782,6 +832,9 @@ if behave == "hang":
     time.sleep(600)
 if behave == "ignore_term":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
+elif behave == "lastword":                    # a trade closed as it stops: the notice written, then exit
+    signal.signal(signal.SIGTERM, lambda *a: (frame(t="notify", n=2, ts=time.time(), text="📉 ĐÓNG LỆNH cuối"),
+                                              os._exit(0)))
 else:
     signal.signal(signal.SIGTERM, lambda *a: (note(f"sigterm {os.getpid()}"), os._exit(0)))
 class H(BaseHTTPRequestHandler):
@@ -883,6 +936,19 @@ with contextlib.redirect_stdout(io.StringIO()):
 t.ok("stop(): SIGTERM to the child, gone, no new start; state 'stopped'", f"sigterm {new_pid}" in log.read_text()
      and not alive(new_pid) and len(starts(log)) == 2 and sup.state()["state"] == "stopped", log.read_text()[-300:])
 
+order = []
+with contextlib.redirect_stdout(io.StringIO()):
+    sup, log = supervisor("lastword", "lastword", ALT_OKX_API_SECRET="__BOTKEEP_KEEP_SECRET_ALT_OKX_API_SECRET__")
+    sup.on_notify = lambda text: (time.sleep(0.3), order.append(("notify", text)))     # a slow bridge
+    sup.drain = lambda timeout: order.append(("drain", timeout))
+    sup.start()
+    wait_for(lambda: ("notify", "🚀 khởi động") in order, 15)
+    sup.stop()
+    after = list(order)
+t.ok("stop(): the child's last notification (written as it exits) read to the pipe's end, then drain(DRAIN_WAIT)",
+     after[-2:] == [("notify", "📉 ĐÓNG LỆNH cuối"), ("drain", ah.DRAIN_WAIT)], after)
+t.ok("spawn: HUB_DROPPED names the masked ALT_ keys (names only) for the banner of its pages",
+     json.loads(starts(log)[0][3])["dropped"] == "ALT_OKX_API_SECRET")
 with contextlib.redirect_stdout(io.StringIO()):
     sup, log = supervisor("e78", "exit78")
     sup.start()

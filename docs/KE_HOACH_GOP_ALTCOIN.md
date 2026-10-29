@@ -4,7 +4,7 @@ Tài liệu này là kế hoạch, viết trước khi sửa code (đã triển 
 
 ## Trạng thái triển khai (2026-10-29)
 
-Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `5bd7c8e`) và **Altcoin 3.2.1** (build `07bb13b`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Kiểm thử đầu cuối trên gói `stockvn-botkeep-v1.15.0-alt3.2.1.zip` đã giải nén (165 file, zip 0,94 MB, Python 3.13, không mạng, không token): bật Altcoin thì child chạy sau ~2 giây, `/altcoin/` qua Hub có thanh chuyển mục, `/alt status` qua bộ điều phối Telegram, `kill -9` child thì 20 giây sau chạy lại trong khi stock vẫn trả 200, SIGTERM thì thoát sạch, không còn tiến trình con, lần chạy sau giữ quyền giao dịch ngay; tắt Altcoin thì như v1.14 (`/altcoin` 404, `/alt` trả "Altcoin đang tắt"). Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
+Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `3733221`) và **Altcoin 3.2.1** (build `e737954`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Kiểm thử đầu cuối trên gói `stockvn-botkeep-v1.15.0-alt3.2.1.zip` đã giải nén (165 file, zip 0,94 MB, Python 3.13, không mạng, không token): bật Altcoin thì child chạy sau ~2 giây, `/altcoin/` qua Hub có thanh chuyển mục, `/alt status` qua bộ điều phối Telegram, `kill -9` child thì 20 giây sau chạy lại trong khi stock vẫn trả 200, SIGTERM thì thoát sạch, không còn tiến trình con, lần chạy sau giữ quyền giao dịch ngay; tắt Altcoin thì như v1.14 (`/altcoin` 404, `/alt` trả "Altcoin đang tắt"). Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
 
 **Quyết định cuối của anh/chị** (đè lên kế hoạch):
 
@@ -44,6 +44,10 @@ Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1
 - `webguard.check_basic` tự đọc header Basic: `WEB_PASSWORD` có ký tự ngoài ASCII nay dùng được; header Basic hỏng tính là sai mật khẩu.
 - `zoom.handle` giữ chữ ký cũ; `ZoomChannel.sender(target)` trả JID người gửi cho bước `xacnhan`.
 - Giới hạn nhịp là cửa sổ trượt 15 tin/60 s và 5 tin/20 s, cách nhau ≥ 1 s (token bucket cho lọt 20 tin trong phút đầu). Tin dài được chia trước, mỗi phần có tiêu đề `🪙 Altcoin › (i/n)`.
+- Tin bị cầu nối bỏ: `events` của stock (`/dulieu`) chỉ giữ 2.000 ký tự đầu mỗi dòng log, toàn văn ở log Botkeep (`[altcoin-notify] …`); §7.3 và §16 ghi "toàn văn trong `events`" là chưa đúng.
+- Khi tắt (khởi động lại server): child ghi nốt hàng đợi thông báo vào pipe (≤ 5 s), supervisor đọc pipe tới hết rồi cầu nối gửi nốt, chờ cả hàng đợi Zoom của stock (≤ 5 s). Kế hoạch (§16) chấp nhận mất tin lúc restart.
+- Banner trên mọi trang `/altcoin/` khi `seam_ok=false` hoặc `dropped_secrets` không rỗng; stock chuyển tên các khoá `ALT_*` bị che cho child qua `HUB_DROPPED` (chỉ tên).
+- `altcoin/hosted.py` nằm trong mã bản dựng của stock (`vnbot.version`), không trong mã của altcoin.
 - Vùng găng: ngoài việc giữ SIGTERM/SIGINT ở luồng chính, một khoá chung cho lệnh sàn của mọi luồng, và lúc thoát tiến trình chờ tối đa 12 s cho lệnh đang chạy ở luồng khác (`/alt close`: cả lượt đóng là một vùng). Vùng gồm cả các bước theo sau lệnh sàn: báo tin mở lệnh, và sau chốt TP1 thì dời SL trên sàn, ghi DB, báo tin. Chỉ `LiveEngine` (paper không có lệnh trên sàn). Altcoin lên 3.2.1 nên câu "build `380dfca`" ở dưới là lịch sử.
 
 **Vấn đề còn mở (đã cân nhắc, chấp nhận):**

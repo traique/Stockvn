@@ -198,7 +198,9 @@ t.ok("altcoin/bot without run.py: exit 1 (missing file)", code == 1 and "altcoin
 if shutil.which("git"):
     # stock only, with the ignored __pycache__/ git leaves behind when a tag before altcoin is checked out
     repo = copy_repo(_common.ROOT / "gitcopy", skip="altcoin/")
-    git = ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+    # that tag was stamped without altcoin/hosted.py (in the stock's build since v1.15.0)
+    subprocess.run([sys.executable, "-m", "vnbot.version", "--stamp"], cwd=repo, check=True, capture_output=True)
+    git =["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.invalid",
            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
 
     def sh(*args: str, when: int | None = None) -> None:

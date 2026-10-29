@@ -18,7 +18,7 @@ from pathlib import Path
 
 VERSION = "3.2.1"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "07bb13b"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "e737954"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
@@ -27,6 +27,7 @@ NOTES = (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",
         "Live: SIGTERM (server khởi động lại) rơi giữa lúc đặt lệnh trên sàn và lúc ghi DB không còn bỏ dở: ghi DB, báo tin, dời SL sau chốt TP1 xong rồi mới tắt",
         "/alt close đang chạy được chờ đóng hết các lệnh (tối đa 12 giây) rồi bot mới tắt",
+        "Web: lý do, bài học, lỗi do AI trả về hiện dạng chữ thuần, không chạy được mã trên trang",
     )),
     ("3.2.0", "2026-10-28", (
         "Rút từ 211 tín hiệu bóng 23–27/10: cổng mới không đánh ngược nhịp 1h của coin (short khi vừa tăng ≥0.5%/1h: -0.72R, thắng 18%)",

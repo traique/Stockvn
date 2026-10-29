@@ -15,7 +15,8 @@ offline: the real TelegramBot with a fake Bot API, the real Zoom webhook path, a
   Zoom, takeover dropped, start notice once per 30 minutes, /resume -> /alt resume, dedupe (a
   dropped one may come again), 15 a minute with a summary a minute after the first dropped
   (🛑 always), a blocked channel never blocks the pipe reader, failures counted, the "altcoin"
-  switch, the 50 kept before the stock is up, secrets masked, /alt zoomtest per channel.
+  switch, the 50 kept before the stock is up, secrets masked, /alt zoomtest per channel; at
+  shutdown flush() sends what is queued (Zoom's queue too), bounded, at once when off.
 """
 import contextlib
 import io
@@ -651,6 +652,63 @@ t.ok("...the overflow dropped and counted, the newest state frame still in state
      st["bridge"]["dropped"] >= 500 - ab.QUEUE_SIZE - 1 and st["bridge"]["notified"] == 500 and st["leader"] is True
      and st["build"] == "380dfca", st["bridge"])
 gate.set()
+
+# shutdown (the supervisor's stop(), the child gone): flush() sends what is queued, Zoom's queue included
+import queue  # noqa: E402
+import types  # noqa: E402
+
+
+class SlowSink:
+    """Telegram sends from the bridge's thread (0.1 s); Zoom has its own queue and thread (0.3 s)."""
+
+    def __init__(self):
+        self.sent, self.zoomed, self.zoom = [], [], types.SimpleNamespace(queue=queue.Queue())
+        threading.Thread(target=self._zoom, daemon=True).start()
+
+    def alt_on(self):
+        return True
+
+    def alt_broadcast(self, text, on_fail=None):
+        time.sleep(0.1)
+        self.sent.append(text)
+        self.zoom.queue.put(text)
+        return True
+
+    def _zoom(self):
+        while True:
+            text = self.zoom.queue.get()
+            time.sleep(0.3)
+            self.zoomed.append(text)
+            self.zoom.queue.task_done()
+
+
+sink, sup4 = SlowSink(), supervisor()
+live4 = ab.Bridge(sup4)
+live4.attach(sink)
+for i in range(3):
+    live4.put(f"📉 ĐÓNG LỆNH {i}")
+started = time.monotonic()
+sup4.drain(10)
+took = time.monotonic() - started
+want = [f"🪙 Altcoin › 📉 ĐÓNG LỆNH {i}" for i in range(3)]
+t.ok("drain (Bridge.flush, set on the supervisor): returns once the 3 queued are sent on Telegram and by Zoom's thread",
+     sup4.drain == live4.flush and sink.sent == want and sink.zoomed == want and took < 5, (took, sink.zoomed))
+gate2 = threading.Event()
+stuck = type("Stuck", (), {"alt_on": lambda self: True,
+                           "alt_broadcast": lambda self, text, on_fail=None: gate2.wait(120)})()
+live5 = ab.Bridge(supervisor())
+live5.attach(stuck)
+live5.put("📉 kẹt")
+started = time.monotonic()
+live5.flush(0.5)
+took = time.monotonic() - started
+gate2.set()
+t.ok("...a channel that hangs: flush gives up after its timeout", 0.45 <= took < 3, took)
+off = ab.Bridge(supervisor(enabled=False))
+off.attach(bot)                                  # its wake-up None stays queued: no thread when off
+started = time.monotonic()
+off.flush(5)
+t.ok("...ALTCOIN_ENABLED off: flush returns at once (every shutdown of the stock alone)", time.monotonic() - started < 0.1)
 t.ok("hub.json's bridge: every counter", set(st["bridge"]) == {"notified", "muted", "dropped", "deduped", "send_failed",
                                                                "last_notify_ts", "last_cmd_ts"} and SUP.state()["bridge"]["last_cmd_ts"])
 

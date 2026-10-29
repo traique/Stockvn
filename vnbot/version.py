@@ -4,7 +4,8 @@ changes.
 
 - ``VERSION`` / ``RELEASED``: the release, with ``NOTES`` (newest first).
 - ``build()``: a short fingerprint of the code that is running (every ``.py`` file of
-  ``tradingagents/``, ``vnbot/`` and ``main_botkeep.py``, this file excepted). The same
+  ``tradingagents/``, ``vnbot/``, ``main_botkeep.py`` and ``altcoin/hosted.py`` - the altcoin's
+  glue, outside its own fingerprint -, this file excepted). The same
   files give the same fingerprint on any machine, so it tells whether the server runs
   exactly the released code (``RELEASE_BUILD``) or a partial upload / a local edit.
 - After changing the code on purpose: raise ``VERSION`` (vMAJOR.MINOR.PATCH), add its ``NOTES``, then
@@ -26,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.15.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "5bd7c8e"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "3733221"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -48,6 +49,10 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Tin Altcoin tới cùng chat và Zoom của Cổ phiếu, mọi phần mở đầu “🪙 Altcoin ›”; công tắc Altcoin trên /ai",
         "Thông báo Altcoin chống trùng, tối đa 15 tin/phút (tin 🛑/⚠️ luôn gửi); /alt zoomtest gửi thử từng kênh",
         "Kèm Altcoin 3.2.1: khởi động lại server không còn cắt giữa lúc đặt lệnh live và lúc ghi DB",
+        "Khởi động lại server: tin Altcoin của những giây cuối (mở, đóng lệnh) được gửi xong rồi mới tắt",
+        "Altcoin bị kill giữa lúc ghi SQLite không còn kẹt khi chạy lại: DB tự phục hồi như bot chạy riêng",
+        "Trang /altcoin/ báo đỏ khi tin Altcoin không tới được Cổ phiếu hoặc có khoá bị che đã bị bỏ",
+        "Mã bản dựng của Cổ phiếu tính cả altcoin/hosted.py (file nối hai bot)",
         "Cần Python 3.12 trở lên",
     )),
     ("v1.14.0", "2026-10-28", (
@@ -172,8 +177,8 @@ _VN = timezone(timedelta(hours=7))
 def _code_files() -> list[Path]:
     files = sorted(p for d in ("tradingagents", "vnbot") for p in (ROOT / d).rglob("*.py")
                    if "__pycache__" not in p.parts)
-    main = ROOT / "main_botkeep.py"
-    return [p for p in files + ([main] if main.exists() else []) if p.resolve() != Path(__file__).resolve()]
+    extra = [p for p in (ROOT / "main_botkeep.py", ROOT / "altcoin" / "hosted.py") if p.exists()]
+    return [p for p in files + extra if p.resolve() != Path(__file__).resolve()]
 
 
 @lru_cache(maxsize=1)

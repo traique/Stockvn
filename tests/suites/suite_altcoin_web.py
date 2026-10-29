@@ -5,7 +5,9 @@ the real bot/dashboard.build_app with a stub bot, after altcoin/hosted.py adapt(
   the three that go to the stock (/ from the switch, /ai#kenh and /zoom from the channel card);
   never /altcoin/altcoin/ nor "@stock/";
 - /caidat: one "Kênh do Stock quản lý" card instead of the two channel cards; with the card
-  seam gone, the same text as a banner; adapt() names a seam that is gone (ERROR);
+  seam gone, the same text as a banner; adapt() names a seam that is gone (ERROR); the AI's
+  text escaped in the dashboard's JS; a red banner on every page for seam_ok false or a
+  dropped masked value;
 - the child lets in only the Hub: X-Hub-Token, X-Hub-Cmd-Token for /_hub/*, GET /health alone
   without; a "/x" redirect gets the prefix;
 - POST /_hub/command (the /alt bridge): 503 before the bot is built, 400 off the allowlist, 409
@@ -112,6 +114,24 @@ hosted_missing = subprocess.run(
 out = hosted_missing.stdout
 t.ok("adapt() names the seams that are gone, each with an ERROR line", "MISSING ['ui.card', 'dashboard.build_app']" in out
      and "Seam ui.card không còn" in out and "Seam dashboard.build_app không còn" in out, out + hosted_missing.stderr[-500:])
+# The AI's text now runs on the stock's origin (same password): never raw into innerHTML
+raw_ai = re.findall(r"\$\{(?:r\.reason|r\.decision|m\.last_error|x\.ai_reason|x\.ai_decision|x\.lesson|x\.verdict"
+                    r"|x\.tags)\b(?!\?)", dashboard.APP_JS)     # "${x.tags?`…`:''}": a test, not shown
+t.ok("dashboard JS: the AI's reason, decision, error, lesson, verdict and tags go through esc()", not raw_ai and all(
+    f"esc({f})" in dashboard.APP_JS for f in ("r.reason", "r.decision", "m.last_error", "x.ai_reason", "x.ai_decision",
+                                              "x.lesson", "x.verdict", "x.tags")), raw_ai)
+t.ok("no banner while the hub is fine (or absent)", 'class="alert alert-err"' not in pages["/"])
+hosted.HUB = hosted.Hub(None, {"dropped_secrets": ["ALT_OKX_API_SECRET", "OPENROUTER_API_KEY"]})
+hosted.HUB.sent = {"t": "state", "seam_ok": False}
+for path in ("/", "/ai", "/caidat", "/phienban"):
+    html = c.get(path).text
+    t.ok(f"{path}: seam_ok false and dropped secrets → one red banner right after <main>, both said",
+         html.count('class="alert alert-err"') == 1 and '<main id="main"><div class="alert alert-err" role="alert">' in html
+         and "lỗi kênh" in html and "ALT_OKX_API_SECRET, OPENROUTER_API_KEY" in html)
+hosted.HUB = hosted.Hub(None, {"dropped_secrets": []})
+hosted.HUB.sent = {"t": "state", "seam_ok": True}
+t.ok("...both fine again: no banner", 'class="alert alert-err"' not in c.get("/").text)
+hosted.HUB = None
 
 # ── 2. only the Hub gets in ──
 t.ok("no X-Hub-Token -> 403", bare.get("/").status_code == 403 and bare.get("/api/state").status_code == 403)

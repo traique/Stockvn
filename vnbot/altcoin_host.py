@@ -27,8 +27,10 @@ Off unless ALTCOIN_ENABLED=1: then nothing starts and nothing changes but one lo
   and handed to ``on_notify`` (vnbot.altcoin_bridge: the stock's channels). Its pages are
   served under /altcoin/ by vnbot.hub, through ``upstream()``; the /alt commands reach it
   through ``command_target()``.
-- ``stop()``: SIGTERM, 15 s to release the leader lock, SIGKILL. The child also dies with
-  the stock process and is the first the kernel kills when memory runs out.
+- ``stop()``: SIGTERM, 15 s to release the leader lock, SIGKILL; then the pipe read to its
+  end and ``drain`` (vnbot.altcoin_bridge) given DRAIN_WAIT s to send the child's last
+  notifications. The child also dies with the stock process and is the first the kernel
+  kills when memory runs out.
 
 ``state()`` is a snapshot replaced whole, read without a lock; /health shows its "state" only.
 Standard library only (the stock's dotenv for the altcoin's files).
@@ -62,6 +64,7 @@ WAIT_STOCK = 60                 # for the stock to be up before the first start
 READY_TIMEOUT, READY_POLL = 120, 2
 WATCH_EVERY, WATCH_TIMEOUT, WATCH_MISSES = 30, 10, 4
 STOP_WAIT = 15                  # SIGTERM to SIGKILL: time to release the leader lock
+DRAIN_WAIT = 5                  # after the child's exit: its last frames read, then sent
 BACKOFF_START, BACKOFF_MAX, HEALTHY_RESET = 20, 600, 900
 WAITING_EXTRA = 10              # exit 75: tried again after LEADER_TTL + this
 MAX_LINE = 64 * 1024            # a longer line on the pipe is dropped
@@ -226,6 +229,7 @@ class Supervisor:
         self._readers: list[threading.Thread] = []
         self._tokens = ("", "")                 # HUB_TOKEN, HUB_CMD_TOKEN of the running child
         self.on_notify = None                   # (text) -> None, never blocking: vnbot.altcoin_bridge
+        self.drain = None                       # (timeout) -> None, at stop(): vnbot.altcoin_bridge
         self._panel = {"ignored_keys": [], "dropped_secrets": []}
         self._child: dict = {}
         self._spawns = 0
@@ -278,13 +282,18 @@ class Supervisor:
 
     def stop(self) -> None:
         """SIGTERM to the child, STOP_WAIT seconds to release its lock, then SIGKILL; no new
-        start after this. Safe twice, and from a signal handler."""
+        start after this. Then its last notifications (a trade opened or closed before it
+        stopped): the pipe read to its end, and sent. Safe twice, and from a signal handler."""
         with self._lock:
             self._stopping.set()
             proc = self._proc
         if proc is not None and proc.poll() is None:
             logger.info("Altcoin: dừng (pid %d)", proc.pid)
             self._kill(proc)
+        for reader in self._readers:            # each ends at EOF: the child is gone
+            reader.join(DRAIN_WAIT)
+        if self.drain is not None:
+            self.drain(DRAIN_WAIT)
         if self.enabled:
             self._set(state="stopped", pid=None)
 
@@ -383,7 +392,8 @@ class Supervisor:
         if self.fresh:
             cmd.append("--allow-empty-db")
         read_end, write_end = os.pipe()
-        env.update(HUB_FD=str(write_end), HUB_TOKEN=tokens[0], HUB_CMD_TOKEN=tokens[1])
+        env.update(HUB_FD=str(write_end), HUB_TOKEN=tokens[0], HUB_CMD_TOKEN=tokens[1],
+                   HUB_DROPPED=",".join(info["dropped_secrets"]))      # names only: the banner of its pages
         try:
             with self._lock:
                 if self._stopping.is_set():
