@@ -2573,6 +2573,11 @@ class TradingBot:
 
         account = self.taisan
         if not effective(account.entries()):
+            if account.state()["shadow"]:        # the zone alerts of valuation cards (/tsdinhgia) need no holding
+                try:
+                    account.settle_shadow(day)
+                except Exception as exc:  # noqa: BLE001 - settled on a later day
+                    logger.warning("Tài sản: settle_shadow on %s failed: %s", day, exc)
             return ""
         vni = account.market.daily_closes(vn_rules.BENCHMARK, day)
         if day not in vni:

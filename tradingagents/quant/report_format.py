@@ -11,6 +11,7 @@ ra như thế nào và kèm cảnh báo gì.
 import math
 import re
 from datetime import datetime
+from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -530,7 +531,85 @@ def price_numbers(text: str) -> set[int]:
     return out
 
 
-def find_unknown_prices(text: str, allowed_text: str) -> list[int]:
-    """Số dạng giá trong `text` không xuất hiện ở `allowed_text` (prompt đã cấp)."""
-    allowed = price_numbers(allowed_text)
-    return sorted(value for value in price_numbers(text) if value not in allowed)
+# GIÁ TRỊ HỢP LÝ trong chữ của LLM: số dạng giá đầu tiên sau từ khoá, trong cùng vế câu (tới , ; . ! ? rồi
+# khoảng trắng, hoặc xuống dòng), cùng các số nối liền sau nó thành khoảng hay danh sách ("28.000-29.000",
+# "28.000 đến 29.000"). Nhãn [FACT/THỐNG KÊ/PHÁN ĐOÁN dd/mm] và số không phải giá (ROE 17,12%, 1,20 lần, p80,
+# vốn hoá 229.513 tỷ) được bỏ qua để tới đúng con số. Gặp từ của kế hoạch giao dịch (stop, cắt lỗ, hỗ trợ,
+# kháng cự, vùng mua, T1/T2, mục tiêu, khi/nếu) trước con số thì thôi: đó là mốc của engine. Bên ngoài (VCI,
+# CTCK...) đứng trước trong câu hoặc giữa từ khoá và con số: quan điểm của họ, như giá mục tiêu, không tính.
+# - "giá trị hợp lý": cách tối đa 40 ký tự (không kể nhãn). "mục tiêu/target" không chặn khi ngay trước con số
+#   là là/ở/mức/khoảng/: = ("giá trị hợp lý theo P/B mục tiêu 1,5 lần là 38.000"), trừ mốc đã có ngoài thẻ (``levels``).
+# - "định giá" (hay dùng chung chung: "rủi ro định giá", "định giá rẻ"): số cách tối đa 12 ký tự, hoặc 30 ký
+#   tự mà đứng ngay sau là/ở/mức/khoảng/quanh/tương ứng/: = ~ ≈.
+# - Tên Base/Bear/Bull/eab (đúng chữ hoa, cả trong bảng "| Bull | 28.066 |"), chỉ với ngân hàng hay lượt chạy có
+#   thẻ định giá (``names``; mã khác thì Bull/Bear là hai phe tranh luận): số đứng ngay sau, chỉ cách bởi dấu, nhãn,
+#   một ngoặc như "(ROE p80)" hoặc là/ở/mức/khoảng/quanh - "phe Bull nhắm kháng cự 35.000" không tính. Mốc mà dữ liệu
+#   của lượt chạy đã có ngoài thẻ (``levels``: vùng mua, stop, T1, T2, hỗ trợ, kháng cự...) đứng sau tên là kịch
+#   bản (engine cũng gọi kịch bản của nó là BASE/BULL/BEAR), không tính.
+# "giá hợp lý" một mình không tính: trong chữ giao dịch nó thường là giá mua ("chờ giá hợp lý hơn").
+_FAIR_VALUE_TRIGGERS = (
+    (re.compile(r"giá trị hợp l[ýí]", re.IGNORECASE), "phrase"),
+    (re.compile(r"định giá", re.IGNORECASE), "loose"),
+    (re.compile(r"(?<![\w-])(?:Base|Bear|Bull|eab)(?![\w-])"), "name"),
+)
+_FAIR_LABEL_RE = re.compile(r"\[(?:FACT|THỐNG KÊ|PHÁN ĐOÁN)[^\]\n]*\]")
+_CLAUSE_END_RE = re.compile(r"[,;.!?](?=\s|$)|\n")
+_PLAN_WORD_RE = re.compile(
+    r"(?i:\b(?:stop|cắt lỗ|chốt lời|hỗ trợ|kháng cự|vùng mua|điểm mua|mục tiêu|target|khi|nếu)\b)|\bT[12]\b")
+_TARGET_WORD_RE = re.compile(r"(?i:\b(?:mục tiêu|target)\b)")
+_LINK_END_RE = re.compile(r"(?:(?<!\w)(?:là|ở|mức|khoảng|quanh|tương ứng|tương đương)|[:=~≈])\s*$", re.IGNORECASE)
+_NAME_GAP_RE = re.compile(r"(?:[\s:=~≈*|→()-]|\([^()\n]{0,24}\)|(?<!\w)(?:là|ở|mức|khoảng|quanh)(?!\w))*")
+_RANGE_JOIN_RE = re.compile(r"(?:\s*(?:VND|đồng|đ)(?!\w))?\s*(?:[-–—~]|(?<!\w)(?:đến|tới|và|hoặc)(?!\w))\s*",
+                            re.IGNORECASE)
+_EXTERNAL_RE = re.compile(r"\b(?:VCI|Vietcap|CTCK|công ty chứng khoán|chuyên viên|giới phân tích)\b", re.IGNORECASE)
+
+
+def _external_before(text: str, start: int) -> bool:
+    """Bên ngoài (VCI, CTCK...) đứng trước trong cùng câu: "Theo VCI, định giá mục tiêu 48.800"."""
+    sentence = re.split(r"[.!?](?:\s|$)|\n", text[max(0, start - 60) : start])[-1]
+    return bool(_EXTERNAL_RE.search(sentence))
+
+
+def _fair_gap(kind: str, gap: str) -> bool:
+    """Chữ giữa từ khoá và con số (đã bỏ nhãn) có cho số đó là giá trị hợp lý không."""
+    if kind == "phrase":
+        planned = _PLAN_WORD_RE.search(_TARGET_WORD_RE.sub(" ", gap) if _LINK_END_RE.search(gap) else gap)
+        return not planned and len(gap.strip()) <= 40
+    if _PLAN_WORD_RE.search(gap):
+        return False
+    if kind == "loose":
+        return len(gap.strip()) <= 12 or (len(gap.strip()) <= 30 and bool(_LINK_END_RE.search(gap)))
+    return bool(_NAME_GAP_RE.fullmatch(gap))
+
+
+def fair_value_numbers(text: str, levels: set[int] | frozenset[int] = frozenset(), *, names: bool = True) -> list[int]:
+    """Các số dạng giá được nêu như giá trị hợp lý: sau "giá trị hợp lý / định giá", và sau "Base / Bear / Bull /
+    eab" khi ``names``. ``levels``: mốc có sẵn ngoài thẻ, không tính khi là kịch bản (sau tên, sau "mục tiêu")."""
+    text = text or ""
+    found: set[int] = set()
+    for pattern, kind in _FAIR_VALUE_TRIGGERS:
+        if kind == "name" and not names:
+            continue
+        for word in pattern.finditer(text):
+            if kind != "name" and _external_before(text, word.start()):
+                continue
+            clause_end = _CLAUSE_END_RE.search(text, word.end())
+            # vốn hoá 229.513 tỷ, VNINDEX 1.720 điểm: không phải giá, xem số sau
+            numbers = [n for n in _PRICE_NUMBER_RE.finditer(text, word.end(), clause_end.start() if clause_end else len(text))
+                       if not _is_index_points(text, n)]
+            if not numbers:
+                continue
+            gap = _FAIR_LABEL_RE.sub("", text[word.end() : numbers[0].start()])
+            if not _fair_gap(kind, gap) or (kind != "name" and _EXTERNAL_RE.search(gap)):
+                continue
+            run = numbers[:1]
+            for prev, after in pairwise(numbers):
+                if not _RANGE_JOIN_RE.fullmatch(text, prev.end(), after.start()):
+                    break
+                run.append(after)
+            scenario = kind == "name" or bool(_TARGET_WORD_RE.search(gap))
+            for number in run:
+                value = _normalize_price_token(number.group(1))
+                if value is not None and value >= 1000 and not (scenario and value in levels):
+                    found.add(value)
+    return sorted(found)

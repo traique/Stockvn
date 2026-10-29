@@ -144,7 +144,7 @@ ZOOM_USER = "zoom"
 # Siêu tín hiệu account point to it.
 TAISAN_COMMANDS = ("/ts", "/taisan", "/tsmua", "/tsban", "/tsthuong", "/tscotuc", "/tsnap", "/tsrut", "/tstien",
                    "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong",
-                   "/tskiemtra", "/tsgiu", "/tssan", "/tsmuctieu")
+                   "/tskiemtra", "/tsgiu", "/tssan", "/tsmuctieu", "/tsdinhgia")
 STV_MOVED = {
     "/stvkhop": "Danh mục tiền thật đã chuyển sang Tài sản: mua /tsmua MÃ KL GIÁ, bán /tsban MÃ KL GIÁ (xem /ts).",
     "/stvcosan": "Danh mục tiền thật đã chuyển sang Tài sản: cổ phiếu mua từ trước ghi bằng /tsmua MÃ KL GIÁ NGÀY_MUA (xem /ts).",
