@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 QUARTER_REPORT_LAG_DAYS = 45
 ANNUAL_REPORT_LAG_DAYS = 90
-PE_HISTORY_QUARTERS = 20
 _SECTION_TITLES = {
     "INCOME_STATEMENT": "Kết quả kinh doanh",
     "BALANCE_SHEET": "Bảng cân đối kế toán",
@@ -129,6 +128,19 @@ def _num(value) -> float | None:
     return v if v == v else None  # drop NaN
 
 
+# Bank ratios VCI serves with a minus sign though they are costs or cover (checked live
+# 29/10/2026: negative in every quarter of CTG, VCB, ACB, MBB); printed as positive.
+NEGATIVE_SIGN_RATIOS = frozenset({
+    "cir", "costToIncome", "loansLossReservesToNPLs", "provisionToOutstandingLoans", "averageCostOfFinancing",
+})
+
+
+def ratio_value(row: dict, field: str) -> float | None:
+    """A ratio-row field as a number, with VCI's stray minus sign dropped (``NEGATIVE_SIGN_RATIOS``)."""
+    v = _num(row.get(field))
+    return abs(v) if v is not None and field in NEGATIVE_SIGN_RATIOS else v
+
+
 def _pct(value) -> str:
     v = _num(value)
     return "N/A" if v is None else rfmt.fmt_pct(v * 100)
@@ -142,12 +154,6 @@ def _ratio(value, decimals: int = 2) -> str:
 def _billion(value) -> str:
     v = _num(value)
     return "N/A" if v is None else f"{rfmt.fmt_number(v / 1e9, 1)} tỷ"
-
-
-def _percentile_rank(current: float, history: list[float]) -> float:
-    if not history:
-        return 50.0
-    return round(sum(1 for h in history if h <= current) / len(history) * 100, 1)
 
 
 def _growth_lines(symbol: str, as_of_date: str | None) -> list[str]:
@@ -193,6 +199,17 @@ def _peer_benchmark(symbol: str, metric: str, as_of_date: str | None) -> tuple[f
     return round(sum(values) / len(values), 2), len(values)
 
 
+def _own_history_line(symbol: str, metric: str, as_of_date: str | None) -> str:
+    """The run date's multiple from that session's price, against every session since 2018."""
+    from tradingagents.dataflows import vn_valuation  # it reads this module's helpers
+
+    try:
+        return vn_valuation.multiple_line(symbol, metric, as_of_date)
+    except Exception as exc:  # noqa: BLE001 - the history line is enrichment
+        logger.warning("Valuation history of %s unavailable: %s", symbol, exc)
+        return f"- {vn_valuation.METRIC_LABELS[metric]} hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu"
+
+
 def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
     """Valuation, profitability, leverage and growth as known on the run date."""
     symbol = normalize_symbol(ticker)
@@ -216,12 +233,13 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
         f"# Hồ sơ định giá: {profile.label} - so sánh chính theo {profile.benchmark_metric.upper()}. {profile.note}",
         "",
         "## Định giá và hiệu quả (TTM theo kỳ báo cáo)",
-        f"- P/E: {_ratio(latest.get('pe'))} | P/B: {_ratio(latest.get('pb'))} | P/S: {_ratio(latest.get('ps'))} | EV/EBITDA: {_ratio(latest.get('evToEbitda'))}",
+        f"- P/E: {_ratio(latest.get('pe'))} | P/B: {_ratio(latest.get('pb'))} | P/S: {_ratio(latest.get('ps'))} | EV/EBITDA: {_ratio(latest.get('evToEbitda'))} "
+        "(số VCI của kỳ, tính theo giá lúc VCI cập nhật, không phải giá hôm nay)",
         f"- ROE: {_pct(latest.get('roe'))} | ROA: {_pct(latest.get('roa'))} | ROIC: {_pct(latest.get('roic'))}",
     ]
     if profile.key == "banking":
         lines.append(
-            f"- NIM: {_pct(latest.get('netInterestMargin'))} | CIR: {_pct(latest.get('cir'))} | "
+            f"- NIM: {_pct(latest.get('netInterestMargin'))} | CIR: {_pct(ratio_value(latest, 'cir'))} | "
             f"NPL: {_pct(latest.get('npl'))} | CASA: {_pct(latest.get('casaRatio'))} | LDR: {_pct(latest.get('ldrLoanDepositRatio'))}"
         )
     else:
@@ -235,19 +253,14 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
 
     metric = profile.benchmark_metric
     current = _num(latest.get(metric))
-    history = [v for v in (_num(r.get(metric)) for r in rows[:PE_HISTORY_QUARTERS]) if v is not None and v > 0]
-    if current is not None and current > 0 and len(history) >= 4:
-        lines.append(
-            f"- {metric.upper()} hiện tại {rfmt.fmt_number(current)} nằm ở bách phân vị "
-            f"{rfmt.fmt_number(_percentile_rank(current, history), 0)} so với {len(history)} quý gần nhất của chính mã "
-            f"(thấp nhất {rfmt.fmt_number(min(history))}, cao nhất {rfmt.fmt_number(max(history))})"
-        )
+    lines.append(_own_history_line(symbol, metric, as_of_date))
     peer_avg, peer_n = _peer_benchmark(symbol, metric, as_of_date)
     if peer_avg is not None and current:
         gap = (current - peer_avg) / peer_avg * 100
         lines.append(
             f"- {metric.upper()} trung bình {peer_n} mã cùng ngành ({sector.get_primary_sector_label(symbol)}): "
-            f"{rfmt.fmt_number(peer_avg)} → {symbol} {'cao hơn' if gap > 0 else 'thấp hơn'} {rfmt.fmt_pct(abs(gap))}"
+            f"{rfmt.fmt_number(peer_avg)} → {symbol} {'cao hơn' if gap > 0 else 'thấp hơn'} {rfmt.fmt_pct(abs(gap))} "
+            "(cùng theo số VCI của kỳ)"
         )
     else:
         lines.append("- So sánh ngành: chưa đủ dữ liệu mã cùng ngành.")
