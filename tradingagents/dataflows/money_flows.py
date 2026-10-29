@@ -71,6 +71,9 @@ def _vendor():
 # several flow series and each failed request would otherwise wait out its retries.
 BREAKER_SECONDS = 300
 _down_until: dict[str, float] = {}
+# The informational VCI calls (the valuation's prices, events and card, a manual card's events) trip a
+# breaker of their own: a slow answer there must not keep the engine's flow fetches off VCI for 5 minutes.
+VCI_INFO = "VCI-info"
 
 
 def reset_breaker() -> None:

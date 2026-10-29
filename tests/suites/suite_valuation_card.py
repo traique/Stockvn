@@ -2,9 +2,10 @@
 fair-value check: the PDF profile's Base reproduced, the book point-in-time (cash dividends after
 the quarter's end, the bonus issue), the annual ROE by its publication, the labels, the card in the
 engine's report, the fundamentals tool and /nhanh, and fair values off the card flagged in the
-fundamentals report and the guarded outputs - not the engine's own levels. CTG and TPB data recorded
-from VCI on 29/10/2026 (tests/fixtures/valuation_{CTG,TPB}_2026-10-28.json; TPB: a cash dividend and a
-stock dividend going ex the same day)."""
+fundamentals report and the guarded outputs - not the engine's own levels, nor a non-bank's Bull/Bear
+sides; VCI behind on a bonus issue's ex-date. CTG and TPB data recorded from VCI on 29/10/2026
+(tests/fixtures/valuation_{CTG,TPB}_2026-10-28.json; TPB: a cash dividend and a stock dividend going ex
+the same day)."""
 import json
 import os
 import re
@@ -302,15 +303,25 @@ t.ok("no card for a past date (the data missing) ...", vv.card("CTG", "2026-09-3
 vv.build_card = real_build
 age("CTG", "2026-09-30")
 t.ok("... is asked again past the hour, not kept until a restart", vv.card("CTG", "2026-09-30") is not None)
-money_flows._down_until["VCI"] = time.time() + 60
+money_flows._down_until[money_flows.VCI_INFO] = time.time() + 60
 before = CALLS["statement"]
 try:
     vv.card("CTG", "2026-09-29")
     failed_fast = False
 except VendorUnavailableError:
     failed_fast = True
-t.ok("VCI breaker open (money_flows._guarded): the card fails at once, no VCI read",
+t.ok("the informational VCI breaker open (money_flows.VCI_INFO): the card fails at once, no VCI read",
      failed_fast and CALLS["statement"] == before)
+money_flows.reset_breaker()
+real_statement = vci.fetch_statement
+vci.fetch_statement = lambda *a: (_ for _ in ()).throw(VendorUnavailableError("VCI slow"))
+try:
+    vv.card("CTG", "2026-09-26")
+except VendorUnavailableError:
+    pass
+vci.fetch_statement = real_statement
+t.ok("a card failing trips that breaker alone, not the engine's 'VCI' one (its flow fetches go on)",
+     set(money_flows._down_until) == {money_flows.VCI_INFO}, money_flows._down_until)
 money_flows.reset_breaker()
 t.ok("no data for a bank (NoMarketDataError) is not an outage: no card, the breaker stays closed",
      vv.card("VCB", "2026-10-28") is None and not money_flows._down_until)
@@ -339,6 +350,39 @@ t.ok("30/03/2026: the 2024 annual report (05/03/2025) and Q3/2025 (published 202
      and labelled(mar30_text), mar30_text)
 t.ok("... and none on a card whose dates are all of the run date's year (28/10/2026)",
      not re.search(r"\[(?:FACT|THỐNG KÊ) \d{2}/\d{2}/", text), text)
+
+# ───────────── 6d. VCI behind on a bonus issue's ex-date (CTG 17/12/2025, 44,6%) ─────────────
+# The evening of 17/12/2025: VCI price-history ends 16/12, the engine's bars hold 17/12 and are not re-adjusted
+# yet (16/12 still 51.000 there, as on VCI). The shares changed that day: the 17/12 close is not carried on
+# the 16/12 count.
+real_price_history = vv.price_history
+
+
+def vci_until(day: str) -> None:
+    """VCI price-history as if its last posted session were ``day``."""
+    vv.price_history = lambda sym: real_price_history(sym).loc[lambda f: f["Date"] <= pd.Timestamp(day)]
+
+
+vci_until("2025-12-16")
+CALLS["events"].clear()
+ex_card = vv.build_card("CTG", "2025-12-17")
+t.ok("a bonus issue going ex on a session VCI has not posted: that session not added, the card stays on 16/12 "
+     "(51.000 over 5.369.991.748 shares), not 34.700 over the old count",
+     (ex_card.day, ex_card.close, ex_card.shares) == (date(2025, 12, 16), 51_000.0, 5_369_991_748.0)
+     and ("CTG", "2025-12-17", "2025-12-17", "ISS") in CALLS["events"], (ex_card.day, ex_card.close, ex_card.shares))
+ex_line = vv.multiple_line("CTG", "pb", "2025-12-17")
+t.ok("... and the P/B line says 'phiên gần nhất có dữ liệu' with the 16/12 close (not 'P/B hôm nay 1,10')",
+     ex_line.startswith("- P/B phiên gần nhất có dữ liệu 1,62 (giá đóng cửa 16/12/2025: 51.000;"), ex_line)
+vci_until("2025-12-12")
+upto = vv.multiple_history("CTG", "pb", "2025-12-17")
+t.ok("... sessions before the ex-date are still added (VCI ends 12/12: 15 and 16/12 from the bars)",
+     upto["Date"].iloc[-1] == pd.Timestamp("2025-12-16") and upto["TotalShares"].iloc[-1] == 5_369_991_748, upto.tail(3))
+vci_until("2025-10-13")
+cash = vv.multiple_history("CTG", "pb", "2025-10-14")
+t.ok("a cash dividend going ex (CTG 450đ, 14/10/2025) changes no shares: that session is added",
+     cash["Date"].iloc[-1] == pd.Timestamp("2025-10-14")
+     and cash["TotalShares"].iloc[-1] == SHARES[pd.Timestamp("2025-10-14")] == SHARES[pd.Timestamp("2025-10-13")])
+vv.price_history = real_price_history
 
 # ───────────── 7. banks only; the engine report, the fundamentals tool, /nhanh ─────────────
 details_asked = []
@@ -388,8 +432,8 @@ t.ok("/nhanh (bank): one line after the engine's summary - the price's session, 
               "Bull 28.066 → Đắt: giá 30.700 (phiên 28/10) trên Base 11,1%. Ke 12% đặt tay (Ke 10%-14%: Base "
               "28.749-26.619), BCTC Q2/2026", quick)
 t.ok("/nhanh (non-bank): the summary alone", service.quick_text("FPT", "2026-10-28") == "CTG - 30.700 VND")
-money_flows._down_until["VCI"] = time.time() + 60
-t.ok("/nhanh (bank) while the VCI breaker is open: the summary alone, at once",
+money_flows._down_until[money_flows.VCI_INFO] = time.time() + 60
+t.ok("/nhanh (bank) while the informational VCI breaker is open: the summary alone, at once",
      service.quick_text("CTG", "2026-09-28") == "CTG - 30.700 VND")
 money_flows.reset_breaker()
 
@@ -467,9 +511,32 @@ t.ok("Markdown tables and arrows: '| Bull | 35.000 |', 'Bull (ROE p80): 35.000',
      rfmt.fair_value_numbers("| Bear | 26.236 |\n| Base | 27.643 |\n| Bull | 35.000 |") == [26_236, 27_643, 35_000]
      and rfmt.fair_value_numbers("Bull (ROE p80): 35.000") == [35_000]
      and rfmt.fair_value_numbers("- Bull → 35.000") == [35_000])
-upd = guard({**STATE, "trader_investment_plan": "| Kịch bản | Giá |\n|---|---|\n| Bear | 26.236 |\n| Bull | 35.000 |"})
-t.ok("... a made-up Bull in a table, equal to a known resistance: flagged",
-     upd["guard_notes"] == "Trader: giá trị hợp lý không có trên thẻ định giá (35.000)", upd["guard_notes"])
+upd = guard({**STATE, "trader_investment_plan": "| Kịch bản | Giá |\n|---|---|\n| Bear | 26.236 |\n| Bull | 36.000 |"})
+t.ok("... a made-up Bull in a table, in no data: flagged",
+     upd["guard_notes"] == "Trader: giá trị hợp lý không có trên thẻ định giá (36.000)", upd["guard_notes"])
+upd = guard({**STATE, "investment_plan": "| Kịch bản | Giá |\n|---|---|\n| Bear | 26.236 |\n| Bull | 35.000 |\n\n"
+                                         "Phe Bull: 35.000 là kháng cự gần nhất."})
+t.ok("... a Bull at the engine's resistance (35.000), in a table or 'Phe Bull: 35.000 là kháng cự': a scenario, not a "
+     "fair value (a bank with its card)", upd["guard_notes"] == "" and "investment_plan" not in upd, upd["guard_notes"])
+
+# A non-bank has no card: Bull/Bear are the debaters' sides (the Research Manager weighs "the bull and bear sides").
+FPT_STATE = {"company_of_interest": "FPT", "trade_date": "2026-10-28", "quant_report": "Giá 30.000.",
+             "quant_decision": {"action": "HOLD", "price": 30_000.0, "deterministic_summary": "FPT"},
+             "market_report": "Kháng cự 35.000, hỗ trợ 26.000."}
+HPG_STATE = {"company_of_interest": "HPG", "trade_date": "2026-10-28",
+             "quant_report": "Giá 26.000. Hỗ trợ 24.500, kháng cự 28.500.",
+             "quant_decision": {"action": "NO_TRADE", "price": 26_000.0, "deterministic_summary": "HPG"}}
+debates = [(FPT_STATE, "- **Bull**: 35.000 nếu vượt đỉnh cũ.\n- **Bear**: 26.000 khi thủng MA50."),
+           (FPT_STATE, "| Bull | 35.000 |\n| Bear | 26.000 |"),
+           (HPG_STATE, "Phe Bull: 28.500 là kháng cự gần nhất, phe Bear lo ngại thủng 24.500."),
+           (HPG_STATE, "| Bull | 28.500 |\n| Bear | 24.500 |")]
+t.ok("non-banks (FPT, HPG): the sides' levels after Bull/Bear - the market report's, the engine's support and "
+     "resistance - pass as known prices, no card named",
+     all(output_guard.guard_text(x, st, label="Research Manager")[1] is None for st, x in debates),
+     [output_guard.guard_text(x, st, label="Research Manager")[1] for st, x in debates])
+t.ok("... a price in no data after Bull: the old note, not a card the stock cannot have",
+     output_guard.guard_text("Phe Bull: 36.000.", HPG_STATE, label="Research Manager")[1]
+     == "Research Manager: có mốc giá ngoài dữ liệu (36.000)")
 
 # The engine's own levels: support 29.000, stop 28.500, entry 30.000-30.700, T1 33.000, T2 35.000, live quote 30.900.
 # The engine names its scenarios BASE/BULL/BEAR; "định giá" and "giá hợp lý" are everyday words.
@@ -494,8 +561,8 @@ for name, report in (("with a card", PLAN_REPORT + "\n\n" + text), ("no card (no
          all(note is None for note in notes.values())
          and output_guard.guard_fundamentals({**plan_state, "fundamentals_report": " ".join(ENGINE_SENTENCES)})[1] is None,
          {x: n for x, n in notes.items() if n})
-t.ok("... but a price off the plan after Bull is still a fair value: 'Bull: 36.000' flagged",
-     output_guard.guard_text("Kịch bản Bull: 36.000.", {"quant_decision": PLAN, "quant_report": PLAN_REPORT + " 36.000"},
+t.ok("... but a price in no data after Bull is still a fair value off the card: 'Bull: 36.000' flagged",
+     output_guard.guard_text("Kịch bản Bull: 36.000.", {"quant_decision": PLAN, "quant_report": PLAN_REPORT + "\n\n" + text},
                              label="Trader")[1] == "Trader: giá trị hợp lý không có trên thẻ định giá (36.000)")
 
 t.ok("a card value rounded within 0,5% in a guarded output passes both checks (nothing like it elsewhere)",
@@ -507,6 +574,24 @@ upd = guard({**STATE, "fundamentals_report": "Theo VCI, định giá mục tiêu
              "final_trade_decision": "**Rating**: HOLD\n\nGiá mục tiêu của VCI 48.800 chỉ là tham khảo."})
 t.ok("VCI's target after 'định giá' (VCI before it, or 'mục tiêu'): not a fair value, still a known price for the PM",
      upd["guard_notes"] == "", upd["guard_notes"])
+upd = guard({**STATE, "fundamentals_report": "VCI khuyến nghị MUA với giá trị hợp lý 48.800 (26/08/2026). Theo VCI, giá "
+                                             "trị hợp lý của CTG là 48.800 đồng. Giá trị hợp lý theo Vietcap: 48.800.",
+             "final_trade_decision": "**Rating**: HOLD\n\nGiá mục tiêu của chuyên viên VCI là 48.800, cao hơn giá hiện tại."})
+t.ok("... after 'giá trị hợp lý' too (VCI before it, or between it and the price): the PM quoting it passes",
+     upd["guard_notes"] == "", upd["guard_notes"])
+t.ok("'giá trị hợp lý theo P/B mục tiêu 1,5 lần là 38.000' is a fair value; so is every price of a range or list",
+     rfmt.fair_value_numbers("Giá trị hợp lý theo P/B mục tiêu 1,5 lần là 38.000") == [38_000]
+     and rfmt.fair_value_numbers("giá trị hợp lý ở vùng 28.000-29.000") == [28_000, 29_000]
+     and rfmt.fair_value_numbers("giá trị hợp lý 28.000 VND đến 29.000 VND") == [28_000, 29_000]
+     and rfmt.fair_value_numbers("giá trị hợp lý so với mục tiêu T1: 33.000") == []
+     and rfmt.fair_value_numbers("Giá trị hợp lý 28.000 rồi giảm về 29.000") == [28_000],
+     rfmt.fair_value_numbers("giá trị hợp lý ở vùng 28.000-29.000"))
+upd = guard({**STATE, "fundamentals_report": "Giá trị hợp lý theo P/B mục tiêu 1,5 lần là 38.000; giá trị hợp lý ở "
+                                             "vùng 27.643-29.000.",
+             "final_trade_decision": "**Rating**: HOLD\n\nMục tiêu 38.000, vùng 29.000."})
+t.ok("... end to end: both invented in the fundamentals report, and no longer known prices for the PM",
+     "Fundamentals Analyst: giá trị hợp lý không có trên thẻ định giá (29.000, 38.000)" in upd["guard_notes"]
+     and "Portfolio Manager: có mốc giá ngoài dữ liệu (29.000, 38.000)" in upd["guard_notes"], upd["guard_notes"])
 # The engine's node could not build the card; the fundamentals tool built it later in the run (the same cache).
 tool_card = {**STATE, "company_of_interest": "CTG", "trade_date": "2026-10-28", "quant_report": R.report,
              "fundamentals_report": "Base 27.643 [THỐNG KÊ 28/10], Bull 28.066.",

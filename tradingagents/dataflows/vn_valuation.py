@@ -100,8 +100,9 @@ def price_history(symbol: str) -> pd.DataFrame:
     its close was final); later calls that day ask again only while the file
     lacks the last session due (``_due_session``), at most once an hour
     (``money_flows.RECHECK_SECONDS``). A failed fetch leaves the cached rows
-    (possibly none) and trips the shared VCI breaker (``money_flows._guarded``):
-    the calls of the next minutes get the cached rows at once.
+    (possibly none) and trips the breaker of the informational VCI calls
+    (``money_flows.VCI_INFO``, not the engine's): the calls of the next minutes
+    get the cached rows at once.
     """
     code = safe_ticker_component(symbol.upper())
     path = os.path.join(_dir(), f"{code}-prices.json")
@@ -115,7 +116,8 @@ def price_history(symbol: str) -> pd.DataFrame:
             return cached
         start = cached["Date"].iloc[-1].strftime("%Y-%m-%d") if not cached.empty else HISTORY_START
         try:
-            fresh = money_flows._guarded("VCI", lambda: flows.fetch_stock_flows(code, start, today))[_PRICE_COLUMNS]
+            fresh = money_flows._guarded(money_flows.VCI_INFO,
+                                         lambda: flows.fetch_stock_flows(code, start, today))[_PRICE_COLUMNS]
         except VendorError as exc:
             logger.warning("Price history of %s for the valuation unavailable: %s", code, exc)
             return cached
@@ -172,7 +174,11 @@ def _top_up(symbol: str, prices: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFr
     bars (``ohlcv.load_ohlcv``: closed sessions only): after the last ex-date the adjusted
     close is the unadjusted one, and the shares are carried forward. Left as they are when
     the bars' close of VCI's last session differs from VCI's: a dividend or bonus issue
-    went ex since, so the bars are on another basis and the shares may have changed."""
+    went ex since, so the bars are on another basis and the shares may have changed.
+    Cut before an issue going ex among the added sessions (VCI ISS: bonus, stock dividend,
+    rights, ESOP...): the shares change that day, while on its evening the source may not
+    have re-adjusted the bars yet (CTG 17/12/2025, 44,6%: 5,37 → 7,77 tỷ cp, 51.000 → 34.700).
+    A cash dividend changes no shares. None is added when the events are unavailable."""
     if prices.empty or prices["Date"].iloc[-1] >= as_of:
         return prices
     try:
@@ -185,6 +191,19 @@ def _top_up(symbol: str, prices: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFr
     newer = bars[bars["Date"] > last["Date"]]
     if newer.empty or same.empty or round(float(same.iloc[-1])) != round(float(last["Close"])):
         return prices
+    first = newer["Date"].iloc[0]
+    try:   # VCI returns an event whose publicDate or ex-date is in the window
+        events = money_flows._guarded(money_flows.VCI_INFO, lambda: vci.fetch_events(
+            normalize_symbol(symbol), first.strftime("%Y-%m-%d"), newer["Date"].iloc[-1].strftime("%Y-%m-%d"),
+            codes="ISS"))
+    except VendorError as exc:
+        logger.info("Issues of %s for the valuation unavailable: %s", symbol, exc)
+        return prices
+    issued = [ex for e in events if (ex := _parse_day(e.get("exrightDate"))) and ex >= first.date()]
+    if issued:
+        newer = newer[newer["Date"] < pd.Timestamp(min(issued))]
+        if newer.empty:
+            return prices
     added = pd.DataFrame({"Date": newer["Date"], "Close": newer["Close"].astype(float), "TotalShares": last["TotalShares"]})
     return pd.concat([prices, added], ignore_index=True)
 
@@ -431,8 +450,9 @@ def _final(key: tuple, built_on: str, c: ValuationCard | None) -> bool:
 
 
 def _build(symbol: str, as_of_date: str | None) -> ValuationCard | None:
-    """``build_card`` behind the shared VCI breaker (``money_flows._guarded``): while VCI is down the
-    card fails at once instead of waiting out each request's retries. No data is not an outage."""
+    """``build_card`` behind the breaker of the informational VCI calls (``money_flows.VCI_INFO``, not
+    the engine's): while VCI is down the card fails at once instead of waiting out each request's
+    retries. No data is not an outage."""
     def build():
         try:
             return build_card(symbol, as_of_date)
@@ -440,7 +460,7 @@ def _build(symbol: str, as_of_date: str | None) -> ValuationCard | None:
             logger.info("No valuation card for %s: %s", symbol, exc)
             return None
 
-    return money_flows._guarded("VCI", build)
+    return money_flows._guarded(money_flows.VCI_INFO, build)
 
 
 def card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
@@ -577,9 +597,16 @@ def quick_line(symbol: str, as_of_date: str | None) -> str:
             f"BCTC {c.period}")
 
 
+def split_card(report: str) -> tuple[str, str]:
+    """(the card inside an engine report, the rest of the report); ("", report) without a card."""
+    report = report or ""
+    start = report.find(CARD_HEADING)
+    if start < 0:
+        return "", report
+    card, gap, after = report[start:].partition("\n\n")
+    return card, report[:start] + gap + after
+
+
 def card_prices(report: str) -> set[int]:
     """The prices printed on the card inside an engine report (empty: no card)."""
-    start = (report or "").find(CARD_HEADING)
-    if start < 0:
-        return set()
-    return rfmt.price_numbers(report[start:].split("\n\n", 1)[0])
+    return rfmt.price_numbers(split_card(report)[0])

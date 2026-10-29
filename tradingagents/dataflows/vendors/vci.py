@@ -242,12 +242,13 @@ def fetch_events(
     symbol: str, from_date: str, to_date: str, codes: str = "DIV,ISS,DDIND,DDINS,DDRP,AGME,AGMR,EGME",
     size: int = 50, *, timeout: float = http.DEFAULT_TIMEOUT, retries: int = 2,
 ) -> list[dict]:
-    """Corporate events published between two dates (YYYY-MM-DD), newest first.
+    """Corporate events whose ``publicDate`` or ex-date (``exrightDate``) is between two dates
+    (YYYY-MM-DD), newest first.
 
-    The window is the ``publicDate``, not the ex-date (checked live 29/10/2026: CTG's 44,6%
-    stock dividend, published 10/12/2025 and ex on 17/12, is in 17/10-16/12 and not in
-    11/12-16/12). Codes: DIV dividends, ISS share issues, DDIND/DDINS/DDRP insider and
-    major-holder deals, AGME/AGMR/EGME shareholder meetings.
+    Checked live 29/10/2026: CTG's 44,6% stock dividend, published 10/12/2025 and ex on 17/12, is
+    in 17/12-17/12 and not in 11/12-16/12; VCB's 450đ dividend, published 30/09/2025 and ex on
+    03/10, is in 03/10-03/10 and not in 04/10-30/12. Codes: DIV dividends, ISS share issues,
+    DDIND/DDINS/DDRP insider and major-holder deals, AGME/AGMR/EGME shareholder meetings.
     """
     def fetch():
         payload = _get(

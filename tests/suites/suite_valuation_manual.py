@@ -54,7 +54,7 @@ while _d.isoformat() <= "2026-12-31":
 
 class FakeMarket:
     """Live prices from ``price``; closes rising 0.1% a session up to ``last``; events per symbol, in
-    VCI's window: the publicDate (the ex-date for a test event without one)."""
+    VCI's window: the publicDate or the ex-date within it."""
 
     def __init__(self):
         self.price = {"CTG": 30_700.0, "FPT": 100_000.0, "VCB": 60_000.0, "VNINDEX": 1_250.0}
@@ -75,7 +75,8 @@ class FakeMarket:
         self.calls.append(("events", symbol, start, end))
         if self.fail:
             raise VendorUnavailableError("VCI down")
-        return [e for e in self.ev.get(symbol, []) if start <= (e.get("publicDate") or e["exrightDate"] or "")[:10] <= end]
+        return [e for e in self.ev.get(symbol, [])
+                if any(start <= d[:10] <= end for d in (e.get("publicDate"), e.get("exrightDate")) if d)]
 
     card_events = events
 
@@ -445,8 +446,10 @@ for sym in ("CTG", "VCB"):
         ts.VendorMarket().card_events(sym, "2026-09-01", "2026-11-05")
     except VendorUnavailableError as exc:
         errors.append(str(exc))
-t.ok("the vendor: one try of 5 s with no retry, behind the shared VCI breaker (the next card fails at once)",
+t.ok("the vendor: one try of 5 s with no retry, behind the informational VCI breaker (the next card fails at once)",
      seen_kwargs == [{"timeout": 5.0, "retries": 0}] and len(errors) == 2 and "not asked again" in errors[1], (seen_kwargs, errors))
+t.ok("... not the engine's: its flow fetches from VCI are still asked",
+     money_flows.VCI_INFO in money_flows._down_until and "VCI" not in money_flows._down_until, money_flows._down_until)
 vci.fetch_events = real_fetch_events
 money_flows.reset_breaker()
 

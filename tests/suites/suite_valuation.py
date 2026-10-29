@@ -1,14 +1,16 @@
 """A stock's valuation against its own history (tradingagents.dataflows.vn_valuation) and the
 fundamentals report around it: the percentile math, the book switching on its publicDate, the
 unadjusted price across a bonus issue, the P/E path of a non-bank, the session VCI has not posted
-yet (from the engine's bars), the cache (hourly re-ask, VCI breaker), VCI's minus signs, VCI's own
-period multiples withheld from a past run. Data recorded from VCI on 29/10/2026
-(tests/fixtures/valuation_*_2026-10-28.json)."""
+yet (from the engine's bars, not past an issue going ex), the cache (hourly re-ask, its own VCI
+breaker), VCI's minus signs, VCI's own period multiples withheld from a past run. Data recorded from
+VCI on 29/10/2026 (tests/fixtures/valuation_*_2026-10-28.json, vci_events_2026-10-29.json)."""
 import json
+import os
 import tempfile
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import _common  # noqa: F401 - clean env, no .env, offline, temp folder, repo on sys.path
 
@@ -91,12 +93,24 @@ def no_details(symbol):
     raise VendorUnavailableError("offline")
 
 
+EVENTS = json.loads((_common.FIXTURES / "vci_events_2026-10-29.json").read_text(encoding="utf-8"))
+EVENT_CALLS: list[tuple] = []
+
+
+def fake_events(symbol, from_date, to_date, codes="DIV,ISS", size=50, **kwargs):
+    """VCI's events filter: the publicDate or the ex-date within the range."""
+    EVENT_CALLS.append((symbol, from_date, to_date, codes))
+    return [dict(e) for e in EVENTS.get(symbol, []) if e["eventCode"] in codes.split(",")
+            and any(d and from_date <= d[:10] <= to_date for d in (e["publicDate"], e["exrightDate"]))]
+
+
 flows.fetch_stock_flows = fake_flows
 vci.fetch_statement = fake_statement
 vci.fetch_ratios = fake_ratios
 vci.fetch_ohlcv = no_adjusted_prices
 ohlcv.load_ohlcv = fake_bars
 vci.fetch_details = no_details
+vci.fetch_events = fake_events
 NOW = {"t": datetime(2026, 10, 29, 10, 0, tzinfo=vn_rules.VN_TZ)}
 vn_rules.now_vn = lambda: NOW["t"]
 
@@ -265,8 +279,10 @@ stale = vv.price_history("CTG")
 t.ok("next day, VCI down: the cached rows",
      len(stale) == 2201 and stale["Date"].iloc[-1] == pd.Timestamp("2026-10-28") and len(CALLS) == 1)
 FAIL["flows"] = None
-t.ok("... and the shared VCI breaker trips: the next minutes get the cached rows at once, VCI not asked",
-     len(vv.price_history("CTG")) == 2201 and len(CALLS) == 1, CALLS)
+t.ok("... and the breaker of the informational VCI calls trips: the next minutes get the cached rows at once, "
+     "VCI not asked", len(vv.price_history("CTG")) == 2201 and len(CALLS) == 1, CALLS)
+t.ok("... not the engine's VCI breaker: its flow fetches are still asked",
+     money_flows.VCI_INFO in money_flows._down_until and "VCI" not in money_flows._down_until, money_flows._down_until)
 money_flows.reset_breaker()
 fresh = vv.price_history("CTG")
 t.ok("next day: fetched from the last cached session on, merged without duplicates",
@@ -309,6 +325,21 @@ PRICES["NEW"] = PRICES["FPT"].iloc[0:0]
 t.ok("a stock VCI has no sessions for: an empty history, kept for the day", vv.price_history("NEW").empty
      and vv.price_history("NEW").empty and [c[0] for c in CALLS].count("NEW") == 1, CALLS)
 
+from vnbot import jobs
+
+DATA = Path(tempfile.mkdtemp(prefix="valuation-prune-"))
+old = {"valuation/CTG-prices.json": 10, "valuation/FPT-prices.json": jobs.VALUATION_CACHE_DAYS + 1, "flows/CTG-foreign.csv": 4,
+       "CTG-dnse-ohlcv.csv": 4, "flows/FPT-foreign.csv": 1}
+for name, days in old.items():
+    (DATA / "cache" / name).parent.mkdir(parents=True, exist_ok=True)
+    (DATA / "cache" / name).write_text("x", encoding="utf-8")
+    os.utime(DATA / "cache" / name, (time.time() - days * 86400,) * 2)
+removed = jobs.prune_cache(SimpleNamespace(data_dir=DATA, cache_max_age_days=3))
+t.ok(f"the daily prune: the valuation's prices since 2018 kept {jobs.VALUATION_CACHE_DAYS} days without use, the rest "
+     "of the cache 3 (CACHE_MAX_AGE_DAYS)",
+     removed == 3 and sorted(p.relative_to(DATA / "cache").as_posix() for p in (DATA / "cache").rglob("*") if p.is_file())
+     == ["flows/FPT-foreign.csv", "valuation/CTG-prices.json"], removed)
+
 # ───────────── 9. the run date's session VCI has not posted yet: from the engine's bars ─────────────
 # Live 29/10/2026 22:09: VCI price-history ends 28/10, the engine's bars hold 29/10 (FPT 52.700, CTG 30.700).
 NOW["t"] = datetime(2026, 10, 29, 22, 0, tzinfo=vn_rules.VN_TZ)
@@ -326,6 +357,20 @@ t.ok("... the line says 'hôm nay' with the 29/10 close",
      vv.multiple_line("FPT", "pe", None))
 t.ok("... the session is not saved in the cache: VCI's own row replaces it once posted",
      vv.price_history("FPT")["Date"].iloc[-1] == pd.Timestamp("2026-10-28"))
+t.ok("... after asking VCI for the issues going ex on the added sessions (none for FPT on 29/10)",
+     EVENT_CALLS[-1] == ("FPT", "2026-10-29", "2026-10-29", "ISS"), EVENT_CALLS)
+EVENTS["FPT"].append({"eventCode": "ISS", "publicDate": "2026-10-22T00:00:00", "exrightDate": "2026-10-29T00:00:00",
+                      "exerciseRatio": 0.1, "valuePerShare": None, "eventTitleVi": "Phát hành cổ phiếu - Cổ phiếu thưởng"})
+t.ok("a bonus issue going ex on the added session: the bars may not be re-adjusted yet while the shares changed - "
+     "not added, 'phiên gần nhất có dữ liệu'",
+     vv.multiple_line("FPT", "pe", None).startswith("- P/E phiên gần nhất có dữ liệu 10,18 (giá đóng cửa 28/10/2026: 54.000;"),
+     vv.multiple_line("FPT", "pe", None))
+EVENTS["FPT"].pop()
+vv.multiple_line("FPT", "pe", None)
+money_flows._down_until[money_flows.VCI_INFO] = time.time() + 60
+t.ok("the events unavailable: none added",
+     vv.multiple_line("FPT", "pe", "2026-10-29").startswith("- P/E phiên gần nhất có dữ liệu 10,18 (giá đóng cửa 28/10/2026"))
+money_flows.reset_breaker()
 BARS["FPT"][pd.Timestamp("2026-10-28")] = 53_200.0     # the bars' 28/10 is adjusted: an ex-date since
 t.ok("the bars' close of VCI's last session differs (a dividend or bonus issue went ex): not used, "
      "'phiên gần nhất có dữ liệu'",

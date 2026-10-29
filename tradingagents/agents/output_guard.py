@@ -10,10 +10,13 @@ the Trader's plan and the Portfolio Manager's final decision - and:
   the system's own decision summary in its place, with a note;
 - a price that appears in none of the data the agents were given puts a
   warning and the system summary ahead of the text, which is kept;
-- so does a fair value ("giá trị hợp lý", "định giá", Base/Bear/Bull/eab
-  followed by a price: ``rfmt.fair_value_numbers``) that is not, within 0,5%,
-  a price of the valuation card (``vn_valuation``) - or the session price; one
-  within 0,5% passes both checks (a rounded Base);
+- so does a fair value ("giá trị hợp lý", "định giá", and for a bank or a run
+  with a valuation card Base/Bear/Bull/eab, followed by a price:
+  ``rfmt.fair_value_numbers``) that is not, within 0,5%, a price of the card
+  (``vn_valuation``) - or the session price; one within 0,5% passes both
+  checks (a rounded Base). For other stocks Bull/Bear are the debaters' sides;
+  after those names a price the data already has outside the card (support,
+  resistance, the plan) is a scenario level;
 - the final decision always ends with exactly one standard disclaimer, and
   ``final_rating`` is always the system action.
 
@@ -29,6 +32,7 @@ import logging
 
 from tradingagents.agents import vn_context
 from tradingagents.dataflows import vn_valuation
+from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.quant import engine, report_format as rfmt
 
 logger = logging.getLogger(__name__)
@@ -114,17 +118,27 @@ def _card_prices(state) -> set[int]:
     return known | (vn_valuation.card_prices(vn_valuation.render_card(built)) if built else set())
 
 
+def _levels(state) -> set[int]:
+    """Prices the run's data has outside the valuation card (the engine's plan, support and resistance, the
+    market report's levels...), the fundamentals report left out: after Base/Bull/Bear they are scenarios."""
+    decision = vn_context.quant_decision(state)
+    outside = vn_valuation.split_card(state.get("quant_report") or "")[1]
+    data = rfmt.price_numbers(_allowed_text({**state, "quant_report": outside, "fundamentals_report": ""}))
+    return data | {round(float(decision[k])) for k in _PLAN_KEYS if decision.get(k)}
+
+
 def _fair_values(text: str, state) -> tuple[list[int], set[int]]:
     """(fair values in ``text`` that are not, within 0,5%, a card price or the session price - quoted
-    as often as a fair value after "định giá" -, the ones that are). The engine's plan levels after
-    Base/Bull/Bear are its own scenarios, not fair values."""
+    as often as a fair value after "định giá" -, the ones that are). Base/Bear/Bull/eab count only for a
+    bank or with a card, and not before a price the data has outside it (``_levels``)."""
     decision = vn_context.quant_decision(state)
     known = _card_prices(state)
+    symbol = state.get("company_of_interest")
+    names = bool(known) or bool(symbol) and vn_valuation.is_bank(normalize_symbol(symbol))
     if decision.get("price"):
         known.add(round(float(decision["price"])))
-    plan = {round(float(decision[k])) for k in _PLAN_KEYS if decision.get(k)}
     invented, matched = [], set()
-    for v in rfmt.fair_value_numbers(text, plan):
+    for v in rfmt.fair_value_numbers(text, _levels(state), names=names):
         if any(abs(v - k) <= FAIR_VALUE_TOLERANCE * k for k in known):
             matched.add(v)
         else:

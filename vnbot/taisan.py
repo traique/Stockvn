@@ -60,7 +60,8 @@ SHADOW_ROWS = 500            # shadow rows kept, the newest, for the holdings' a
 SHADOW_SESSIONS = (5, 10)
 MAX_VALUATIONS = 30          # valuation cards kept: each one is a price read at every intraday check
 ZONE_BUFFER_PCT = 0.5        # a zone alerted is left only this far back past its level: no alert ping-pong
-EX_LOOKBACK_DAYS = 60        # VCI's event filter is the publicDate, not the ex-date: ask from this long before the card
+EX_LOOKBACK_DAYS = 60        # VCI returns an event by its publicDate or its ex-date: from this long before the card,
+                             # a coming ex-date announced before it is read too
 CARD_EVENTS_TIMEOUT = 5.0    # seconds of the one try at a card's events (VCI answers in 0,3-1,5 s)
 CARD_EVENTS_RETRY_SECONDS = 3600   # a card whose events failed is asked again after this long, not at every look
 SPARK_SESSIONS = 62          # about three months of closes on the page's stock cards
@@ -387,13 +388,14 @@ class VendorMarket:
 
     def card_events(self, symbol: str, start: str, end: str) -> list[dict]:
         """``events`` for a valuation card's ex-dates (``TaiSan.valuation_status``): one short try behind
-        the shared VCI breaker (``money_flows._guarded``), so VCI down costs an intraday check, a page
-        view or /tsdinhgia a few seconds, not 33 s a card."""
+        the breaker of the informational VCI calls (``money_flows.VCI_INFO``, not the engine's flow
+        fetches), so VCI down costs an intraday check, a page view or /tsdinhgia a few seconds, not 33 s
+        a card."""
         from tradingagents.dataflows import money_flows
         from tradingagents.dataflows.vendors import vci
 
-        return money_flows._guarded("VCI", lambda: vci.fetch_events(symbol, start, end, codes="DIV,ISS",
-                                                                    timeout=CARD_EVENTS_TIMEOUT, retries=0))
+        return money_flows._guarded(money_flows.VCI_INFO, lambda: vci.fetch_events(
+            symbol, start, end, codes="DIV,ISS", timeout=CARD_EVENTS_TIMEOUT, retries=0))
 
     def exchange(self, symbol: str) -> str | None:
         from vnbot.intraday import exchange

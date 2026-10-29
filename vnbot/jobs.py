@@ -272,15 +272,22 @@ def write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
+# A stock's prices since 2018 for the valuation (cache/valuation, rewritten on each day it is used) cost
+# about 9 VCI requests to fetch again: kept this long without use, not the cache's few days.
+VALUATION_CACHE_DAYS = 30
+
+
 def prune_cache(settings: Settings) -> int:
-    """Delete cached downloads older than ``cache_max_age_days``; returns how many."""
+    """Delete cached downloads older than ``cache_max_age_days`` (the valuation's price history:
+    ``VALUATION_CACHE_DAYS``); returns how many."""
     root = settings.data_dir / "cache"
     if not root.exists():
         return 0
-    cutoff = time.time() - settings.cache_max_age_days * 86400
+    now = time.time()
     removed = 0
     for path in root.rglob("*"):
-        if path.is_file() and path.stat().st_mtime < cutoff:
+        days = VALUATION_CACHE_DAYS if path.relative_to(root).parts[0] == "valuation" else settings.cache_max_age_days
+        if path.is_file() and path.stat().st_mtime < now - days * 86400:
             try:
                 path.unlink()
                 removed += 1
