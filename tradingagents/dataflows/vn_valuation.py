@@ -19,8 +19,9 @@ sessions it has not posted yet come from the engine's bars (``_top_up``).
 
 The valuation card of a bank (``card``): Bear / eab / Base / Bull from the book
 per share of the run date and a justified P/B, the margin of safety and the zone
-(Rẻ / Hợp lý / Đắt), every line labelled [FACT dd/mm] or [THỐNG KÊ dd/mm]. The
-assumptions (Ke, λ, g, margin) are set by hand in ``valuation_config``.
+(Rẻ / Hợp lý / Đắt), every line labelled [FACT dd/mm] or [THỐNG KÊ dd/mm] (with
+the year when it is not the run date's). The assumptions (Ke, λ, g, margin) are
+set by hand in ``valuation_config``.
 
 Nothing in the Quant Engine (engine, policy, simulator, calibration) reads
 this module: it only writes text, for the analysts, after the engine's report
@@ -43,15 +44,15 @@ import pandas as pd
 
 from tradingagents.dataflows import money_flows, ohlcv, valuation_config
 from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.errors import VendorError
+from tradingagents.dataflows.errors import NoMarketDataError, VendorError
 from tradingagents.dataflows.files import locked, replace_file
-from tradingagents.dataflows.symbols import normalize_symbol, safe_ticker_component
+from tradingagents.dataflows.symbols import listing_entry, normalize_symbol, safe_ticker_component
 from tradingagents.dataflows.vendors import flows, vci
 from tradingagents.dataflows.vn_fundamentals import (
     _as_of_day, _num, _parse_day, _period_end, published_annual_ratio_rows, published_on,
 )
 from tradingagents.market import vn_rules
-from tradingagents.quant import fundamental_profiles, report_format as rfmt, sector
+from tradingagents.quant import report_format as rfmt, sector
 
 logger = logging.getLogger(__name__)
 
@@ -267,11 +268,16 @@ ROE_YEARS = 5                 # sustainable ROE: median of the newest 5 annual R
 MIN_ROE_YEARS = 3             # fewer annual ROEs published (VCI's start in 2018): no card
 EVENT_LOOKAHEAD_DAYS = 45     # how far ahead a scheduled ex-date ends the card's validity
 CARD_HEADING = "--- Định giá (tham khảo"
-# A paid issue (rights to buy): VCI counts its shares from the ex-date (MBB 11/08/2026: +10% with a 15%
-# stock dividend, +25% in all), while the cash comes into a later statement.
-_RIGHTS_ISSUE = re.compile(r"quyền mua|rights issue", re.IGNORECASE)
+BANK_ICB = "8300"             # VCI listing's icbCode2 of the banks (28 codes, checked live 29/10/2026)
+# An issue that brings in capital - rights, a private placement, ESOP, a bond conversion: VCI counts its
+# shares from the ex-date (MBB rights 11/08/2026; BID private placement 3,8% 24/03/2026), while the capital
+# comes into a later statement. Every bank ISS title on VCI (checked live 29/10/2026) is one of these, a
+# bonus issue ("Cổ phiếu thưởng") or a stock dividend ("Trả Cổ tức bằng Cổ phiếu"), which bring none.
+_PAID_ISSUE_KIND = {"quyền mua": "quyền mua", "riêng lẻ": "riêng lẻ", "cbcnv": "ESOP",
+                    "chuyển đổi": "chuyển đổi trái phiếu"}
+_PAID_ISSUE = re.compile("|".join(_PAID_ISSUE_KIND), re.IGNORECASE)
 _CARD_CACHE_MAX = 256
-_cards: dict[tuple, tuple[float, "ValuationCard | None"]] = {}
+_cards: dict[tuple, tuple[float, str, "ValuationCard | None"]] = {}   # key -> (built at, built on day, card)
 _cards_lock = threading.Lock()
 
 
@@ -283,16 +289,13 @@ def justified_pb(roe: float, ke: float, lam: float, g: float = 0.0) -> float:
 
 
 def is_bank(symbol: str) -> bool:
-    """The card covers banks only: by the sector map, else by VCI's company type (NH)."""
+    """The card covers banks only: by the sector map, else by the VCI listing's ICB code (8300). No
+    call of its own: the listing is kept a day and on disk, and the engine has read it for the exchange."""
     sectors = sector.get_symbol_sectors(symbol)
     if sectors:
         return "banking" in sectors
-    try:
-        com_type = vci.fetch_details(symbol).get("comTypeCode")
-    except Exception as exc:  # noqa: BLE001 - unknown type: no card
-        logger.info("Company type of %s unavailable: %s", symbol, exc)
-        return False
-    return fundamental_profiles.get_profile(symbol, com_type).key == "banking"
+    entry = listing_entry(symbol)
+    return bool(entry) and str(entry.get("icbCode2")) == BANK_ICB
 
 
 @dataclass(frozen=True)
@@ -307,7 +310,7 @@ class ValuationCard:
     equity: float                 # parent shareholders' equity of that quarter (bsa78 − bsa210)
     shares: float                 # shares outstanding at ``day``
     dividends: tuple[tuple[date, float], ...]   # cash dividends gone ex after the period end: (ex-date, đ/cp)
-    rights: tuple[tuple[date, float], ...]      # rights issues gone ex after it: (ex-date, ratio), cash not in the book
+    issues: tuple[tuple[date, float, str], ...]  # paid issues gone ex after it: (ex-date, ratio, kind), capital not in the book
     paid: float                   # what they paid out in all, đồng
     book: float                   # book per share at ``day``
     roes: tuple[tuple[int, float], ...]         # every annual ROE published, oldest first
@@ -326,9 +329,11 @@ class ValuationCard:
     next_ex: date | None          # the next ex-date already announced, within EVENT_LOOKAHEAD_DAYS
 
 
-def _shares_on(history: pd.DataFrame, day: date) -> float:
-    rows = history[history["Date"] <= pd.Timestamp(day)]
-    return float((rows if not rows.empty else history)["TotalShares"].iloc[-1])
+def _shares_before(history: pd.DataFrame, day: date) -> float:
+    """Shares outstanding of the last session before ``day``: a cash dividend is paid to the holders of
+    record, before a bonus issue going ex the same day (TPB 02/10/2026: 500đ and 15% in shares) adds its."""
+    before = history.loc[history["Date"] < pd.Timestamp(day), "TotalShares"]
+    return float(before.iloc[-1] if not before.empty else history["TotalShares"].iloc[0])
 
 
 def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
@@ -338,7 +343,7 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     after that quarter's end, by the price's session) / the shares outstanding of that session.
     The shares change on a bonus issue's ex-date, so a book published before it is restated
     (CTG: Q3/2025 over 7,77 billion shares from 17/12/2025, the 44,6% bonus); each dividend is
-    paid on the shares of its own ex-date.
+    paid on the shares of the session before its ex-date.
     """
     code = normalize_symbol(symbol)
     as_of = _as_of_day(as_of_date)
@@ -358,7 +363,7 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     period_end = _period_end(year, quarter)
     events = vci.fetch_events(code, (period_end + timedelta(days=1)).isoformat(),
                               (as_of + timedelta(days=EVENT_LOOKAHEAD_DAYS)).isoformat(), codes="DIV,ISS")
-    dividends, rights, upcoming = [], [], []
+    dividends, issues, upcoming = [], [], []
     for event in events:
         ex = _parse_day(event.get("exrightDate"))
         public = _parse_day(event.get("publicDate")) or ex
@@ -370,12 +375,11 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
             continue
         elif event.get("eventCode") == "DIV" and (_num(event.get("valuePerShare")) or 0) > 0:
             dividends.append((ex, _num(event.get("valuePerShare"))))
-        elif event.get("eventCode") == "ISS" and _RIGHTS_ISSUE.search(
-                f"{event.get('eventTitleVi') or ''} {event.get('eventTitleEn') or ''}"):
-            rights.append((ex, _num(event.get("exerciseRatio")) or 0.0))
+        elif event.get("eventCode") == "ISS" and (kind := _PAID_ISSUE.search(event.get("eventTitleVi") or "")):
+            issues.append((ex, _num(event.get("exerciseRatio")) or 0.0, _PAID_ISSUE_KIND[kind.group(0).lower()]))
     dividends.sort()
-    rights.sort()
-    paid = sum(value * _shares_on(history, ex) for ex, value in dividends)
+    issues.sort()
+    paid = sum(value * _shares_before(history, ex) for ex, value in dividends)
     shares = float(last["TotalShares"])
     book = (float(last["Base"]) - paid) / shares
     if book <= 0:
@@ -395,34 +399,76 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     return ValuationCard(
         symbol=code, as_of=as_of, day=day, close=close, period=str(last["Period"]),
         published=last["PeriodPublished"], period_end=period_end, equity=float(last["Base"]), shares=shares,
-        dividends=tuple(dividends), rights=tuple(rights), paid=paid, book=book, roes=tuple(annual), annual_published=annual_published,
+        dividends=tuple(dividends), issues=tuple(issues), paid=paid, book=book, roes=tuple(annual), annual_published=annual_published,
         roe_base=roe_base, roe_bear=roe_bear, roe_bull=roe_bull, assumptions=setup,
         bear=value(roe_bear), eab=base * (1 - setup.margin), base=base, bull=bull, mos=(base - close) / base,
-        zone=zone, sensitivity=tuple((ke, value(roe_base, ke)) for ke in valuation_config.SENSITIVITY_KE),
+        zone=zone, sensitivity=tuple((ke, value(roe_base, ke)) for ke in valuation_config.sensitivity_ke(setup.ke)),
         next_ex=min(upcoming) if upcoming else None,
     )
 
 
+def _key(symbol: str, as_of_date: str | None) -> tuple:
+    return normalize_symbol(symbol), _as_of_day(as_of_date).isoformat(), valuation_config.assumptions("banking")
+
+
+def _last_session(day: date) -> date:
+    while not vn_rules.is_session_day(day.isoformat()):
+        day -= timedelta(days=1)
+    return day
+
+
+def _final(key: tuple, built_on: str, c: ValuationCard | None) -> bool:
+    """A past run date's card that cannot change any more: built on a later day, with that date's
+    last session. Any other (today's, one built during the session, None) is rebuilt after an hour."""
+    return c is not None and built_on > key[1] and c.day == _last_session(date.fromisoformat(key[1]))
+
+
+def _build(symbol: str, as_of_date: str | None) -> ValuationCard | None:
+    """``build_card`` behind the shared VCI breaker (``money_flows._guarded``): while VCI is down the
+    card fails at once instead of waiting out each request's retries. No data is not an outage."""
+    def build():
+        try:
+            return build_card(symbol, as_of_date)
+        except NoMarketDataError as exc:
+            logger.info("No valuation card for %s: %s", symbol, exc)
+            return None
+
+    return money_flows._guarded("VCI", build)
+
+
 def card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     """``build_card``, kept per (stock, run date, assumptions): the engine node, the fundamentals
-    tool and /nhanh of one run read the same numbers. Today's card is rebuilt after an hour
-    (``money_flows.RECHECK_SECONDS``), once the session's close may be out."""
-    key = (normalize_symbol(symbol), _as_of_day(as_of_date).isoformat(), valuation_config.assumptions("banking"))
-    today = vn_rules.now_vn().date().isoformat()
+    tool and /nhanh of one run read the same numbers. Rebuilt after an hour
+    (``money_flows.RECHECK_SECONDS``) until it is final (``_final``)."""
+    key = _key(symbol, as_of_date)
     with _cards_lock:
         hit = _cards.get(key)
-    if hit and (key[1] < today or time.time() - hit[0] < money_flows.RECHECK_SECONDS):
-        return hit[1]
-    built = build_card(symbol, as_of_date)
+    if hit and (_final(key, hit[1], hit[2]) or time.time() - hit[0] < money_flows.RECHECK_SECONDS):
+        return hit[2]
+    built = _build(symbol, as_of_date)
     with _cards_lock:
         if len(_cards) >= _CARD_CACHE_MAX:
             _cards.pop(min(_cards, key=lambda k: _cards[k][0]), None)
-        _cards[key] = (time.time(), built)
+        _cards[key] = (time.time(), vn_rules.now_vn().date().isoformat(), built)
     return built
 
 
-def _label(kind: str, day: date) -> str:
-    return f"[{kind} {day:%d/%m}]"
+def cached_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
+    """The card ``card`` keeps for the run date, without building one (the Output Guard: the
+    fundamentals tool may have built it after the engine's node failed to)."""
+    with _cards_lock:
+        hit = _cards.get(_key(symbol, as_of_date))
+    return hit[2] if hit else None
+
+
+def _day(day: date, as_of: date) -> str:
+    """dd/mm, with the year when it is not the run date's: on 30/03/2026 the 2024 annual report
+    published 29/03/2025 must not read as yesterday's."""
+    return f"{day:%d/%m}" if day.year == as_of.year else f"{day:%d/%m/%Y}"
+
+
+def _label(kind: str, day: date, as_of: date) -> str:
+    return f"[{kind} {_day(day, as_of)}]"
 
 
 def _pct(value: float) -> str:
@@ -435,39 +481,41 @@ def _rate(value: float) -> str:
 
 
 def _expiry(c: ValuationCard) -> str:
-    when = f"{c.next_ex:%d/%m}" if c.next_ex else "chưa có lịch"
+    when = _day(c.next_ex, c.as_of) if c.next_ex else "chưa có lịch"
     return f"Hạn dùng: tới khi có BCTC quý mới hoặc tới ngày GDKHQ kế tiếp ({when})"
 
 
 def render_card(c: ValuationCard) -> str:
     """The card for the engine's report: every price with its distance from the session's close."""
     a = c.assumptions
-    model = _label("THỐNG KÊ", c.day)
+    model = _label("THỐNG KÊ", c.day, c.as_of)
     years = [y for y, _ in c.roes]
     recent = c.roes[-ROE_YEARS:]
     span = (f"{len(recent)} năm {recent[0][0]}-{recent[-1][0]}" if len(recent) >= ROE_YEARS
             else f"chỉ có {len(recent)} năm {recent[0][0]}-{recent[-1][0]}, chưa đủ {ROE_YEARS}")
     lines = [
         f"{CARD_HEADING}, không vào quyết định; không phải khuyến nghị) - ngân hàng ---",
-        f"Giá phiên {c.day:%d/%m} · BCTC {c.period} công bố {c.published:%d/%m} · {_expiry(c)}",
-        f"{_label('FACT', c.published)} Vốn chủ sở hữu công ty mẹ {c.period} (tới {c.period_end:%d/%m/%Y}): "
+        f"Giá phiên {_day(c.day, c.as_of)} · BCTC {c.period} công bố {_day(c.published, c.as_of)} · {_expiry(c)}",
+        f"{_label('FACT', c.published, c.as_of)} Vốn chủ sở hữu công ty mẹ {c.period} (tới {c.period_end:%d/%m/%Y}): "
         f"{rfmt.fmt_number(c.equity / 1e9, 1)} tỷ",
     ]
     if c.dividends:
         paid = " + ".join(f"{rfmt.fmt_price(v)} đ/cp (GDKHQ {ex:%d/%m/%Y})" for ex, v in c.dividends)
-        lines.append(f"{_label('FACT', c.dividends[-1][0])} Cổ tức tiền GDKHQ sau ngày khoá sổ quý, đã trừ khỏi "
+        lines.append(f"{_label('FACT', c.dividends[-1][0], c.as_of)} Cổ tức tiền GDKHQ sau ngày khoá sổ quý, đã trừ khỏi "
                      f"sổ sách: {paid}, tổng {rfmt.fmt_number(c.paid / 1e9, 1)} tỷ")
     lines += [
-        f"{_label('FACT', c.day)} Sổ sách/cp {rfmt.fmt_price(c.book)} = (vốn chủ"
+        f"{_label('FACT', c.day, c.as_of)} Sổ sách/cp {rfmt.fmt_price(c.book)} = (vốn chủ"
         + (" − cổ tức tiền đã trả" if c.dividends else "")
         + f") / {rfmt.fmt_price(c.shares)} cp lưu hành phiên {c.day:%d/%m/%Y}",
     ]
-    if c.rights:
-        issues = ", ".join(f"{rfmt.fmt_pct(r * 100, 1)} (GDKHQ {ex:%d/%m/%Y})" for ex, r in c.rights)
-        lines.append(f"{_label('FACT', c.rights[-1][0])} Phát hành quyền mua {issues}: số cổ phiếu đã tính phần mới, "
-                     f"tiền thu về chưa có trong BCTC {c.period} → sổ sách/cp và các mốc dưới đây thấp hơn thực tế")
+    if c.issues:
+        issues = ", ".join(f"{kind}{f' {rfmt.fmt_pct(r * 100, 1)}' if r > 0 else ''} (GDKHQ {ex:%d/%m/%Y})"
+                           for ex, r, kind in c.issues)
+        lines.append(f"{_label('FACT', c.issues[-1][0], c.as_of)} Phát hành thêm sau ngày khoá sổ quý: {issues}: số cổ "
+                     f"phiếu đã tính phần mới, vốn thu về chưa có trong BCTC {c.period} → sổ sách/cp và các mốc dưới "
+                     "đây thấp hơn thực tế")
     lines += [
-        f"{_label('THỐNG KÊ', c.annual_published)} ROE bền vững {_pct(c.roe_base)} = trung vị ROE năm ({span}: "
+        f"{_label('THỐNG KÊ', c.annual_published, c.as_of)} ROE bền vững {_pct(c.roe_base)} = trung vị ROE năm ({span}: "
         + " · ".join(_pct(v) for _, v in recent) + f"); ROE p20 {_pct(c.roe_bear)}, p80 {_pct(c.roe_bull)} "
         f"của {len(years)} năm {years[0]}-{years[-1]}",
         f"{model} Base (giá trị hợp lý) {rfmt.format_level(c.close, c.base)} = {rfmt.fmt_number(c.base / c.book)} "
@@ -497,7 +545,7 @@ def fundamentals_line(c: ValuationCard | None) -> str:
     if c is None:
         return "- Định giá tham khảo (thẻ của hệ thống): chưa đủ dữ liệu"
     return (
-        f"- Định giá tham khảo (thẻ của hệ thống, không vào quyết định) {_label('THỐNG KÊ', c.day)}: "
+        f"- Định giá tham khảo (thẻ của hệ thống, không vào quyết định) {_label('THỐNG KÊ', c.day, c.as_of)}: "
         f"Bear {rfmt.fmt_price(c.bear)} · eab {rfmt.fmt_price(c.eab)} · Base {rfmt.fmt_price(c.base)} · "
         f"Bull {rfmt.fmt_price(c.bull)} VND; giá {rfmt.fmt_price(c.close)} → vùng {c.zone} "
         f"(MOS {rfmt.fmt_signed_pct(c.mos * 100)}); sổ sách/cp {rfmt.fmt_price(c.book)}, ROE bền vững "
@@ -506,15 +554,20 @@ def fundamentals_line(c: ValuationCard | None) -> str:
 
 
 def quick_line(symbol: str, as_of_date: str | None) -> str:
-    """One line for /nhanh (banks): the card's levels and zone; "" otherwise."""
+    """One line for /nhanh (banks): the card's levels and zone, the price's session, how far it is
+    from Base, and that Ke is set by hand with the Base it gives 2 points either side; "" otherwise."""
     if not is_bank(normalize_symbol(symbol)):
         return ""
     c = card(symbol, as_of_date)
     if c is None:
         return ""
+    (low_ke, high_base), (high_ke, low_base) = c.sensitivity[0], c.sensitivity[-1]
+    gap = (c.close - c.base) / c.base * 100
     return (f"📐 Định giá tham khảo (không vào quyết định): Bear {rfmt.fmt_price(c.bear)} · Base {rfmt.fmt_price(c.base)}"
-            f" · Bull {rfmt.fmt_price(c.bull)} → {c.zone}, MOS {rfmt.fmt_signed_pct(c.mos * 100, 1)} "
-            f"(Ke {_rate(c.assumptions.ke)}, BCTC {c.period})")
+            f" · Bull {rfmt.fmt_price(c.bull)} → {c.zone}: giá {rfmt.fmt_price(c.close)} (phiên {_day(c.day, c.as_of)}) "
+            f"{'trên' if gap > 0 else 'dưới'} Base {rfmt.fmt_pct(abs(gap), 1)}. Ke {_rate(c.assumptions.ke)} đặt tay "
+            f"(Ke {_rate(low_ke)}-{_rate(high_ke)}: Base {rfmt.fmt_price(high_base)}-{rfmt.fmt_price(low_base)}), "
+            f"BCTC {c.period}")
 
 
 def card_prices(report: str) -> set[int]:

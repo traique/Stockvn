@@ -11,8 +11,9 @@ the Trader's plan and the Portfolio Manager's final decision - and:
 - a price that appears in none of the data the agents were given puts a
   warning and the system summary ahead of the text, which is kept;
 - so does a fair value ("giá trị hợp lý", "định giá", Base/Bear/Bull/eab
-  followed by a price) that is not, within 0,5%, a price of the valuation card
-  in the engine's report (``vn_valuation``) - or the session price;
+  followed by a price: ``rfmt.fair_value_numbers``) that is not, within 0,5%,
+  a price of the valuation card (``vn_valuation``) - or the session price; one
+  within 0,5% passes both checks (a rounded Base);
 - the final decision always ends with exactly one standard disclaimer, and
   ``final_rating`` is always the system action.
 
@@ -98,24 +99,44 @@ def _allowed_text(state) -> str:
 
 
 FAIR_VALUE_TOLERANCE = 0.005
+_PLAN_KEYS = ("entry_low", "entry_high", "stop_price", "target_price", "target2")
 
 
-def _invented_fair_values(text: str, state) -> list[int]:
-    """Fair values in ``text`` that are not, within 0,5%, a price of the valuation card in the
-    engine's report or the session price (quoted as often as a fair value after "định giá")."""
+def _card_prices(state) -> set[int]:
+    """The valuation card's prices: the card in the engine's report, and the one the run's fundamentals
+    tool read (the same ``vn_valuation.card`` cache; built there when the engine's node could not)."""
     known = vn_valuation.card_prices(state.get("quant_report") or "")
-    price = vn_context.quant_decision(state).get("price")
-    if price:
-        known.add(round(float(price)))
-    return [v for v in rfmt.fair_value_numbers(text)
-            if not any(abs(v - k) <= FAIR_VALUE_TOLERANCE * k for k in known)]
+    symbol, day = state.get("company_of_interest"), state.get("trade_date")
+    try:
+        built = vn_valuation.cached_card(symbol, day) if symbol and day else None
+    except ValueError:        # a run date that is not YYYY-MM-DD: the report's card alone
+        built = None
+    return known | (vn_valuation.card_prices(vn_valuation.render_card(built)) if built else set())
+
+
+def _fair_values(text: str, state) -> tuple[list[int], set[int]]:
+    """(fair values in ``text`` that are not, within 0,5%, a card price or the session price - quoted
+    as often as a fair value after "định giá" -, the ones that are). The engine's plan levels after
+    Base/Bull/Bear are its own scenarios, not fair values."""
+    decision = vn_context.quant_decision(state)
+    known = _card_prices(state)
+    if decision.get("price"):
+        known.add(round(float(decision["price"])))
+    plan = {round(float(decision[k])) for k in _PLAN_KEYS if decision.get(k)}
+    invented, matched = [], set()
+    for v in rfmt.fair_value_numbers(text, plan):
+        if any(abs(v - k) <= FAIR_VALUE_TOLERANCE * k for k in known):
+            matched.add(v)
+        else:
+            invented.append(v)
+    return invented, matched
 
 
 def _allowed_prices(state) -> set[int]:
     """Prices of ``_allowed_text``, less the fair values the fundamentals report invented."""
     fundamentals = state.get("fundamentals_report") or ""
     others = rfmt.price_numbers(_allowed_text({**state, "fundamentals_report": ""}))
-    return others | (rfmt.price_numbers(fundamentals) - set(_invented_fair_values(fundamentals, state)))
+    return others | (rfmt.price_numbers(fundamentals) - set(_fair_values(fundamentals, state)[0]))
 
 
 def _price_note(label: str, unknown: list[int], invented: list[int]) -> str:
@@ -147,8 +168,9 @@ def guard_text(text: str, state, *, label: str) -> tuple[str, str | None]:
             f"{label}: bỏ phần diễn giải vì mâu thuẫn với action {action} ({', '.join(conflicts[:3])})",
         )
     allowed_prices = _allowed_prices(state)
-    invented = _invented_fair_values(narrative, state)
-    unknown = sorted(v for v in rfmt.price_numbers(narrative) if v not in allowed_prices and v not in invented)
+    invented, matched = _fair_values(narrative, state)
+    unknown = sorted(v for v in rfmt.price_numbers(narrative)
+                     if v not in allowed_prices and v not in invented and v not in matched)
     if unknown or invented:
         logger.warning("%s cited prices outside the data: %s; fair values off the card: %s", label, unknown[:5], invented[:5])
         return f"{UNKNOWN_PRICE_NOTE}\n\n{summary}\n\n{text}", _price_note(label, unknown, invented)
@@ -159,7 +181,7 @@ def guard_fundamentals(state) -> tuple[str, str | None]:
     """The fundamentals report with the unknown-price warning ahead when it gives a fair value
     the valuation card does not have; its other numbers are left as they are."""
     text = state.get("fundamentals_report") or ""
-    invented = _invented_fair_values(text, state)
+    invented = _fair_values(text, state)[0]
     if not invented:
         return text, None
     label = "Fundamentals Analyst"

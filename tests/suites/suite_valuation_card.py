@@ -2,13 +2,15 @@
 fair-value check: the PDF profile's Base reproduced, the book point-in-time (cash dividends after
 the quarter's end, the bonus issue), the annual ROE by its publication, the labels, the card in the
 engine's report, the fundamentals tool and /nhanh, and fair values off the card flagged in the
-fundamentals report and the guarded outputs. CTG data recorded from VCI on 29/10/2026
-(tests/fixtures/valuation_CTG_2026-10-28.json)."""
+fundamentals report and the guarded outputs - not the engine's own levels. CTG and TPB data recorded
+from VCI on 29/10/2026 (tests/fixtures/valuation_{CTG,TPB}_2026-10-28.json; TPB: a cash dividend and a
+stock dividend going ex the same day)."""
 import json
 import os
 import re
 import tempfile
 import time
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,7 +36,7 @@ from vnbot import service  # noqa: E402
 
 t = _common.Checks()
 FX = {s: json.loads((_common.FIXTURES / f"valuation_{s}_2026-10-28.json").read_text(encoding="utf-8"))
-      for s in ("CTG", "FPT")}
+      for s in ("CTG", "FPT", "TPB")}
 
 
 def fixture_prices(sym: str) -> pd.DataFrame:
@@ -103,7 +105,7 @@ vn_rules.now_vn = lambda: NOW["t"]
 
 BS = {(r["yearReport"], r["lengthReport"]): r for r in FX["CTG"]["balance_sheet"]}
 SHARES = PRICES["CTG"].set_index("Date")["TotalShares"]
-LABEL = re.compile(r"^\[(FACT|THỐNG KÊ) \d{2}/\d{2}\] ")
+LABEL = re.compile(r"^\[(FACT|THỐNG KÊ) \d{2}/\d{2}(?:/\d{4})?\] ")
 
 
 def labelled(text: str) -> bool:
@@ -126,10 +128,10 @@ t.ok("ROE = Ke: P/B 1 whatever λ and g; the excess return fades with λ, grows 
 # ───────────── 2. CTG on 28/10/2026, Ke 12% by default ─────────────
 c = vv.card("CTG", "2026-10-28")
 equity_q2 = vv.parent_equity(BS[(2026, 2)])
-t.ok("book/share = (Q2/2026 parent equity − 450đ × shares on 23/07) / shares of 28/10 = 25.166 (PDF: 25.166)",
+t.ok("book/share = (Q2/2026 parent equity − 450đ × shares before the 23/07 ex-date) / shares of 28/10 = 25.166 (PDF: 25.166)",
      c.period == "Q2/2026" and c.published == date(2026, 8, 19) and c.period_end == date(2026, 6, 30)
      and c.dividends == ((date(2026, 7, 23), 450.0),) and round(c.book) == 25_166
-     and abs(c.book - (equity_q2 - 450 * SHARES[pd.Timestamp("2026-07-23")]) / SHARES[pd.Timestamp("2026-10-28")]) < 1e-6, c)
+     and abs(c.book - (equity_q2 - 450 * SHARES[pd.Timestamp("2026-07-22")]) / SHARES[pd.Timestamp("2026-10-28")]) < 1e-6, c)
 roes = [r["roe"] for r in FX["CTG"]["annual_ratios"]]
 t.ok("sustainable ROE = median of the 5 newest annual ROEs (2021-2025) = 17,12% (PDF: 17,1%)",
      c.roe_base == float(np.median(roes[-5:])) and round(c.roe_base * 100, 2) == 17.12
@@ -148,8 +150,8 @@ t.ok("Base/Bear/Bull = book × justified P/B; eab = Base × (1 − 13,7%); MOS =
 t.ok("CTG 28/10 at Ke 12%: Base 27.643, Bull 28.066, price 30.700 ≥ Bull → Đắt, MOS −11,06%",
      (round(c.base), round(c.bull), c.close, c.zone, round(c.mos * 100, 2)) == (27_643, 28_066, 30_700, "Đắt", -11.06),
      (c.base, c.bull, c.zone, c.mos))
-t.ok("sensitivity: Base at Ke 8/10/12/14%, falling with Ke, the 12% one is the Base",
-     [k for k, _ in c.sensitivity] == [0.08, 0.10, 0.12, 0.14] and c.sensitivity[2][1] == c.base
+t.ok("sensitivity: Base at Ke 10/12/14% (the Ke in use ± 2 points), falling with Ke, the middle one is the Base",
+     [k for k, _ in c.sensitivity] == [0.10, 0.12, 0.14] and c.sensitivity[1][1] == c.base
      and all(x[1] > y[1] for x, y in zip(c.sensitivity, c.sensitivity[1:])), c.sensitivity)
 t.ok("no ex-date scheduled within 45 days of 28/10 (checked live)", c.next_ex is None)
 t.ok("the events are asked from the day after the quarter's end to 45 days after the run date",
@@ -166,31 +168,42 @@ t.ok("... the card expires on the announced ex-date 23/07 (announced 14/07)", ju
 aug = vv.card("CTG", "2026-08-18")
 t.ok("as_of 18/08/2026: still Q1/2026 (Q2 out 19/08), the 450đ gone ex 23/07 deducted",
      aug.period == "Q1/2026" and aug.dividends == ((date(2026, 7, 23), 450.0),)
-     and abs(aug.book - (equity_q1 - 450 * SHARES[pd.Timestamp("2026-07-23")]) / SHARES[pd.Timestamp("2026-08-18")]) < 1e-6
+     and abs(aug.book - (equity_q1 - 450 * SHARES[pd.Timestamp("2026-07-22")]) / SHARES[pd.Timestamp("2026-08-18")]) < 1e-6
      and round(jul.book - aug.book) == 450, (jul.book, aug.book))
 t.ok("as_of 13/07/2026: the 23/07 ex-date not announced yet (14/07): no expiry date",
      vv.card("CTG", "2026-07-13").next_ex is None)
 jan = vv.card("CTG", "2026-01-15")
 equity_q3 = vv.parent_equity(BS[(2025, 3)])
-before_bonus = SHARES[pd.Timestamp("2025-10-14")]
+before_bonus = SHARES[pd.Timestamp("2025-10-13")]
 t.ok("as_of 15/01/2026: Q3/2025 book over the shares after the 44,6% bonus (17/12/2025); the 450đ of "
-     "14/10/2025 paid on the shares of that day",
+     "14/10/2025 paid on the shares of the session before",
      jan.period == "Q3/2025" and jan.dividends == ((date(2025, 10, 14), 450.0),)
      and abs(SHARES[pd.Timestamp("2026-01-15")] / before_bonus - 1.446) < 0.001
      and abs(jan.book - (equity_q3 - 450 * before_bonus) / SHARES[pd.Timestamp("2026-01-15")]) < 1e-6, jan)
-# A rights issue gone ex after the quarter's end (MBB 11/08/2026, live): its shares are counted, its cash is not.
-FX["CTG"]["events"].append({"eventCode": "ISS", "publicDate": "2026-05-04T00:00:00", "exrightDate": "2026-05-12T00:00:00",
-                            "valuePerShare": None, "exerciseRatio": 0.1,
-                            "eventTitleVi": "Phát hành cổ phiếu - Quyền mua CP cho Cổ đông hiện hữu tỉ lệ 10.0%"})
+# Issues that bring in capital, gone ex after the quarter's end (MBB rights 11/08/2026, BID private placement
+# 24/03/2026, live; VCI's titles): their shares are counted, their capital is not. A bonus issue brings none.
+paid_issues = [("2026-05-12", 0.1, "Phát hành cổ phiếu - Quyền mua CP cho Cổ đông hiện hữu tỉ lệ 10.0%"),
+               ("2026-05-20", 0.0375, "Phát hành cổ phiếu - Phát hành riêng lẻ tỉ lệ 3.8%"),
+               ("2026-06-03", None, "Phát hành cổ phiếu - Phát hành cho CBCNV"),
+               ("2026-06-10", 0.02, "Phát hành cổ phiếu - Chuyển từ trái phiếu chuyển đổi tỉ lệ 2.0%"),
+               ("2026-06-17", 0.1, "Phát hành cổ phiếu - Cổ phiếu thưởng tỉ lệ 10.0%")]
+for ex, ratio, title in paid_issues:
+    FX["CTG"]["events"].append({"eventCode": "ISS", "publicDate": "2026-05-04T00:00:00", "exrightDate": f"{ex}T00:00:00",
+                                "valuePerShare": None, "exerciseRatio": ratio, "eventTitleVi": title})
 rights = vv.build_card("CTG", "2026-08-18")
 rights_text = vv.render_card(rights)
-t.ok("a rights issue after the quarter's end: said on the card (book and levels too low until the next statement)",
-     rights.rights == ((date(2026, 5, 12), 0.1),) and rights.book == aug.book and labelled(rights_text)
-     and "[FACT 12/05] Phát hành quyền mua 10,0% (GDKHQ 12/05/2026): số cổ phiếu đã tính phần mới, tiền thu về chưa "
-         "có trong BCTC Q1/2026" in rights_text, rights_text)
-t.ok("... not said once the statement of the quarter it fell in is out (as_of 28/10: Q2/2026)",
-     vv.build_card("CTG", "2026-10-28").rights == ())
-FX["CTG"]["events"].pop()
+t.ok("rights, private placement, ESOP, bond conversion after the quarter's end: said on the card (book and levels "
+     "too low until the next statement); the bonus issue not",
+     rights.issues == ((date(2026, 5, 12), 0.1, "quyền mua"), (date(2026, 5, 20), 0.0375, "riêng lẻ"),
+                       (date(2026, 6, 3), 0.0, "ESOP"), (date(2026, 6, 10), 0.02, "chuyển đổi trái phiếu"))
+     and rights.book == aug.book and labelled(rights_text)
+     and "[FACT 10/06] Phát hành thêm sau ngày khoá sổ quý: quyền mua 10,0% (GDKHQ 12/05/2026), riêng lẻ 3,8% (GDKHQ "
+         "20/05/2026), ESOP (GDKHQ 03/06/2026), chuyển đổi trái phiếu 2,0% (GDKHQ 10/06/2026): số cổ phiếu đã tính phần "
+         "mới, vốn thu về chưa có trong BCTC Q1/2026 → sổ sách/cp và các mốc dưới đây thấp hơn thực tế" in rights_text,
+     rights_text)
+t.ok("... not said once the statement of the quarter they fell in is out (as_of 28/10: Q2/2026)",
+     vv.build_card("CTG", "2026-10-28").issues == ())
+del FX["CTG"]["events"][-len(paid_issues):]
 mar30, mar31 = vv.card("CTG", "2026-03-30"), vv.card("CTG", "2026-03-31")
 t.ok("annual ROE by its report's publicDate: 2025 out 31/03/2026 (median 2020-2024 the day before)",
      [y for y, _ in mar30.roes] == list(range(2018, 2025)) and mar30.annual_published == date(2025, 3, 5)
@@ -220,10 +233,10 @@ t.ok("FACT for the statement (its publication day) and the dividend (its ex-date
 t.ok("every level with its distance from the session's close; the zone and the sensitivity printed",
      "Bear 26.236 VND (-14,54% so với giá hiện tại)" in text and "Bull 28.066 VND (-8,58% so với giá hiện tại)" in text
      and "eab 23.856 VND (-22,29% so với giá hiện tại) = Base × (1 − 13,7%)" in text and "→ vùng Đắt" in text
-     and "Độ nhạy Base theo Ke: 8% 29.946 · 10% 28.749 · 12% 27.643 · 14% 26.619" in text
+     and "Độ nhạy Base theo Ke: 10% 28.749 · 12% 27.643 · 14% 26.619" in text
      and "Ke 12% (giả định đặt tay), λ 0,4, g 0%" in text, text)
 t.ok("the card's prices for the Output Guard: Bear, eab, Base, Bull, book, price, sensitivity",
-     vv.card_prices("báo cáo\n\n" + text) == {26_236, 23_856, 27_643, 28_066, 25_166, 30_700, 29_946, 28_749, 26_619}
+     vv.card_prices("báo cáo\n\n" + text) == {26_236, 23_856, 27_643, 28_066, 25_166, 30_700, 28_749, 26_619}
      and vv.card_prices("no card here") == set(), vv.card_prices(text))
 
 # ───────────── 5. Ke from the environment (VALUATION_KE_BANK, in %) ─────────────
@@ -234,6 +247,12 @@ t.ok("VALUATION_KE_BANK=7,94: the PDF's Ke; Base within 1% of its 30.164 (ROE 17
      and "Ke 7,94% (giả định đặt tay)" in vv.render_card(pdf_ke), pdf_ke.base)
 t.ok("... its Bull is 30.443, not the PDF's 33.309 (ROE p80 18% here; the PDF's implies ~23,5%): 30.700 is Đắt",
      round(pdf_ke.bull) == 30_443 and pdf_ke.zone == "Đắt", (pdf_ke.bull, pdf_ke.zone))
+t.ok("... the sensitivity line brackets the Ke in use: 5,94 / 7,94 / 9,94%, the middle one is the Base",
+     [k for k, _ in pdf_ke.sensitivity] == [0.0594, 0.0794, 0.0994] and pdf_ke.sensitivity[1][1] == pdf_ke.base
+     and "Độ nhạy Base theo Ke: 5,94% " in vv.render_card(pdf_ke), pdf_ke.sensitivity)
+os.environ["VALUATION_KE_BANK"] = "16"
+t.ok("VALUATION_KE_BANK=16: sensitivity 14 / 16 / 18%",
+     [k for k, _ in vv.card("CTG", "2026-10-28").sensitivity] == [0.14, 0.16, 0.18])
 for bad in ("abc", "50", "2"):
     os.environ["VALUATION_KE_BANK"] = bad
     t.ok(f"VALUATION_KE_BANK={bad!r}: ignored, Ke 12%", valuation_config.assumptions("banking").ke == 0.12)
@@ -241,24 +260,98 @@ del os.environ["VALUATION_KE_BANK"]
 t.ok("no profile for non-banks", valuation_config.assumptions("default") is None)
 
 # ───────────── 6. the cache per (stock, run date) ─────────────
+def age(sym: str, day: str) -> None:
+    """The cached card of (sym, day) as if built more than an hour ago."""
+    key = next(k for k in vv._cards if k[:2] == (sym, day))
+    vv._cards[key] = (time.time() - money_flows.RECHECK_SECONDS - 1, *vv._cards[key][1:])
+
+
+def forget(sym: str, day: str) -> None:
+    for key in [k for k in vv._cards if k[:2] == (sym, day)]:
+        vv._cards.pop(key)
+
+
 before = CALLS["statement"]
-t.ok("a past run date's card is kept: no new statement read", vv.card("CTG", "2026-07-22") is jul
-     and CALLS["statement"] == before)
+age("CTG", "2026-07-22")
+t.ok("a past run date's card built on a later day, with that date's session: kept for good, no new statement read",
+     vv.card("CTG", "2026-07-22") is jul and CALLS["statement"] == before)
+forget("CTG", "2026-10-28")
 NOW["t"] = datetime(2026, 10, 28, 20, 0, tzinfo=vn_rules.VN_TZ)
 today = vv.card("CTG", None)
 t.ok("today's card kept within the hour", vv.card("CTG", "2026-10-28") is today)
-key = next(k for k in vv._cards if k[:2] == ("CTG", "2026-10-28"))
-vv._cards[key] = (time.time() - money_flows.RECHECK_SECONDS - 1, today)
+age("CTG", "2026-10-28")
 t.ok("... rebuilt after an hour (the session's close may be out)", vv.card("CTG", None) is not today
      and vv.card("CTG", None) == today)
+# Built at 10:00 during the session of 28/10: the price is 27/10's (VCI and the bars have no 28/10 row yet).
+forget("CTG", "2026-10-28")
+real_build = vv.build_card
+NOW["t"] = datetime(2026, 10, 28, 10, 0, tzinfo=vn_rules.VN_TZ)
+vv.build_card = lambda sym, day: replace(real_build(sym, day), day=date(2026, 10, 27), close=30_350.0)
+during = vv.card("CTG", None)
+vv.build_card = real_build
+NOW["t"] = datetime(2026, 10, 29, 9, 0, tzinfo=vn_rules.VN_TZ)
+age("CTG", "2026-10-28")
+after = vv.card("CTG", "2026-10-28")
+t.ok("a card built during the session (price of 27/10) is not kept for good: the next day, past the hour, rebuilt "
+     "with the session of 28/10", during.day == date(2026, 10, 27) and after is not during
+     and (after.day, after.close) == (date(2026, 10, 28), 30_700.0), (during.day, after.day))
+age("CTG", "2026-10-28")
+t.ok("... built on 29/10 with 28/10's session, that one is final", vv.card("CTG", "2026-10-28") is after)
+vv.build_card = lambda *a: None
+t.ok("no card for a past date (the data missing) ...", vv.card("CTG", "2026-09-30") is None)
+vv.build_card = real_build
+age("CTG", "2026-09-30")
+t.ok("... is asked again past the hour, not kept until a restart", vv.card("CTG", "2026-09-30") is not None)
+money_flows._down_until["VCI"] = time.time() + 60
+before = CALLS["statement"]
+try:
+    vv.card("CTG", "2026-09-29")
+    failed_fast = False
+except VendorUnavailableError:
+    failed_fast = True
+t.ok("VCI breaker open (money_flows._guarded): the card fails at once, no VCI read",
+     failed_fast and CALLS["statement"] == before)
+money_flows.reset_breaker()
+t.ok("no data for a bank (NoMarketDataError) is not an outage: no card, the breaker stays closed",
+     vv.card("VCB", "2026-10-28") is None and not money_flows._down_until)
 NOW["t"] = datetime(2026, 10, 29, 10, 0, tzinfo=vn_rules.VN_TZ)
 
+# ───────────── 6b. a cash dividend and a stock dividend going ex the same day (TPB, live) ─────────────
+tpb = vv.card("TPB", "2026-10-28")
+TPB_SHARES = PRICES["TPB"].set_index("Date")["TotalShares"]
+tpb_q2 = next(r for r in FX["TPB"]["balance_sheet"] if (r["yearReport"], r["lengthReport"]) == (2026, 2))
+t.ok("TPB 28/10/2026: the 500đ going ex with the 15% stock dividend (02/10) is paid on the 2.774.046.873 shares of "
+     "01/10, not the 3.190.153.903 of 02/10 (VCI's count already has the new shares): 1.387,0 tỷ, book 13.926",
+     tpb.dividends == ((date(2026, 10, 2), 500.0),) and TPB_SHARES[pd.Timestamp("2026-10-01")] == 2_774_046_873
+     and TPB_SHARES[pd.Timestamp("2026-10-02")] == 3_190_153_903 and tpb.paid == 500 * 2_774_046_873
+     and round(tpb.book) == 13_926
+     and abs(tpb.book - (vv.parent_equity(tpb_q2) - tpb.paid) / TPB_SHARES[pd.Timestamp("2026-10-28")]) < 1e-6
+     and "500 đ/cp (GDKHQ 02/10/2026), tổng 1.387,0 tỷ" in vv.render_card(tpb) and tpb.issues == (),
+     vv.render_card(tpb))
+
+# ───────────── 6c. the year in the labels when it is not the run date's ─────────────
+mar30_text = vv.render_card(mar30)
+t.ok("30/03/2026: the 2024 annual report (05/03/2025) and Q3/2025 (published 2025) carry their year; the "
+     "session's own labels do not",
+     f"[THỐNG KÊ {mar30.annual_published:%d/%m/%Y}] ROE bền vững" in mar30_text and mar30.published.year == 2025
+     and f"công bố {mar30.published:%d/%m/%Y}" in mar30_text.splitlines()[1]
+     and f"[FACT {mar30.published:%d/%m/%Y}] Vốn chủ" in mar30_text and "[THỐNG KÊ 30/03] Base" in mar30_text
+     and labelled(mar30_text), mar30_text)
+t.ok("... and none on a card whose dates are all of the run date's year (28/10/2026)",
+     not re.search(r"\[(?:FACT|THỐNG KÊ) \d{2}/\d{2}/", text), text)
+
 # ───────────── 7. banks only; the engine report, the fundamentals tool, /nhanh ─────────────
+details_asked = []
+vci.fetch_details = lambda s: details_asked.append(s) or {"comTypeCode": "NH"}
 t.ok("banks by the sector map (CTG yes, FPT no) without asking VCI", vv.is_bank("CTG") and not vv.is_bank("FPT"))
-vci.fetch_details = lambda s: {"comTypeCode": "NH"}
-t.ok("a bank outside the sector map: by VCI's company type NH", vv.is_bank("PGB"))
+real_listing_entry = vv.listing_entry
+vv.listing_entry = lambda s: {"PGB": {"symbol": "PGB", "icbCode2": "8300"}, "DGW": {"symbol": "DGW", "icbCode2": "5300"}}.get(s)
+t.ok("outside the sector map: by the VCI listing's ICB code 8300 (kept a day; no call per stock)",
+     vv.is_bank("PGB") and not vv.is_bank("DGW") and not vv.is_bank("XYZ") and details_asked == [], details_asked)
+vv.listing_entry = lambda s: None
+t.ok("listing unavailable: no card", not vv.is_bank("PGB") and vv.card_text("PGB", "2026-10-28") == "")
+vv.listing_entry = real_listing_entry
 vci.fetch_details = no_details
-t.ok("unknown company type (VCI down): no card", not vv.is_bank("PGB") and vv.card_text("PGB", "2026-10-28") == "")
 t.ok("card_text: the bank's card; '' for a non-bank", vv.card_text("CTG", "2026-10-28") == text
      and vv.card_text("FPT", "2026-10-28") == "")
 
@@ -289,10 +382,16 @@ t.ok("get_fundamentals (bank, no card): 'chưa đủ dữ liệu'",
 vv.card = real_card
 
 quick = service.quick_text("CTG", "2026-10-28")
-t.ok("/nhanh (bank): one line after the engine's summary",
+t.ok("/nhanh (bank): one line after the engine's summary - the price's session, its distance from Base, Ke set by "
+     "hand with the Base 2 points either side",
      quick == "CTG - 30.700 VND\n📐 Định giá tham khảo (không vào quyết định): Bear 26.236 · Base 27.643 · "
-              "Bull 28.066 → Đắt, MOS -11,1% (Ke 12%, BCTC Q2/2026)", quick)
+              "Bull 28.066 → Đắt: giá 30.700 (phiên 28/10) trên Base 11,1%. Ke 12% đặt tay (Ke 10%-14%: Base "
+              "28.749-26.619), BCTC Q2/2026", quick)
 t.ok("/nhanh (non-bank): the summary alone", service.quick_text("FPT", "2026-10-28") == "CTG - 30.700 VND")
+money_flows._down_until["VCI"] = time.time() + 60
+t.ok("/nhanh (bank) while the VCI breaker is open: the summary alone, at once",
+     service.quick_text("CTG", "2026-09-28") == "CTG - 30.700 VND")
+money_flows.reset_breaker()
 
 # ───────────── 8. the Output Guard: fair values must be the card's ─────────────
 t.ok("fair-value numbers: after the phrases (same clause, ≤ 30 characters) and right after Base/Bear/Bull/eab",
@@ -350,6 +449,74 @@ early = output_guard.guard_early(lambda s: {"investment_plan": "Giá trị hợp
                                  "Research Manager")(STATE)
 t.ok("guard_early (Research Manager, Trader) applies the fair-value check too",
      early["investment_plan"].startswith(output_guard.UNKNOWN_PRICE_NOTE) and "(35.000)" in early["guard_notes"], early)
+
+# Labels, a %, a Ke or a parenthesis between the word and the price (the model keeps the labels as told).
+t.ok("labelled, or with a %, a Ke, a parenthesis, a non-price number between the word and the price: still read",
+     rfmt.fair_value_numbers("Giá trị hợp lý (Base) [THỐNG KÊ 28/10]: 36.500 VND") == [36_500]
+     and rfmt.fair_value_numbers("Base [THỐNG KÊ 28/10/2026]: 36.500") == [36_500]
+     and rfmt.fair_value_numbers("giá trị hợp lý theo ROE 17,12% là 36.500") == [36_500]
+     and rfmt.fair_value_numbers("giá trị hợp lý với Ke 8% là 36.500") == [36_500]
+     and rfmt.fair_value_numbers("Bull (ROE p80) 36.500") == [36_500]
+     and rfmt.fair_value_numbers("giá trị hợp lý của CTG (vốn hoá 229.513 tỷ) là 36.500") == [36_500])
+upd = guard({**STATE, "fundamentals_report": "Giá trị hợp lý (Base) [THỐNG KÊ 28/10]: 36.500 VND.",
+             "final_trade_decision": "**Rating**: HOLD\n\nBase [THỐNG KÊ 28/10] 36.500, giữ."})
+t.ok("... end to end: a labelled fair value off the card flagged in the fundamentals report and the final decision",
+     "Fundamentals Analyst: giá trị hợp lý không có trên thẻ định giá (36.500)" in upd["guard_notes"]
+     and "Portfolio Manager: giá trị hợp lý không có trên thẻ định giá (36.500)" in upd["guard_notes"], upd["guard_notes"])
+t.ok("Markdown tables and arrows: '| Bull | 35.000 |', 'Bull (ROE p80): 35.000', '- Bull → 35.000'",
+     rfmt.fair_value_numbers("| Bear | 26.236 |\n| Base | 27.643 |\n| Bull | 35.000 |") == [26_236, 27_643, 35_000]
+     and rfmt.fair_value_numbers("Bull (ROE p80): 35.000") == [35_000]
+     and rfmt.fair_value_numbers("- Bull → 35.000") == [35_000])
+upd = guard({**STATE, "trader_investment_plan": "| Kịch bản | Giá |\n|---|---|\n| Bear | 26.236 |\n| Bull | 35.000 |"})
+t.ok("... a made-up Bull in a table, equal to a known resistance: flagged",
+     upd["guard_notes"] == "Trader: giá trị hợp lý không có trên thẻ định giá (35.000)", upd["guard_notes"])
+
+# The engine's own levels: support 29.000, stop 28.500, entry 30.000-30.700, T1 33.000, T2 35.000, live quote 30.900.
+# The engine names its scenarios BASE/BULL/BEAR; "định giá" and "giá hợp lý" are everyday words.
+PLAN = {"action": "BUY", "price": 30_700.0, "entry_low": 30_000.0, "entry_high": 30_700.0, "stop_price": 28_500.0,
+        "target_price": 33_000.0, "target2": 35_000.0, "deterministic_summary": "TÓM TẮT HỆ THỐNG"}
+PLAN_REPORT = ("=== QUYẾT ĐỊNH HỆ THỐNG ĐỊNH LƯỢNG - CTG ===\nGiá 30.700 VND; giá khớp lúc 10:15: 30.900\n"
+               "Vùng mua 30.000 - 30.700 | Stop 28.500 | T1 33.000 | T2 35.000\n"
+               "- BULL: nếu Đóng cửa vượt T1 33.000 kèm volume -> Giữ phần còn lại nhắm T2 35.000\n"
+               "- BEAR: nếu Đóng cửa dưới stop 28.500 -> Cắt toàn bộ vị thế\nHỗ trợ: 29.000 VND | Kháng cự: 35.000 VND")
+ENGINE_SENTENCES = [
+    "Chờ giá hợp lý hơn quanh vùng hỗ trợ 29.000.", "Định giá rẻ nhưng nếu thủng stop 28.500 thì cắt lỗ.",
+    "Giá hợp lý để gia tăng là vùng mua 30.000-30.700.", "Kịch bản Bull: 33.000 rồi 35.000.",
+    "Bear: 28.500 là mức cắt lỗ.", "Định giá hiện tại theo giá khớp 30.900.",
+    "Kịch bản Bull: 33.000 (T1), kịch bản Bear: 28.500 (stop).", "Bear ở 28.500 là stop của hệ thống.",
+    "Rủi ro định giá: nếu thủng hỗ trợ 29.000 thì cắt lỗ.", "Định giá hấp dẫn quanh vùng hỗ trợ 29.000.",
+    "Có thể mua thêm ở giá hợp lý 30.000.", "Định giá: vùng mua 30.000-30.700.",
+    "Giá trị hợp lý chỉ đáng tin khi giữ được hỗ trợ 29.000."]
+for name, report in (("with a card", PLAN_REPORT + "\n\n" + text), ("no card (non-bank)", PLAN_REPORT)):
+    plan_state = {"quant_decision": PLAN, "quant_report": report}
+    notes = {x: output_guard.guard_text(x, plan_state, label="Trader")[1] for x in ENGINE_SENTENCES}
+    t.ok(f"the engine's levels after Bull/Bear, 'định giá', 'giá hợp lý' are not fair values ({name})",
+         all(note is None for note in notes.values())
+         and output_guard.guard_fundamentals({**plan_state, "fundamentals_report": " ".join(ENGINE_SENTENCES)})[1] is None,
+         {x: n for x, n in notes.items() if n})
+t.ok("... but a price off the plan after Bull is still a fair value: 'Bull: 36.000' flagged",
+     output_guard.guard_text("Kịch bản Bull: 36.000.", {"quant_decision": PLAN, "quant_report": PLAN_REPORT + " 36.000"},
+                             label="Trader")[1] == "Trader: giá trị hợp lý không có trên thẻ định giá (36.000)")
+
+t.ok("a card value rounded within 0,5% in a guarded output passes both checks (nothing like it elsewhere)",
+     output_guard.guard_text("Base khoảng 27.700, Bull quanh 28.100.", STATE, label="Portfolio Manager")[1] is None
+     and output_guard.guard_text("Base khoảng 27.900.", STATE, label="Portfolio Manager")[1]
+     == "Portfolio Manager: giá trị hợp lý không có trên thẻ định giá (27.900)")
+upd = guard({**STATE, "fundamentals_report": "Theo VCI, định giá mục tiêu 48.800 (quan điểm bên ngoài). VCI định giá CTG "
+                                             "48.800. Định giá mục tiêu 48.800 là của bên ngoài.",
+             "final_trade_decision": "**Rating**: HOLD\n\nGiá mục tiêu của VCI 48.800 chỉ là tham khảo."})
+t.ok("VCI's target after 'định giá' (VCI before it, or 'mục tiêu'): not a fair value, still a known price for the PM",
+     upd["guard_notes"] == "", upd["guard_notes"])
+# The engine's node could not build the card; the fundamentals tool built it later in the run (the same cache).
+tool_card = {**STATE, "company_of_interest": "CTG", "trade_date": "2026-10-28", "quant_report": R.report,
+             "fundamentals_report": "Base 27.643 [THỐNG KÊ 28/10], Bull 28.066.",
+             "final_trade_decision": "**Rating**: HOLD\n\nBase [THỐNG KÊ 28/10] khoảng 27.700."}
+t.ok("a card the fundamentals tool read but the engine's report lacks: its values pass",
+     vv.cached_card("CTG", "2026-10-28") is not None and guard(tool_card)["guard_notes"] == "", guard(tool_card)["guard_notes"])
+t.ok("... no card for the run date anywhere (none kept for 20/10): flagged",
+     vv.cached_card("CTG", "2026-10-20") is None
+     and "Fundamentals Analyst: giá trị hợp lý không có trên thẻ định giá (27.643, 28.066)"
+     in guard({**tool_card, "trade_date": "2026-10-20"})["guard_notes"])
 
 # ───────────── 9. the prompts and informational only ─────────────
 from tradingagents.agents import vn_context  # noqa: E402
