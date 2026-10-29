@@ -1,0 +1,6 @@
+ccxt>=4.4
+requests>=2.31
+fastapi>=0.110
+uvicorn>=0.29
+python-dotenv>=1.0
+psycopg[binary]>=3.1
