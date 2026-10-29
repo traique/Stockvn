@@ -223,6 +223,8 @@ Upload lên server Cổ phiếu:
 
 Gói không bao giờ chứa `.env`, `bot.env`, `data/`, file `.db`, `tests/`, `docs/` hay `altcoin/tools/`. Chi tiết ở README, mục 2.
 
+**Cách khác: deploy từ GitHub.** Trỏ Botkeep vào nhánh **`botkeep`** (không phải `main`, vì `main` vượt 250 mục). GitHub Actions tự cập nhật nhánh này sau mỗi lần `main` đổi; file zip của mỗi lượt nằm ở mục Artifacts trên trang Actions. Trước khi chuyển: để bí mật trong Secrets của panel, sao lưu `data/` và thử một lần redeploy xem `data/` (gồm `data/altcoin/`) còn nguyên không (README, mục 2, "Deploy từ GitHub").
+
 ---
 
 ## 7. Giai đoạn 0: khảo sát và sao lưu (anh/chị làm)
