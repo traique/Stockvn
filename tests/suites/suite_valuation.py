@@ -116,6 +116,17 @@ t.ok(f"fewer than {vv.MIN_SESSIONS} sessions with a multiple: no rank",
 t.ok("no multiple on the last session: no rank", vv.rank_of(synthetic.assign(Multiple=synthetic["Multiple"].where(
     synthetic.index < len(synthetic) - 1)), "pb") is None)
 t.ok("an empty history: no rank", vv.rank_of(synthetic.iloc[0:0], "pb") is None)
+real_history = vv.multiple_history
+for multiples, want in (([1.0] + [2.0] * 398 + [1.5], "rẻ hơn 99% số phiên"),    # 99,5%, one cheaper session
+                        ([2.0] * 399 + [1.0], "rẻ hơn 100% số phiên"),            # 99,75%, the cheapest ever
+                        ([3.0] + [2.0] * 199, "rẻ hơn 1% số phiên"),              # 0,5%, one dearer session
+                        ([1.0] * 199 + [2.0], "rẻ hơn 0% số phiên")):             # the dearest ever
+    frame = pd.DataFrame({"Date": pd.bdate_range("2024-01-01", periods=len(multiples)), "Close": 1.0, "Base": 1.0,
+                          "Period": "Q4/2023", "PeriodPublished": date(2024, 1, 1), "Multiple": multiples})
+    vv.multiple_history = lambda *a, frame=frame: frame
+    t.ok(f"rounded, never 100% with a cheaper session nor 0% with a dearer one: {want}",
+         f"): {want} từ" in vv.multiple_line("CTG", "pb", None), vv.multiple_line("CTG", "pb", None))
+vv.multiple_history = real_history
 
 # ───────────── 2. CTG on 28/10/2026, as the PDF profile (P/B 1,20; 73%) ─────────────
 ctg = vv.rank_of(vv.multiple_history("CTG", "pb", "2026-10-28"), "pb")

@@ -420,6 +420,21 @@ Các tài khoản ảo vẫn khớp lệnh theo nến ngày sau 15:05 (đúng nh
 
 Mỗi cảnh báo khác gửi một lần mỗi ngày, kể cả khi khởi động lại (`data/intraday_alerts.json`). Giá đọc cách nhau vài phút nên có thể bỏ lỡ một cú xuyên stop rất ngắn. Bật/tắt bằng công tắc trên trang **AI & cảnh báo** (`INTRADAY_ALERTS` chỉ là giá trị mặc định). Bộ theo dõi này chạy ở mọi `TRADE_MODE` (kể cả `off`) vì lời nhắc 14:20 của việc treo Tài sản đi ra từ đây, không phụ thuộc công tắc.
 
+### Định giá tham khảo (v1.16.0)
+
+Chữ để **đọc**, không vào quyết định: không đổi hành động, cắt lỗ, mục tiêu, ngưỡng, cổng chặn của Quant Engine hay kết quả kiểm định/hiệu chỉnh (không module nào của engine, policy, simulator đọc nó). Ý tưởng lấy từ một hồ sơ định giá CTG (PDF); bot tự tính lại từ dữ liệu VCI, không đọc PDF.
+
+- **Dòng bách phân vị** (báo cáo cơ bản của `/phantich`, mọi mã), ví dụ CTG 30/10/2026: *P/B phiên gần nhất có dữ liệu 1,20 (giá đóng cửa 29/10/2026: 30.700; vốn chủ sở hữu công ty mẹ tới Q2/2026, công bố 19/08/2026): rẻ hơn 74% số phiên từ 05/2018 (2.124 phiên; thấp nhất 0,83, cao nhất 2,22)*. Đọc là: 74% số phiên kể từ khi có BCTC quý có P/B **cao hơn** hôm nay; số càng cao, mã càng rẻ so với **chính lịch sử của nó** (không so với mã khác). P/B cho ngân hàng, chứng khoán, bảo hiểm, BĐS; P/E (LNST công ty mẹ 4 quý) cho mã khác. Mỗi phiên tính bằng giá chưa điều chỉnh × số cổ phiếu của chính phiên đó và sổ sách của quý đã công bố tới phiên đó, nên phân tích ngày cũ không dùng số công bố sau. *Phiên gần nhất có dữ liệu*: chưa có giá đóng cửa của ngày phân tích. Dưới 120 phiên: *chưa đủ dữ liệu*. Dòng P/E, P/B của VCI ghi rõ là theo giá lúc VCI cập nhật, không phải hôm nay.
+- **Thẻ định giá ngân hàng** (cuối báo cáo Quant Engine của `/phantich`, dòng 📐 của `/nhanh`, một dòng trong báo cáo cơ bản):
+  - **Base** = sổ sách/cp × P/B hợp lý, với **P/B = 1 + (ROE − Ke) / (1 + Ke − (1 − λ)(1 + g))**, λ 0,4, g 0; ROE = trung vị ROE 5 năm đã công bố. **Bear**/**Bull** theo ROE p20/p80 của chính mã (mọi năm từ 2018); **eab** = Base × (1 − 13,7%). Sổ sách/cp = vốn chủ sở hữu công ty mẹ của quý đã công bố, trừ cổ tức tiền có ngày GDKHQ sau ngày khoá sổ quý, chia số cổ phiếu lưu hành của phiên (qua ngày chia thưởng vẫn đúng).
+  - Vùng: **Rẻ** khi giá ≤ Base, **Đắt** khi giá ≥ Bull, còn lại **Hợp lý**; MOS = (Base − giá)/Base.
+  - **Ke** (chi phí vốn chủ sở hữu) mặc định **12%**, đổi bằng `VALUATION_KE_BANK` (%, 4-30). Base rất nhạy với Ke nên thẻ luôn in Base ở Ke ±2 điểm; hồ sơ PDF dùng 7,94%, cho Base CTG cao hơn khoảng 8,5%.
+  - Mỗi dòng có **nhãn và ngày**: `[FACT dd/mm]` số trong BCTC và sự kiện, `[THỐNG KÊ dd/mm]` trung vị, phân vị, kết quả mô hình; **PHÁN ĐOÁN** chỉ dành cho chữ do AI viết (AI được dặn giữ nguyên nhãn khi trích). Đầu thẻ ghi giá phiên, kỳ BCTC, ngày công bố và **hạn dùng**: tới khi có BCTC quý mới hoặc tới ngày GDKHQ kế tiếp.
+  - **Output Guard**: giá trị hợp lý, Base, Bear, Bull, eab mà AI nêu (cả trong báo cáo cơ bản) phải khớp thẻ ±0,5%, nếu không thì bị gắn cảnh báo *giá trị hợp lý không có trên thẻ định giá*.
+  - Ví dụ `/nhanh CTG` ngày 30/10/2026: `📐 Định giá tham khảo (không vào quyết định): Bear 26.236 · Base 27.643 · Bull 28.066 → Đắt: giá 30.700 (phiên 29/10) trên Base 11,1%. Ke 12% đặt tay (Ke 10%-14%: Base 28.749-26.619), BCTC Q2/2026`.
+  - Chỉ ngân hàng (ICB 8300 theo danh sách mã của VCI); công ty chứng khoán, bảo hiểm, BĐS chưa có thẻ. Giá từ 2018 lấy một lần (lần đầu một mã khoảng 10-15 giây), sau đó mỗi ngày chỉ lấy thêm phiên mới (`data/cache/valuation/`).
+- **Thẻ anh nhập** (`/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...]` · `/tsdinhgia CTG xoa` · `/tsdinhgia`, cả trên trang `/taisan`; chi tiết ở bảng lệnh **Tài sản**): mã nào cũng được, không cần đang giữ, bán hết vẫn còn. Trong phiên bot báo 🟢 khi giá **vào** vùng Rẻ, 🔺 khi vào vùng Đắt, mỗi lần vào vùng một lần, vùng đệm 0,5% (xem **Cảnh báo trong phiên** ở trên); thẻ hết hạn hoặc đã qua ngày GDKHQ thì báo một lần rồi ngừng.
+
 ### Bật/tắt kênh thông báo và đổi vốn tài khoản ảo trên web
 
 - Trang **AI & cảnh báo** (`/ai`), thẻ **Kênh thông báo** (`/ai#kenh`): công tắc bật/tắt thật cho *Telegram · thông báo* (báo cáo, AI phản biện, cảnh báo; lệnh Telegram vẫn được trả lời khi tắt), *Zoom · thông báo*, *Zoom · nhận lệnh*, *Cảnh báo trong phiên* và *Altcoin · thông báo* (tin của bot Altcoin, mở đầu “🪙 Altcoin ›”, tới cùng chat Telegram và Zoom như tin Cổ phiếu; Telegram/Zoom tắt thì tin Altcoin cũng không qua kênh đó). Lưu trong `data/channels.json`, giữ qua lần khởi động lại. Kênh chưa cấu hình hiện "chưa cấu hình".
@@ -535,6 +550,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `TAISAN_RISK_PCT` | 2 | Một lệnh mua được lỗ tối đa bao nhiêu % tài sản nếu chạm cắt lỗ (`/tskiemtra`) |
 | `TAISAN_OPEN_RISK_PCT` | 6 | Trần của mọi cắt lỗ cộng lại (% tài sản) |
 | `TAISAN_MAX_WEIGHT_NEW` | 30 | Một mã tối đa bao nhiêu % tài sản sau khi mua (không quá ngưỡng nguy hiểm `/tsnguong`) |
+| `VALUATION_KE_BANK` | 12 | Ke (%/năm, 4-30) của thẻ định giá ngân hàng; chỉ đổi số tham khảo, không đổi quyết định (mục **Định giá tham khảo**) |
 | `ZOOM_WEBHOOK_URL`, `ZOOM_WEBHOOK_TOKEN` | - | Gửi thông báo vào một kênh Zoom (Incoming Webhook) |
 | `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_BOT_JID`, `ZOOM_ACCOUNT_ID` | - | Chatbot Zoom (thông báo tới JID đã ghép đôi, nhận lệnh) |
 | `ZOOM_TO_JID` | - | Gửi thông báo (cả của Altcoin) tới JID này thay cho JID đã ghép đôi |

@@ -27,17 +27,17 @@ from pathlib import Path
 
 VERSION = "v1.16.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "62c8e5f"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "359eefb"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.16.0", "2026-10-29", (
-        "Định giá tham khảo: P/B (ngân hàng, chứng khoán, bảo hiểm, BĐS) hoặc P/E theo giá đóng cửa phiên gần nhất",
+        "Định giá tham khảo: P/B (ngân hàng, chứng khoán, bảo hiểm, BĐS) hoặc P/E theo giá đóng cửa gần nhất",
         "So với mọi phiên từ 2018 của chính mã: “rẻ hơn X% số phiên”; sổ sách đúng quý đã công bố tại mỗi phiên",
         "Giá chưa điều chỉnh × số cổ phiếu của chính phiên đó: không lệch qua ngày chia thưởng",
         "VCI chưa đăng phiên hôm nay: lấy giá đóng cửa từ nến của Quant; hỏi lại VCI mỗi giờ tới khi có",
-        "Bỏ dòng “P/B hiện tại” cũ (là P/B theo giá ngày VCI cập nhật, không phải hôm nay)",
+        "Bỏ dòng “P/B hiện tại” cũ (theo giá ngày VCI cập nhật, không phải hôm nay)",
         "P/E tính từ LNST công ty mẹ 4 quý, không từ EPS quý (VCI có quý để EPS bằng 0)",
         "Phân tích ngày cũ: bỏ P/E, P/B, vốn hoá của VCI và so sánh ngành (VCI tính theo giá sau ngày đó)",
         "CIR nay in số dương (VCI trả số âm)",
@@ -45,7 +45,7 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Thẻ: sổ sách/cp đúng ngày, ROE trung vị 5 năm, Ke 12% (VALUATION_KE_BANK) và ±2 điểm, nhãn FACT/THỐNG KÊ",
         "Cổ tức tiền tính trên số cp trước GDKHQ; báo phát hành riêng lẻ/ESOP/quyền mua sau ngày khoá sổ",
         "Output Guard: giá trị hợp lý AI nêu phải khớp thẻ (±0,5%); không bắt nhầm stop/T1/hỗ trợ của Quant",
-        "Thẻ anh nhập: /tsdinhgia MÃ BEAR BASE BULL (cả /taisan); báo trong phiên khi vào Rẻ/Đắt, sau ⛔/🎯",
+        "Thẻ anh nhập /tsdinhgia MÃ BEAR BASE BULL (cả /taisan, cạnh thẻ của bot): báo khi vào Rẻ/Đắt, sau ⛔/🎯",
         "Chỉ là thông tin: không đổi quyết định, stop/target của Quant Engine",
     )),
     ("v1.15.0", "2026-10-29", (

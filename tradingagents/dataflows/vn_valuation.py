@@ -254,9 +254,16 @@ def multiple_line(symbol: str, metric: str, as_of_date: str | None) -> str:
         return f"- {label} hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu"
     # The run date's session not out yet: before the close, a holiday, or VCI and the bars both behind.
     when = "hôm nay" if rank.day == _as_of_day(as_of_date) else "phiên gần nhất có dữ liệu"
+    # Rounded, but never "100%" while a session was cheaper (FPT 29/10/2026: 99,5%, 8 sessions
+    # lower), nor "0%" while one was dearer.
+    shown = round(rank.higher_pct)
+    if rank.low < rank.value:
+        shown = min(shown, 99)
+    if rank.higher_pct > 0:
+        shown = max(shown, 1)
     return (
         f"- {label} {when} {rfmt.fmt_number(rank.value)} (giá đóng cửa {rank.day:%d/%m/%Y}: {rfmt.fmt_price(rank.close)}; "
-        f"{base} tới {rank.period}, công bố {rank.published:%d/%m/%Y}): rẻ hơn {rfmt.fmt_number(rank.higher_pct, 0)}% "
+        f"{base} tới {rank.period}, công bố {rank.published:%d/%m/%Y}): rẻ hơn {shown}% "
         f"số phiên từ {rank.since:%m/%Y} ({rfmt.fmt_price(rank.sessions)} phiên; thấp nhất {rfmt.fmt_number(rank.low)}, "
         f"cao nhất {rfmt.fmt_number(rank.high)})"
     )
