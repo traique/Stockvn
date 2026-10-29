@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.16.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "dcea0fc"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "df1ac0f"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -41,6 +41,9 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "P/E tính từ LNST công ty mẹ 4 quý, không từ EPS quý (VCI có quý để EPS bằng 0)",
         "Phân tích ngày cũ: bỏ P/E, P/B, vốn hoá của VCI và so sánh ngành (VCI tính theo giá sau ngày đó)",
         "CIR nay in số dương (VCI trả số âm)",
+        "Thẻ định giá ngân hàng (Bear · eab · Base · Bull, MOS, vùng Rẻ/Hợp lý/Đắt): sau báo cáo Quant, /nhanh",
+        "Thẻ: sổ sách/cp đúng ngày, ROE trung vị 5 năm đã công bố, Ke 12% (VALUATION_KE_BANK), nhãn FACT/THỐNG KÊ",
+        "Output Guard: giá trị hợp lý AI nêu phải khớp thẻ (±0,5%), kiểm cả báo cáo cơ bản",
         "Chỉ là thông tin cho AI phân tích: không đổi quyết định, stop/target của Quant Engine",
     )),
     ("v1.15.0", "2026-10-29", (

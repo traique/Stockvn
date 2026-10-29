@@ -123,6 +123,29 @@ def published_ratio_rows(symbol: str, as_of_date: str | None) -> list[dict]:
     return sorted(visible, key=lambda r: (r.get("yearReport") or 0, r.get("quarter") or 0), reverse=True)
 
 
+def published_annual_ratio_rows(symbol: str, as_of_date: str | None) -> list[tuple[dict, date]]:
+    """Annual ratio rows (``quarter`` 5, which ``published_ratio_rows`` leaves out) of the years
+    whose annual report was public by the run date, newest first, each with that day.
+
+    The annual income statement's ``publicDate`` decides (CTG 2025: 31/03/2026); when VCI has no
+    statement for the year, the annual filing deadline.
+    """
+    try:
+        years = {int(r.get("yearReport") or 0): published_on(r, annual=True)
+                 for r in vci.fetch_statement(symbol, "INCOME_STATEMENT")["years"]}
+    except NoMarketDataError:
+        years = {}
+    cutoff = _as_of_day(as_of_date)
+    visible = []
+    for row in vci.fetch_ratios(symbol):
+        if int(row.get("quarter") or 0) != 5:
+            continue
+        public = years.get(int(row.get("yearReport") or 0)) or published_on(row, annual=True)
+        if public <= cutoff:
+            visible.append((row, public))
+    return sorted(visible, key=lambda rp: int(rp[0].get("yearReport") or 0), reverse=True)
+
+
 def _num(value) -> float | None:
     try:
         v = float(value)
@@ -214,6 +237,17 @@ def _own_history_line(symbol: str, metric: str, as_of_date: str | None) -> str:
         return f"- {vn_valuation.METRIC_LABELS[metric]} hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu"
 
 
+def _valuation_card_line(symbol: str, as_of_date: str | None) -> str:
+    """The system's valuation card of a bank in one line (the full card is in the engine's report)."""
+    from tradingagents.dataflows import vn_valuation
+
+    try:
+        return vn_valuation.fundamentals_line(vn_valuation.card(symbol, as_of_date))
+    except Exception as exc:  # noqa: BLE001 - the card is enrichment
+        logger.warning("Valuation card of %s unavailable: %s", symbol, exc)
+        return vn_valuation.fundamentals_line(None)
+
+
 def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
     """Valuation, profitability, leverage and growth as known on the run date."""
     symbol = normalize_symbol(ticker)
@@ -265,6 +299,8 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
 
     metric = profile.benchmark_metric
     lines.append(_own_history_line(symbol, metric, as_of_date))
+    if profile.key == "banking":
+        lines.append(_valuation_card_line(symbol, as_of_date))
     if historical:
         lines.append(f"- So sánh ngành: bị giữ lại cho lượt phân tích ngày {as_of_date} (theo số VCI của kỳ, giá sau ngày này).")
     else:

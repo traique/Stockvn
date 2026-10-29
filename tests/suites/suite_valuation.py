@@ -329,8 +329,11 @@ ohlcv.load_ohlcv = fake_bars
 # ───────────── 10. informational only ─────────────
 repo = _common.REPO
 readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbot") for p in (repo / d).rglob("*.py")
-                 if "vn_valuation" in p.read_text(encoding="utf-8", errors="replace"))
-t.ok("only the fundamentals report reads vn_valuation (no engine, policy, simulator, calibration)",
-     readers == ["tradingagents/dataflows/vn_fundamentals.py"], readers)
+                 if "vn_valuation" in p.read_text(encoding="utf-8", errors="replace")
+                 and p.name not in ("vn_valuation.py", "valuation_config.py"))
+t.ok("only text writers read vn_valuation: the fundamentals report, the card after the engine's report, the Output "
+     "Guard, /nhanh (no engine, policy, simulator, calibration)",
+     readers == ["tradingagents/agents/output_guard.py", "tradingagents/agents/quant_engine.py",
+                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/service.py"], readers)
 
 t.done()

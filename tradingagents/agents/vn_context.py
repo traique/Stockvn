@@ -27,6 +27,10 @@ GROUNDING_RULES = (
     "- Tin tức: chỉ tin đánh dấu ✅ mới là tin của chính mã; tin ⚠️ phải gọi rõ là tin ngành/thị trường "
     "chung. Mọi tin nhắc tới phải kèm ngày.\n"
     "- Không tự tính lãi/lỗ vị thế; nếu dữ liệu có dòng lãi/lỗ do hệ thống tính thì dùng lại đúng số đó.\n"
+    "- Số có nhãn [FACT dd/mm] hoặc [THỐNG KÊ dd/mm] khi trích phải giữ nguyên nhãn và ngày; nhận định của "
+    "chính bạn thì ghi PHÁN ĐOÁN. Giá trị hợp lý (Base, Bear, Bull, eab, \"giá hợp lý\", \"định giá ... X\") chỉ "
+    "được lấy đúng số trên thẻ \"Định giá (tham khảo...)\" của hệ thống; không có thẻ thì không nêu giá trị "
+    "hợp lý. Thẻ chỉ để tham khảo, không đổi action.\n"
     "- Không hứa hẹn lợi nhuận. Số viết kiểu Việt Nam: dấu chấm phân cách nghìn, dấu phẩy thập phân "
     "(70.370 VND; -4,76%)."
 )

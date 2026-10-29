@@ -530,7 +530,28 @@ def price_numbers(text: str) -> set[int]:
     return out
 
 
-def find_unknown_prices(text: str, allowed_text: str) -> list[int]:
-    """Số dạng giá trong `text` không xuất hiện ở `allowed_text` (prompt đã cấp)."""
-    allowed = price_numbers(allowed_text)
-    return sorted(value for value in price_numbers(text) if value not in allowed)
+# Từ đứng trước một GIÁ TRỊ HỢP LÝ. Cụm tiếng Việt: số đầu tiên trong cùng vế câu (không qua dấu phẩy),
+# cách tối đa 30 ký tự không có chữ số ("giá trị hợp lý của CTG theo mô hình là 27.643"; nhưng "về định
+# giá, kháng cự 35.000" là mốc khác). Tên kịch bản (Base/Bear/Bull/eab,
+# đúng chữ hoa): số phải đứng ngay sau, chỉ cách bởi dấu hoặc "là/ở/mức/khoảng/quanh" - để "phe Bull
+# nhắm kháng cự 35.000" (nói về người tranh luận) không bị coi là giá trị hợp lý.
+_FAIR_VALUE_PHRASE_RE = re.compile(r"giá trị hợp l[ýí]|giá hợp l[ýí]|định giá", re.IGNORECASE)
+_FAIR_VALUE_NAME_RE = re.compile(r"(?<![\w-])(?:Base|Bear|Bull|eab)(?![\w-])")
+_PHRASE_GAP_RE = re.compile(r"[^\d\n.,;!?]{0,30}")
+_NAME_GAP_RE = re.compile(r"[\s:=~≈(*]*(?:(?:là|ở|mức|khoảng|quanh)[\s:=~≈(*]+)*")
+
+
+def fair_value_numbers(text: str) -> list[int]:
+    """Các số dạng giá đứng sau "giá trị hợp lý / giá hợp lý / định giá / Base / Bear / Bull / eab"."""
+    text = text or ""
+    found: set[int] = set()
+    for pattern, gap in ((_FAIR_VALUE_PHRASE_RE, _PHRASE_GAP_RE), (_FAIR_VALUE_NAME_RE, _NAME_GAP_RE)):
+        for word in pattern.finditer(text):
+            start = gap.match(text, word.end()).end()
+            number = _PRICE_NUMBER_RE.match(text, start)
+            if number is None or _is_index_points(text, number):
+                continue
+            value = _normalize_price_token(number.group(1))
+            if value is not None and value >= 1000:
+                found.add(value)
+    return sorted(found)
