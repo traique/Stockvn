@@ -184,6 +184,7 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 | `/tsnhatky [n]` · `/tshuy [số]` | Nhật ký (20 dòng) · huỷ dòng cuối hoặc dòng số đó |
 | `/tsbaocao` | Báo cáo ngay (như bản 15:30) |
 | `/tsnguong 25 40` | Ngưỡng tỷ trọng một mã: theo dõi, nguy hiểm (%) |
+| `/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...]` · `/tsdinhgia CTG xoa` · `/tsdinhgia` | **Thẻ định giá anh nhập** (Bear Base Bull, mã nào cũng được, không cần đang giữ): giá theo đồng, `30164`, `30.164` hay `30,164` đều là 30.164 đ (dấu chấm/phẩy chỉ ngăn hàng nghìn; `30,1` bị từ chối), cần Bear < Base < Bull, eab < Base, hạn dùng không ở quá khứ, tối đa 30 thẻ. Bot báo trong phiên khi giá vào vùng Rẻ (≤ Base) hoặc Đắt (≥ Bull). Chỉ để tham khảo: không đổi cắt lỗ, mục tiêu hay quyết định của bot · xoá · xem các thẻ (giá, vùng, MOS, hạn) |
 | `/tsxuat` | File Excel (Telegram); Zoom trả về đường link tải trên web (cần mật khẩu web) |
 | `/tsnhap` | Gửi file `.xlsx` vào bot Telegram kèm chú thích `/tsnhap`: bot cho xem trước và đối chiếu; ghi bằng `/tsnhap xacnhan` (sổ trống) hoặc `/tsnhap thaythe` (thay toàn bộ, sổ cũ lưu bản sao); bỏ: `/tsnhap huy` |
 
@@ -198,8 +199,9 @@ Sổ riêng cho tiền thật của anh, **không lẫn với các tài khoản 
 - **Hiệu suất danh mục**: 7N/1T/3T/6T/1N/Tất cả; bật **So sánh VN-Index** để xem % theo đơn vị quỹ, tắt để xem tổng tài sản và vốn gốc theo đồng; chạm, di chuột hoặc dùng phím mũi tên để xem từng ngày.
 - **Mã đang nắm giữ**, mỗi mã một thẻ: tên công ty, số lô và số lượng, biểu đồ giá 3 tháng, giá hiện tại và thay đổi so với phiên trước, PnL, vốn trung bình, cắt lỗ/mục tiêu, **nếu chạm cắt lỗ mất bao nhiêu** (hoặc «chưa có cắt lỗ: không giới hạn»), việc treo ⛔/🔴 hay «giữ có lý do», 🟠 trong ngày, cổ phiếu chờ T+2, tín hiệu Siêu tín hiệu, tổng mua và giá trị hiện tại, nút **Đọc tin tức** và **Xem lệnh** (nhật ký lọc theo mã). Nút **Làm mới giá** lấy lại giá khớp và biểu đồ nhỏ.
 - **Quyền chờ về** (nút ghi nhận khi về) và quyền sắp tới.
-- Các mục thu gọn: Chi tiết danh mục, Thêm giao dịch (nút **Kiểm tra lệnh mua** = `/tskiemtra`, không ghi gì vào sổ), Nhật ký giao dịch (lọc theo loại và mã, có nút huỷ), Nạp/rút/cổ tức/điều chỉnh, Cắt lỗ & mục tiêu, Nhận xét & chiến lược, Báo cáo cuối ngày, Nhập file Excel, Ngưỡng cảnh báo tỷ trọng.
-  - **Nhận xét & chiến lược**: tín hiệu Siêu tín hiệu của từng mã, nút Quant Engine và AI phản biện, kết quả cảnh báo bán.
+- Các mục thu gọn: Chi tiết danh mục, Thêm giao dịch (nút **Kiểm tra lệnh mua** = `/tskiemtra`, không ghi gì vào sổ), Nhật ký giao dịch (lọc theo loại và mã, có nút huỷ), Nạp/rút/cổ tức/điều chỉnh, Cắt lỗ & mục tiêu, Thẻ định giá anh nhập, Nhận xét & chiến lược, Báo cáo cuối ngày, Nhập file Excel, Ngưỡng cảnh báo tỷ trọng.
+  - **Thẻ định giá anh nhập** (`/tsdinhgia`, có cả khi sổ trống): form gõ mã tự do để lưu hoặc xoá thẻ; bảng mỗi thẻ: giá, vùng hôm nay, MOS, chip hạn dùng / **HẾT HẠN** (vùng ghi «theo thẻ cũ») / **cần cập nhật** (đã qua một ngày GDKHQ sau ngày nhập: cổ tức tiền, cổ phiếu thưởng/cổ tức bằng cổ phiếu, quyền mua; ESOP, phát hành riêng lẻ, chuyển đổi trái phiếu không tính vì sở không điều chỉnh giá tham chiếu; khi đó không hiện vùng, MOS hay % lệch vì mốc theo giá cũ còn giá đã theo giá mới); với ngân hàng, thẻ của bot (Bear/Base/Bull, BCTC, Ke đặt tay) đặt cạnh và % lệch hai Base, gắn cờ khi lệch quá 10% (thẻ của bot tính ngầm, không chặn trang: lần xem đầu ghi «đang tính»).
+  - **Nhận xét & chiến lược**: tín hiệu Siêu tín hiệu của từng mã, nút Quant Engine và AI phản biện, kết quả cảnh báo bán và vùng định giá (cột *Đúng hướng*: giá thấp hơn sau 10 phiên, riêng 🟢 Rẻ là giá cao hơn).
   - **Báo cáo cuối ngày**: bản gửi lúc 15:30, xem bản mới nhất, nút gửi ngay qua Telegram và Zoom.
   - **Nhập file Excel**: xem trước rồi xác nhận, tối đa 1 MB.
 - **Reset danh mục**: gõ `XOA` để xoá, sổ cũ được lưu bản sao.
@@ -413,9 +415,25 @@ Các tài khoản ảo vẫn khớp lệnh theo nến ngày sau 15:05 (đúng nh
 
 - ⛔ mã đang giữ có giá ≤ stop, kèm số cổ phiếu bán được theo T+2 (cổ phiếu mua phiên T chỉ tính từ phiên chiều T+2); 🎯 chạm T1; 🏁 chạm T2; 🔒 giá sàn tính từ giá đóng cửa phiên trước (có thể không bán được). Áp dụng cho tài khoản thật (chế độ `signal`) và tài khoản ảo Quant Engine. Ngày GDKHQ: nếu nguồn đã điều chỉnh lịch sử, stop/T1/T2 được so theo giá đã điều chỉnh (⚖️); nếu chưa, giá thấp hơn giá sàn tính từ giá đóng cửa hôm trước được báo là có thể GDKHQ thay vì chạm stop;
 - 🛒 lệnh mua giới hạn hôm nay của Quant Engine đang trong vùng mua, hoặc ⚠️ giá đã dưới stop dự kiến (nên bỏ lệnh);
-- 📉 VNINDEX giảm `INTRADAY_VNI_DROP_PCT` % (mặc định 2) và gấp đôi mức đó so với phiên trước.
+- 📉 VNINDEX giảm `INTRADAY_VNI_DROP_PCT` % (mặc định 2) và gấp đôi mức đó so với phiên trước;
+- 🟢 giá vào vùng **Rẻ** (≤ Base) hoặc 🔺 vào vùng **Đắt** (≥ Bull) của một thẻ định giá anh nhập (`/tsdinhgia`, cả mã không giữ). Mỗi lần **vào** vùng báo một lần (không theo ngày), tối đa một Rẻ và một Đắt mỗi thẻ mỗi phiên: vùng cuối của mỗi thẻ lưu ở `data/valuation_zones.json`, giữ qua ngày và qua khởi động lại; thẻ mới nhập bắt đầu từ vùng lúc lưu (giá đã ở Rẻ khi lưu thì không báo «vào vùng Rẻ»); đã báo Rẻ thì giá phải lên quá Base 0,5% mới coi là rời vùng (Đắt: xuống dưới Bull 0,5%), nên giá dao động quanh Base không báo liên tục. Thẻ hết hạn hoặc đã qua ngày GDKHQ từ ngày nhập (các mốc còn theo giá cũ) thì bot báo một lần rồi ngừng; ngày GDKHQ đã công bố được nhớ trước, nên sáng hôm đó VCI lỗi vẫn biết. Các dòng này gửi sau, thành tin riêng, để việc hỏi VCI/giá từng thẻ không làm chậm ⛔/🎯/🔒; VCI lỗi thì thẻ đó hỏi lại sau một giờ và hôm đó chưa báo vùng tới khi đọc được lịch GDKHQ. Mỗi lần báo được ghi vào kết quả cảnh báo (🟢 Rẻ đúng khi giá 10 phiên sau cao hơn, 🔺 Đắt đúng khi thấp hơn), không gọi AI.
 
-Mỗi cảnh báo gửi một lần mỗi ngày, kể cả khi khởi động lại (`data/intraday_alerts.json`). Giá đọc cách nhau vài phút nên có thể bỏ lỡ một cú xuyên stop rất ngắn. Bật/tắt bằng công tắc trên trang **AI & cảnh báo** (`INTRADAY_ALERTS` chỉ là giá trị mặc định). Bộ theo dõi này chạy ở mọi `TRADE_MODE` (kể cả `off`) vì lời nhắc 14:20 của việc treo Tài sản đi ra từ đây, không phụ thuộc công tắc.
+Mỗi cảnh báo khác gửi một lần mỗi ngày, kể cả khi khởi động lại (`data/intraday_alerts.json`). Giá đọc cách nhau vài phút nên có thể bỏ lỡ một cú xuyên stop rất ngắn. Bật/tắt bằng công tắc trên trang **AI & cảnh báo** (`INTRADAY_ALERTS` chỉ là giá trị mặc định). Bộ theo dõi này chạy ở mọi `TRADE_MODE` (kể cả `off`) vì lời nhắc 14:20 của việc treo Tài sản đi ra từ đây, không phụ thuộc công tắc.
+
+### Định giá tham khảo (v1.16.0)
+
+Chữ để **đọc**, không vào quyết định: không đổi hành động, cắt lỗ, mục tiêu, ngưỡng, cổng chặn của Quant Engine hay kết quả kiểm định/hiệu chỉnh (không module nào của engine, policy, simulator đọc nó). Ý tưởng lấy từ một hồ sơ định giá CTG (PDF); bot tự tính lại từ dữ liệu VCI, không đọc PDF.
+
+- **Dòng bách phân vị** (báo cáo cơ bản của `/phantich`, mọi mã), ví dụ CTG 30/10/2026: *P/B phiên gần nhất có dữ liệu 1,20 (giá đóng cửa 29/10/2026: 30.700; vốn chủ sở hữu công ty mẹ tới Q2/2026, công bố 19/08/2026): rẻ hơn 74% số phiên từ 05/2018 (2.124 phiên; thấp nhất 0,83, cao nhất 2,22)*. Đọc là: 74% số phiên kể từ khi có BCTC quý có P/B **cao hơn** hôm nay; số càng cao, mã càng rẻ so với **chính lịch sử của nó** (không so với mã khác). P/B cho ngân hàng, chứng khoán, bảo hiểm, BĐS; P/E (LNST công ty mẹ 4 quý) cho mã khác. Mỗi phiên tính bằng giá chưa điều chỉnh × số cổ phiếu của chính phiên đó và sổ sách của quý đã công bố tới phiên đó, nên phân tích ngày cũ không dùng số công bố sau. *Phiên gần nhất có dữ liệu*: chưa có giá đóng cửa của ngày phân tích. Dưới 120 phiên: *chưa đủ dữ liệu*. Dòng P/E, P/B của VCI ghi rõ là theo giá lúc VCI cập nhật, không phải hôm nay.
+- **Thẻ định giá ngân hàng** (cuối báo cáo Quant Engine của `/phantich`, dòng 📐 của `/nhanh`, một dòng trong báo cáo cơ bản):
+  - **Base** = sổ sách/cp × P/B hợp lý, với **P/B = 1 + (ROE − Ke) / (1 + Ke − (1 − λ)(1 + g))**, λ 0,4, g 0; ROE = trung vị ROE 5 năm đã công bố. **Bear**/**Bull** theo ROE p20/p80 của chính mã (mọi năm từ 2018); **eab** = Base × (1 − 13,7%). Sổ sách/cp = vốn chủ sở hữu công ty mẹ của quý đã công bố, trừ cổ tức tiền có ngày GDKHQ sau ngày khoá sổ quý, chia số cổ phiếu lưu hành của phiên (qua ngày chia thưởng vẫn đúng).
+  - Vùng: **Rẻ** khi giá ≤ Base, **Đắt** khi giá ≥ Bull, còn lại **Hợp lý**; MOS = (Base − giá)/Base.
+  - **Ke** (chi phí vốn chủ sở hữu) mặc định **12%**, đổi bằng `VALUATION_KE_BANK` (%, 4-30). Base rất nhạy với Ke nên thẻ luôn in Base ở Ke ±2 điểm; hồ sơ PDF dùng 7,94%, cho Base CTG cao hơn khoảng 8,5%.
+  - Mỗi dòng có **nhãn và ngày**: `[FACT dd/mm]` số trong BCTC và sự kiện, `[THỐNG KÊ dd/mm]` trung vị, phân vị, kết quả mô hình; **PHÁN ĐOÁN** chỉ dành cho chữ do AI viết (AI được dặn giữ nguyên nhãn khi trích). Đầu thẻ ghi giá phiên, kỳ BCTC, ngày công bố và **hạn dùng**: tới khi có BCTC quý mới hoặc tới ngày GDKHQ kế tiếp.
+  - **Output Guard**: giá trị hợp lý, Base, Bear, Bull, eab mà AI nêu (cả trong báo cáo cơ bản) phải khớp thẻ ±0,5%, nếu không thì bị gắn cảnh báo *giá trị hợp lý không có trên thẻ định giá*. Mốc đã có trong dữ liệu (hỗ trợ, kháng cự, kế hoạch của Quant) đứng sau Bull/Bear là kịch bản, không bị bắt; mã không phải ngân hàng thì Bull/Bear là hai phe tranh luận; giá trị hợp lý VCI/CTCK nêu là quan điểm bên ngoài.
+  - Ví dụ `/nhanh CTG` ngày 30/10/2026: `📐 Định giá tham khảo (không vào quyết định): Bear 26.236 · Base 27.643 · Bull 28.066 → Đắt: giá 30.700 (phiên 29/10) trên Base 11,1%. Ke 12% đặt tay (Ke 10%-14%: Base 28.749-26.619), BCTC Q2/2026`.
+  - Chỉ ngân hàng (ICB 8300 theo danh sách mã của VCI); công ty chứng khoán, bảo hiểm, BĐS chưa có thẻ. Giá từ 2018 lấy một lần (lần đầu một mã khoảng 10-15 giây), sau đó mỗi ngày chỉ lấy thêm phiên mới (`data/cache/valuation/`; mã không dùng quá 30 ngày thì xoá, lần sau lấy lại). Phiên VCI chưa đăng lấy từ giá của engine, trừ ngày GDKHQ chia thưởng/cổ tức cổ phiếu/phát hành thêm (số cổ phiếu đổi đúng ngày đó): khi ấy dòng P/B và thẻ dùng phiên trước.
+- **Thẻ anh nhập** (`/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...]` · `/tsdinhgia CTG xoa` · `/tsdinhgia`, cả trên trang `/taisan`; chi tiết ở bảng lệnh **Tài sản**): mã nào cũng được, không cần đang giữ, bán hết vẫn còn. Trong phiên bot báo 🟢 khi giá **vào** vùng Rẻ, 🔺 khi vào vùng Đắt, mỗi lần vào vùng một lần, vùng đệm 0,5% (xem **Cảnh báo trong phiên** ở trên); thẻ hết hạn hoặc đã qua ngày GDKHQ thì báo một lần rồi ngừng.
 
 ### Bật/tắt kênh thông báo và đổi vốn tài khoản ảo trên web
 
@@ -532,6 +550,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `TAISAN_RISK_PCT` | 2 | Một lệnh mua được lỗ tối đa bao nhiêu % tài sản nếu chạm cắt lỗ (`/tskiemtra`) |
 | `TAISAN_OPEN_RISK_PCT` | 6 | Trần của mọi cắt lỗ cộng lại (% tài sản) |
 | `TAISAN_MAX_WEIGHT_NEW` | 30 | Một mã tối đa bao nhiêu % tài sản sau khi mua (không quá ngưỡng nguy hiểm `/tsnguong`) |
+| `VALUATION_KE_BANK` | 12 | Ke (%/năm, 4-30) của thẻ định giá ngân hàng; chỉ đổi số tham khảo, không đổi quyết định (mục **Định giá tham khảo**) |
 | `ZOOM_WEBHOOK_URL`, `ZOOM_WEBHOOK_TOKEN` | - | Gửi thông báo vào một kênh Zoom (Incoming Webhook) |
 | `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_BOT_JID`, `ZOOM_ACCOUNT_ID` | - | Chatbot Zoom (thông báo tới JID đã ghép đôi, nhận lệnh) |
 | `ZOOM_TO_JID` | - | Gửi thông báo (cả của Altcoin) tới JID này thay cho JID đã ghép đôi |
@@ -553,7 +572,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `MAX_DEBATE_ROUNDS`, `MAX_RISK_ROUNDS` | 1 / 1 | Số vòng tranh luận |
 | `MAX_TOOL_ROUNDS` | 8 | Số lượt gọi tool tối đa của mỗi analyst |
 | `KEEP_REPORTS` | 60 | Số thư mục báo cáo giữ lại |
-| `CACHE_MAX_AGE_DAYS` | 3 | Xoá cache giá cũ hơn số ngày này |
+| `CACHE_MAX_AGE_DAYS` | 3 | Xoá cache giá cũ hơn số ngày này (giá từ 2018 cho định giá: 30 ngày không dùng) |
 | `AI_PICK` | 1 | 0 = tắt **AI thẩm định tín hiệu** (cần 9Router và `SIEUTINHIEU=1`) |
 | `AI_PICK_MODEL` | `gmw/gemini-pro` | Model chính (chọn mã buổi chiều); Gemini web (`gmw/…`) tự tìm tin trên web |
 | `AI_PICK_MODEL_FAST` | `gmw/gemini-flash` | Model nhanh (cảnh báo, tổng kết tuần) và dự phòng khi model kia lỗi |
@@ -621,7 +640,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `28/28 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì các bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `31/31 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì các bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -631,6 +650,8 @@ Kết quả `28/28 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `fixes_round1`, `fixes_round2`, `catchup` | Các lỗi đã sửa: sổ thật khi có cổ tức/thưởng, NAV theo giá thị trường, hiệu chỉnh tham số, nến trễ, cảnh báo VNINDEX, chạy bù phiên |
 | `stv`, `stv_catchup`, `stv_morning` | Siêu tín hiệu: lấy tín hiệu lịch sự, sổ ảo so sánh, bản tin sáng, tài khoản thật riêng, gửi Zoom rồi Telegram |
 | `version` | Số phiên bản trên web và Telegram/Zoom, mã bản dựng, báo khi cập nhật |
+| `valuation`, `valuation_card` | Định giá tham khảo (dữ liệu VCI ghi ngày 29/10/2026): P/B, P/E so với mọi phiên từ 2018 theo giá chưa điều chỉnh và sổ sách đã công bố; thẻ định giá ngân hàng (Base của hồ sơ CTG tính lại khớp ±0,5%, sổ sách trừ cổ tức tiền sau ngày khoá sổ trên số cổ phiếu trước ngày GDKHQ (TPB: cổ tức tiền và cổ phiếu cùng ngày), qua ngày chia thưởng, phát hành riêng lẻ/ESOP/quyền mua, ROE năm theo ngày công bố, nhãn FACT/THỐNG KÊ, hạn dùng, thẻ ngày cũ giữ lại chỉ khi đã có phiên của ngày đó); Output Guard bắt giá trị hợp lý không có trên thẻ (kể cả có nhãn, trong bảng, trong báo cáo cơ bản, cả khoảng 28.000-29.000) nhưng không bắt nhầm stop/T1/hỗ trợ/kháng cự của Quant sau Bull/Bear, phe Bull/Bear của mã không phải ngân hàng hay giá trị hợp lý/giá mục tiêu VCI; tối ngày GDKHQ chia thưởng VCI chưa đăng thì không nối phiên mới với số cổ phiếu cũ; cầu dao VCI riêng, không chặn dòng tiền của Quant; không module nào của Quant Engine đọc thẻ |
+| `valuation_manual` | Thẻ định giá anh nhập (`/tsdinhgia`, Telegram và Zoom chung bộ xử lý, trang `/taisan`): số kiểu VN (`30.164`, `30,164`, `30164`; từ chối `30,1`), Bear < Base < Bull, eab, hạn dùng, lỗi; thẻ còn sau khi bán hết, huỷ dòng, reset; đường giá 30,7 → 30,1 → 30,3 → 33,4 ra đúng 2 cảnh báo, vùng đệm 0,5%, một Rẻ mỗi phiên, thẻ nhập lại bắt đầu từ vùng lúc lưu, khởi động lại không báo trùng, hôm sau không báo lại; hết hạn và qua GDKHQ thì báo một lần rồi ngừng, không hiện vùng/MOS trên mốc giá cũ; sự kiện VCI ngày 29/10/2026: ESOP, riêng lẻ, chuyển đổi trái phiếu không là GDKHQ, CTG 44,6% nhớ trước ngày GDKHQ; VCI lỗi: ⛔ gửi trước khi hỏi thẻ, không hỏi lại trong một giờ, một lần thử 5 giây sau cầu dao VCI; dòng vùng định giá không đẩy mất dòng stop/bán; chiều chấm của 🟢 Rẻ/🔺 Đắt; form web cần mật khẩu, chặn POST chéo trang, thẻ của bot cạnh thẻ ngân hàng và cờ lệch quá 10%; Quant Engine không đọc thẻ |
 | `review_2026_10_23` | Các lỗi sửa ngày 23/10/2026 (xem `BAO_CAO_RA_SOAT_2026-10-23.md`): Output Guard, khối ngoại khớp lệnh, cache giá ngày nghỉ, chấm điểm bộ nhớ, hạn mức AI, Zoom |
 | `store` | Kho dữ liệu (SQLite, migration, chọn dòng cho thống kê), cổng chặn MUA và quyết định khi nhấc cổng thị trường, kế hoạch bóng (T+2, khoảng trống giá, không khớp), kết quả 5/10/20 phiên, thống kê và t, che bí mật trong log, trang `/tinhieu` `/dulieu`, tải CSV/JSON, lệnh `/vikhongmua` |
 | `breakout` | Công tắc MUA breakout: breakout thành THEO DÕI (đang giữ: GIỮ không kèm kế hoạch), pullback không đổi, kết quả bóng nhóm riêng, hiệu chỉnh đêm không đổi công tắc, nút trên trang `/bot` (mật khẩu, chặn POST chéo trang) |

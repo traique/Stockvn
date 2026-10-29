@@ -55,7 +55,14 @@ def quick_text(ticker: str, date: str | None = None) -> str:
     except Exception as exc:  # noqa: BLE001 - the comparison line is optional
         logger.warning("Siêu tín hiệu note for %s: %s", code, exc)
         line = ""
-    return text + ("\n" + line if line else "")
+    try:
+        from tradingagents.dataflows import vn_valuation
+
+        card = vn_valuation.quick_line(code, day)            # banks only; never part of the decision
+    except Exception as exc:  # noqa: BLE001 - the valuation line is optional
+        logger.warning("Valuation card for %s: %s", code, exc)
+        card = ""
+    return text + "".join("\n" + extra for extra in (line, card) if extra)
 
 
 class Watchlist:
