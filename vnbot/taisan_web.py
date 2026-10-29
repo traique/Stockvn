@@ -8,7 +8,9 @@ position weights, the risk and a risk-parity split, the performance chart agains
 VNINDEX, one card per stock (company, three months of prices, price and change, P&L,
 cost, levels, planned loss, ticket, the site's signal, news), then sections that open: the
 details, the forms that record, the journal (filtered), the cash, the cut-loss levels,
-the assistant, the evening report, the Excel import and the thresholds; last, the reset.
+the valuation cards the owner enters (any stock: today's zone and MOS, the bot's own card
+of a bank next to it), the assistant, the evening report, the Excel import and the
+thresholds; last, the reset.
 
 The page reads the saved closes and state; only the live prices of the holdings during
 the session are fetched (cached a minute). Every form posts and comes back here.
@@ -744,6 +746,105 @@ def _levels_form(book: ts.Book, levels: dict) -> str:
     return ui.acc("catlo", "Kỷ luật", "Cắt lỗ & mục tiêu", body)
 
 
+BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own (a bank's card): flagged
+
+
+def _bot_card(symbol: str) -> tuple[object | None, str]:
+    """(the bot's own card of a bank, ``vn_valuation.card``: kept an hour there; why there is none)."""
+    from tradingagents.dataflows import vn_valuation as vv
+
+    try:
+        if not vv.is_bank(symbol):
+            return None, "chỉ có cho ngân hàng"
+        found = vv.card(symbol, None)
+    except Exception as exc:  # noqa: BLE001 - the owner's card is shown alone
+        logger.warning("Tài sản web: the bot's valuation card of %s: %s", symbol, exc)
+        return None, "chưa tính được"
+    return found, "" if found else "chưa đủ dữ liệu"
+
+
+def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
+    """The owner's valuation cards (/tsdinhgia): today's zone and MOS, HẾT HẠN / cần cập nhật, the
+    bot's card of a bank beside it with the gap of the two Bases; the form that saves or removes one."""
+    cards = account.valuations()
+    rows = []
+    if cards:
+        prices, label = account.current_prices(sorted(set(cards) | set(book.holdings)))
+        day = ts.today_vn()
+        for sym, card in sorted(cards.items()):
+            price = prices.get(sym)
+            status = account.valuation_status(sym, card, day)
+            zone = ts.card_zone(card, price) if price else None
+            mos = ts.card_mos(card, price) if price else None
+            chips = []
+            if status["stale"]:
+                chips.append(ui.chip(e(f"cần cập nhật · GDKHQ {ts.ddmm(status['stale']['ex'])}"), "amber")
+                             .replace("<span ", f'<span title="{e(status["stale"]["what"])}" ', 1))
+            if status["expired"]:
+                chips.append(ui.chip(e(f"HẾT HẠN {ts.ddmmyyyy(card['expires'])}"), "neg"))
+            elif card.get("expires"):
+                chips.append(ui.chip(e(f"hạn {ts.ddmmyyyy(card['expires'])}")))
+            else:
+                chips.append('<span class="muted small">chưa đặt hạn</span>')
+            mine = (f"nhập {ts.ddmmyyyy(card['day'])}" + (f" · nguồn: {card['note']}" if card.get("note") else ""))
+            bot, why = _bot_card(sym)
+            if bot is not None:
+                gap = (float(card["base"]) / bot.base - 1) * 100
+                theirs = (f'<div class="small num">Bear {ui.money(bot.bear)} · Base {ui.money(bot.base)} · Bull {ui.money(bot.bull)}</div>'
+                          f'<div class="muted small">BCTC {e(bot.period)} · Ke {f"{bot.assumptions.ke * 100:g}".replace(".", ",")}% '
+                          "đặt tay</div>")
+                gap_cell = (ui.chip(e(f"lệch {ui.pct(gap)}"), "neg") + f'<div class="muted small">quá {BOT_GAP_PCT:g}%: xem lại giả định</div>'
+                            if abs(gap) > BOT_GAP_PCT else f'<span class="num">{ui.pct(gap)}</span>')
+            else:
+                theirs, gap_cell = f'<span class="muted small">{e(why)}</span>', ui.NONE
+            held = ' <span class="badge b-info">đang giữ</span>' if sym in book.holdings else ""
+            zone_chip = ui.chip(e(zone), {"Rẻ": "pos", "Đắt": "neg"}.get(zone, "")) if zone else ui.NONE
+            rows.append(
+                f'<tr><td data-label="Mã"><b>{e(sym)}</b>{held}</td>'
+                f'<td data-label="Thẻ anh nhập"><div class="small num">{e(ts.card_levels(card))}</div>'
+                f'<div class="muted small">{e(mine)}</div></td>'
+                f'<td data-label="Giá" class="num">{ui.money(price) if price else ui.NONE}</td>'
+                f'<td data-label="Vùng hôm nay">{zone_chip}</td>'
+                f'<td data-label="MOS" class="num {ui.tone(mos)}">{ui.pct(mos)}</td>'
+                f'<td data-label="Hạn dùng"><div class="chips">{"".join(chips)}</div></td>'
+                f'<td data-label="Thẻ của bot">{theirs}</td><td data-label="Lệch Base">{gap_cell}</td>'
+                f'<td><form method="post" action="/taisan/dinhgia" class="inline" onsubmit="return confirm(\'Xoá thẻ {e(sym)}?\')">'
+                f'<input type="hidden" name="symbol" value="{e(sym)}"><button class="linkbtn" type="submit" name="action" '
+                f'value="clear" aria-label="Xoá thẻ định giá {e(sym)}">Xoá</button></form></td></tr>')
+        table = ui.table([("Mã", ""), ("Thẻ anh nhập", ""), ("Giá", "num"), ("Vùng hôm nay", ""), ("MOS", "num"),
+                          ("Hạn dùng", ""), ("Thẻ của bot (ngân hàng)", ""), ("Lệch Base", ""), ("", "")], rows, "", stack=True)
+        table = f'<p class="muted small" style="margin:0 0 12px">{e(_price_label(label))}</p>' + table
+    else:
+        table = '<p class="muted" style="margin:0">Chưa có thẻ định giá nào.</p>'
+    today = ts.today_vn()
+    choices = sorted(set(book.holdings) | set(cards))
+    datalist = '<datalist id="ts-vsyms">' + "".join(f'<option value="{e(x)}">' for x in choices) + "</datalist>"
+    form = f"""
+<form method="post" action="/taisan/dinhgia" style="margin-top:24px">{datalist}
+  <div class="row">
+    <div class="fld"><label class="f" for="ts-vsym">Mã (gõ mã bất kỳ)</label>
+      <input id="ts-vsym" class="ticker" name="symbol" list="ts-vsyms" maxlength="10" autocomplete="off" required></div>
+    <div class="fld"><label class="f" for="ts-vbear">Bear</label><input id="ts-vbear" name="bear" inputmode="numeric" placeholder="27.904"></div>
+    <div class="fld"><label class="f" for="ts-vbase">Base</label><input id="ts-vbase" name="base" inputmode="numeric" placeholder="30.164"></div>
+    <div class="fld"><label class="f" for="ts-vbull">Bull</label><input id="ts-vbull" name="bull" inputmode="numeric" placeholder="33.309"></div>
+  </div>
+  <div class="row mt">
+    <div class="fld"><label class="f" for="ts-veab">eab (tuỳ chọn)</label><input id="ts-veab" name="eab" inputmode="numeric"></div>
+    <div class="fld"><label class="f" for="ts-vhan">Hạn dùng (tuỳ chọn)</label><input id="ts-vhan" type="date" name="han" min="{today}"></div>
+    <div class="fld" style="flex:3 1 220px"><label class="f" for="ts-vnote">Nguồn</label><input id="ts-vnote" name="nguon" maxlength="200"></div>
+  </div>
+  <div class="row mt">
+    <button class="btn btn-primary" type="submit" name="action" value="save">Lưu thẻ</button>
+    <button class="btn btn-ghost" type="submit" name="action" value="clear" formnovalidate>Xoá thẻ của mã</button>
+  </div>
+  <p class="muted small" style="margin:12px 0 0">Giá theo đồng: 30164, 30.164 hoặc 30,164 (dấu chấm/phẩy chỉ ngăn hàng nghìn).
+  Cần Bear &lt; Base &lt; Bull. Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. Bot báo trong phiên khi giá vào Rẻ hoặc
+  Đắt, một lần mỗi lần vào; thẻ hết hạn hoặc qua ngày GDKHQ thì ngừng báo. Chỉ để tham khảo: không đổi cắt lỗ, mục tiêu hay
+  quyết định của bot. Trong Telegram/Zoom: /tsdinhgia.</p>
+</form>"""
+    return ui.acc("dinhgia", "Định giá", "Thẻ định giá anh nhập", table + form, opened=bool(cards))
+
+
 def _assistant(account: ts.TaiSan, book: ts.Book, site: dict) -> str:
     from vnbot import external
 
@@ -771,12 +872,13 @@ def _assistant(account: ts.TaiSan, book: ts.Book, site: dict) -> str:
              f'<td class="num">{_right(s["right"])}</td></tr>'
              for s in stats]
     shadow = ui.table([("Cảnh báo", ""), ("Số lần", "num"), ("Có kết quả", "num"), ("Sau 5 phiên", "num"), ("Sau 10 phiên", "num"),
-                       ("Giá thấp hơn", "num")], srows, "")
+                       ("Đúng hướng", "num")], srows, "")
     body = ("<h3 style=\"margin-top:0\">Siêu tín hiệu và ý kiến hệ thống</h3>"
             + ("".join(rows) or '<p class="muted" style="margin:0">Chưa nắm giữ mã nào.</p>')
-            + "<h3>Kết quả cảnh báo bán</h3>" + shadow
-            + '<p class="muted small" style="margin:12px 0 0">Giá 5 và 10 phiên sau cảnh báo so với đóng cửa ngày cảnh báo: giá thấp hơn = '
-            "bán theo cảnh báo là đúng. Backtest: bán khi thủng cắt lỗ hoặc trang BÁN; dấu hiệu sớm chỉ để theo dõi.</p>")
+            + "<h3>Kết quả cảnh báo bán và vùng định giá</h3>" + shadow
+            + '<p class="muted small" style="margin:12px 0 0">Giá 5 và 10 phiên sau cảnh báo so với đóng cửa ngày cảnh báo. Đúng hướng: '
+            "giá thấp hơn sau 10 phiên (bán theo cảnh báo là đúng; 🔺 Đắt cũng vậy), riêng 🟢 Rẻ là giá cao hơn. Backtest: bán khi thủng "
+            "cắt lỗ hoặc trang BÁN; dấu hiệu sớm chỉ để theo dõi.</p>")
     return ui.acc("nhanxet", "Trợ lý", "Nhận xét & chiến lược", body)
 
 
@@ -858,7 +960,7 @@ def _reset(has_entries: bool) -> str:
     if not has_entries:
         return ""
     body = """<p>Xoá toàn bộ dữ liệu hiện tại để khởi tạo lại từ đầu. Sổ cũ được giữ lại thành bản sao trong data/taisan;
-ngưỡng cảnh báo giữ nguyên.</p>
+ngưỡng cảnh báo và thẻ định giá giữ nguyên.</p>
 <form method="post" action="/taisan/reset"><div class="row">
   <div class="fld"><label class="f" for="ts-word">Gõ XOA để xác nhận</label><input id="ts-word" name="word" autocomplete="off" required></div>
   <button class="btn btn-danger" type="submit">Xoá toàn bộ</button></div></form>"""
@@ -890,7 +992,8 @@ def page_body(account: ts.TaiSan, msg: str = "", *, ma: str = "", loai: str = ""
                  '<a class="btn btn-ghost" href="#ghi">Thêm giao dịch</a></div>'
                  '<p class="muted small" style="margin:16px 0 0">Trong Telegram/Zoom: /tsnap, /tsmua, /tsban; hướng dẫn đủ: /trogiup.</p>')
         parts.append(ui.card("Bắt đầu theo dõi tài sản", start, kicker="Danh mục trống"))
-        parts.append('<div class="mt">' + _trade_form(book) + _cash_form(book) + _import(account) + "</div>")
+        parts.append('<div class="mt">' + _trade_form(book) + _cash_form(book) + _valuations(account, book) + _import(account)
+                     + "</div>")
         return "".join(parts)
     s = account.summary(book=book)
     state = account.state()
@@ -923,7 +1026,7 @@ def page_body(account: ts.TaiSan, msg: str = "", *, ma: str = "", loai: str = ""
     if rights:
         parts.append('<div class="mt">' + rights + "</div>")
     parts.append('<div class="mt">' + _details(s, book) + _trade_form(book) + _journal(entries, ma, loai) + _cash_form(book)
-                 + _levels_form(book, state.get("levels") or {}) + _assistant(account, book, site)
+                 + _levels_form(book, state.get("levels") or {}) + _valuations(account, book) + _assistant(account, book, site)
                  + _report(account, fresh_report, can_send) + _import(account) + _thresholds(account) + "</div>")
     parts.append(_reset(has_entries))
     return "".join(parts)
@@ -1014,6 +1117,19 @@ def register(app, account: ts.TaiSan, *, guard, post_guard, show_bot=lambda: Tru
                 raise ts.LedgerError("Ghi mức cắt lỗ (mục tiêu không bắt buộc).")
             return account.levels_text(sym, cut, _optional(target, "Mục tiêu"))
         return run(act, "catlo")
+
+    @app.post("/taisan/dinhgia", dependencies=post_guard)
+    def taisan_valuation(symbol: str = Form(...), bear: str = Form(""), base: str = Form(""), bull: str = Form(""),
+                         eab: str = Form(""), han: str = Form(""), nguon: str = Form(""), action: str = Form("save")):
+        def act():
+            sym = _code(symbol)
+            if action == "clear":
+                return account.clear_valuation(sym)
+            card = account.set_valuation(sym, _number(bear, "Bear"), _number(base, "Base"), _number(bull, "Bull"),
+                                         eab=_optional(eab, "eab"), expires=ts.card_day(han) if han.strip() else "",
+                                         note=nguon, source="web")
+            return account.valuation_set_text(sym, card)
+        return run(act, "dinhgia")
 
     @app.post("/taisan/nguong", dependencies=post_guard)
     def taisan_thresholds(warn: str = Form(...), danger: str = Form(...)):

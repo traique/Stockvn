@@ -528,10 +528,10 @@ repo = _common.REPO
 readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbot") for p in (repo / d).rglob("*.py")
                  if re.search(r"vn_valuation|valuation_config", p.read_text(encoding="utf-8", errors="replace"))
                  and p.name not in ("vn_valuation.py", "valuation_config.py"))
-t.ok("who reads the card: the fundamentals tool, the graph's engine node, the Output Guard, /nhanh - not the "
-     "engine, policy, simulator, calibration or params",
+t.ok("who reads the card: the fundamentals tool, the graph's engine node, the Output Guard, /nhanh, the /taisan "
+     "page beside the owner's cards - not the engine, policy, simulator, calibration or params",
      readers == ["tradingagents/agents/output_guard.py", "tradingagents/agents/quant_engine.py",
-                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/service.py"], readers)
+                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/service.py", "vnbot/taisan_web.py"], readers)
 t.ok("engine.analyze is not where the card is made (it runs for every stock of a scan)",
      "vn_valuation" not in Path(engine.__file__).read_text(encoding="utf-8") and analyzed)
 

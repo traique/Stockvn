@@ -16,7 +16,9 @@ values it, charts it, reports it every session and warns when to sell.
   sellable at once.
 - ``state.json``: the cut-loss/target of each holding (the site's plan, or set by the
   owner), the marks used to see an ex-date (``Ledger.mark_to_history``), the alerts sent
-  and their shadow results, the allocation thresholds, the corporate events.
+  and their shadow results, the allocation thresholds, the corporate events, and the
+  valuation cards the owner enters (``/tsdinhgia``: Bear/Base/Bull of any stock, held or
+  not; only for the zone alerts in the session, never a level of the portfolio).
 - ``prices.json``: unadjusted closes per symbol and day (and VNINDEX), which the asset
   chart is computed from. ``pending.json``: the value of the rights waiting to arrive.
 """
@@ -49,8 +51,14 @@ ALERT_LEVELS = {
     "sell": ("🔴", "Mạnh", "trang đã chốt BÁN"),
     "early": ("🟠", "Sớm", "đổi chiều sang BÁN trong phiên (chưa chốt)"),
     "target": ("🎯", "Chốt lời", "chạm mục tiêu"),
+    "re": ("🟢", "Vào vùng Rẻ", "giá ≤ Base của thẻ định giá anh nhập"),
+    "dat": ("🔺", "Vào vùng Đắt", "giá ≥ Bull của thẻ định giá anh nhập"),
 }
+UP_IS_RIGHT = ("re",)        # right when the price is higher 10 sessions later; every other level when lower
 SHADOW_SESSIONS = (5, 10)
+MAX_VALUATIONS = 30          # valuation cards kept: each one is a price read at every intraday check
+ZONE_BUFFER_PCT = 0.5        # a zone alerted is left only this far back past its level: no alert ping-pong
+EX_LOOKBACK_DAYS = 60        # VCI's event filter is not the ex-date: ask from this long before the card
 SPARK_SESSIONS = 62          # about three months of closes on the page's stock cards
 
 KINDS = ("BUY", "SELL", "BONUS", "DEPOSIT", "WITHDRAW", "DIVIDEND", "ADJUST", "VOID")
@@ -402,6 +410,104 @@ def parse_event(raw: dict) -> dict | None:
     return None
 
 
+def ex_event(raw: dict) -> dict | None:
+    """Any ex-date of a VCI DIV/ISS event, the card's "cần cập nhật": {ex, what} for a cash or
+    stock dividend, bonus shares, rights (ESOP and private placements have no ex-date)."""
+    ev = parse_event(raw)
+    if ev:
+        what = (f"cổ tức tiền {vnd(ev['value'])} đ/cp" if ev["kind"] == "CASH"
+                else f"cổ phiếu thưởng/cổ tức bằng cổ phiếu {_ratio(ev['ratio'])}")
+        return {"ex": ev["ex"], "what": what}
+    ex = str(raw.get("exrightDate") or "")[:10]
+    if raw.get("eventCode") not in ("DIV", "ISS") or len(ex) != 10:
+        return None
+    ratio = float(raw["exerciseRatio"]) if _finite(raw.get("exerciseRatio")) and float(raw["exerciseRatio"]) > 0 else 0
+    return {"ex": ex, "what": ("cổ tức" if raw["eventCode"] == "DIV" else "phát hành thêm")
+            + (f" {_ratio(ratio)}" if ratio else "")}
+
+
+def _ratio(value: float) -> str:
+    """0.44636584 -> "44,6%"."""
+    return f"{value * 100:.1f}".rstrip("0").rstrip(".").replace(".", ",") + "%"
+
+
+# ─── valuation cards entered by hand ──────────────────────────────────────────
+
+VALUATION_USAGE = ("Dùng: /tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - Bear Base Bull "
+                   "theo đồng · /tsdinhgia CTG xoa · /tsdinhgia - xem các thẻ")
+
+
+def card_zone(card: dict, price: float, last: str | None = None) -> str:
+    """Rẻ (price ≤ Base) / Hợp lý / Đắt (price ≥ Bull). ``last``: the zone alerted before, kept until
+    the price is back ``ZONE_BUFFER_PCT`` past its level (a price wavering around Base alerts once)."""
+    base, bull, buffer = float(card["base"]), float(card["bull"]), ZONE_BUFFER_PCT / 100
+    if price <= base or (last == "Rẻ" and price <= base * (1 + buffer)):
+        return "Rẻ"
+    if price >= bull or (last == "Đắt" and price >= bull * (1 - buffer)):
+        return "Đắt"
+    return "Hợp lý"
+
+
+def card_levels(card: dict) -> str:
+    return (f"Bear {vnd(card['bear'])}" + (f" · eab {vnd(card['eab'])}" if card.get("eab") else "")
+            + f" · Base {vnd(card['base'])} · Bull {vnd(card['bull'])}")
+
+
+def card_mos(card: dict, price: float) -> float:
+    """Margin of safety, %: (Base − price) / Base."""
+    return (float(card["base"]) - price) / float(card["base"]) * 100
+
+
+def mos_text(card: dict, price: float) -> str:
+    return f"MOS {card_mos(card, price):+.1f}%".replace(".", ",")
+
+
+def _card_price(word: str, name: str) -> float:
+    from vnbot.telegram_bot import _amount
+
+    try:
+        return _amount(word)
+    except ValueError:
+        raise LedgerError(f"{name} không hợp lệ: {word!r}. Nhập giá đầy đủ theo đồng: 30164, 30.164 hoặc 30,164 "
+                          "(dấu chấm hay phẩy chỉ ngăn hàng nghìn; không nhận số lẻ như 30,1).") from None
+
+
+def card_day(word: str) -> str:
+    """dd/mm/yyyy (or YYYY-MM-DD) -> YYYY-MM-DD; LedgerError otherwise."""
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", word.strip())
+    try:
+        return (_date(int(m[3]), int(m[2]), int(m[1])) if m else _date.fromisoformat(word.strip())).isoformat()
+    except ValueError:
+        raise LedgerError(f"Hạn dùng không hợp lệ: {word!r}. Dùng dạng 30/10/2026.") from None
+
+
+def parse_valuation(words: list[str]) -> dict:
+    """``BEAR BASE BULL [eab X] [han dd/mm/yyyy] [nguon text...]`` -> the fields of ``set_valuation``.
+    Prices are whole đồng: "30.164", "30,164" and "30164" are all 30.164 đ - a dot or a comma must
+    split groups of three digits (``telegram_bot._amount``), so "30,1" (thousands, or a decimal) is
+    refused rather than read as 301 đ."""
+    if len(words) < 3:
+        raise LedgerError(VALUATION_USAGE)
+    out = {"bear": _card_price(words[0], "Bear"), "base": _card_price(words[1], "Base"),
+           "bull": _card_price(words[2], "Bull"), "eab": None, "expires": "", "note": ""}
+    i = 3
+    while i < len(words):
+        key = words[i].lower()
+        if key in ("nguon", "nguồn"):
+            out["note"] = " ".join(words[i + 1:])
+            break
+        if key not in ("eab", "han", "hạn"):
+            raise LedgerError(f"Không hiểu {words[i]!r}. {VALUATION_USAGE}")
+        if i + 1 >= len(words):
+            raise LedgerError(f"Thiếu giá trị sau {words[i]!r}. {VALUATION_USAGE}")
+        if key == "eab":
+            out["eab"] = _card_price(words[i + 1], "eab")
+        else:
+            out["expires"] = card_day(words[i + 1])
+        i += 2
+    return out
+
+
 # ─── the portfolio ────────────────────────────────────────────────────────────
 
 class TaiSan:
@@ -550,7 +656,8 @@ class TaiSan:
     # ── state: levels, marks, settings, alerts ──
     def state(self) -> dict:
         data = _read_json(self.state_path, {})
-        for key in ("levels", "marks", "alerts", "shadow", "events", "notes", "names", "spark"):
+        # "valuations" is never pruned (``_prune_state``): a card is kept for a stock not held
+        for key in ("levels", "marks", "alerts", "shadow", "events", "notes", "names", "spark", "valuations"):
             data.setdefault(key, {} if key not in ("shadow",) else [])
         data.setdefault("thresholds", {"warn": WARN_PCT, "danger": DANGER_PCT})
         # the discipline layer (vnbot.kyluat): cut-loss flags, exit tickets, overrides, checks, buy/sell tags, the floor, the goal
@@ -1008,9 +1115,10 @@ class TaiSan:
 
     # ── alerts and their shadow results ──
     def record_alert(self, level: str, symbol: str, price: float | None, day: str, at: str = "", *, hook: bool = True) -> bool:
-        """Keep an alert sent for a holding, once per (day, symbol, level), to judge later how
-        the price went after it (``settle_shadow``). True when it is new. ``hook``: also tell
-        ``on_alert`` (the AI's look at the news); off for an alert the evening report repeats."""
+        """Keep an alert sent for a holding (or a valuation card's zone), once per (day, symbol,
+        level), to judge later how the price went after it (``settle_shadow``). True when it is new.
+        ``hook``: also tell ``on_alert`` (the AI's look at the news); off for an alert the evening
+        report repeats and for the zone alerts."""
         if level not in ALERT_LEVELS:
             return False
         added = []
@@ -1119,18 +1227,126 @@ class TaiSan:
 
     def shadow_stats(self) -> list[dict]:
         """Per alert level: how many settled, the mean move 5 and 10 sessions later, and how
-        often the price was lower 10 sessions later (selling on the alert was right)."""
+        often the alert was right 10 sessions later: the price lower (selling on it was right),
+        higher for "re" (``UP_IS_RIGHT``: the Rẻ zone said the price was low)."""
         out = []
         rows = self.state()["shadow"]
         for level, (icon, name, _) in ALERT_LEVELS.items():
             done = [r for r in rows if r.get("level") == level and r.get("r5") is not None]
             ten = [r for r in done if r.get("r10") is not None]
+            up = level in UP_IS_RIGHT
             out.append({"level": level, "icon": icon, "name": name, "alerts": len([r for r in rows if r.get("level") == level]),
-                        "settled": len(done),
+                        "settled": len(done), "up": up,
                         "r5": sum(r["r5"] for r in done) / len(done) if done else None,
                         "r10": sum(r["r10"] for r in ten) / len(ten) if ten else None,
-                        "right": sum(1 for r in ten if r["r10"] < 0) / len(ten) * 100 if ten else None})
+                        "right": sum(1 for r in ten if (r["r10"] > 0 if up else r["r10"] < 0)) / len(ten) * 100 if ten else None})
         return out
+
+    # ── valuation cards entered by hand (/tsdinhgia, the page): informational, no level of the portfolio ──
+    def valuations(self) -> dict[str, dict]:
+        return self.state()["valuations"]
+
+    def set_valuation(self, symbol: str, bear, base, bull, *, eab=None, expires: str = "", note: str = "",
+                      source: str = "") -> dict:
+        """Save the owner's card of ``symbol`` (held or not), replacing its earlier one."""
+        symbol = (symbol or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{1,10}", symbol):
+            raise LedgerError(f"Mã không hợp lệ: {symbol!r}.")
+        levels = {"Bear": bear, "Base": base, "Bull": bull, **({"eab": eab} if eab is not None else {})}
+        for name, value in levels.items():
+            if not _finite(value) or float(value) < 100:
+                raise LedgerError(f"{name} không hợp lệ: nhập giá theo đồng, ví dụ 30164 hoặc 30.164.")
+        bear, base, bull = float(bear), float(base), float(bull)
+        if not bear < base < bull:
+            raise LedgerError(f"Cần Bear < Base < Bull (anh nhập Bear {vnd(bear)}, Base {vnd(base)}, Bull {vnd(bull)}).")
+        if eab is not None and not float(eab) < base:
+            raise LedgerError(f"eab phải thấp hơn Base {vnd(base)} (eab = Base trừ biên an toàn).")
+        today = today_vn()
+        if expires and expires < today:
+            raise LedgerError(f"Hạn dùng {ddmmyyyy(expires)} đã qua.")
+        card = {"bear": bear, "base": base, "bull": bull, "eab": float(eab) if eab is not None else None,
+                "expires": expires or "", "note": (note or "").strip()[:200], "day": today,
+                "at": now_vn().isoformat(timespec="seconds"), "source": source}
+
+        def change(s):
+            if symbol not in s["valuations"] and len(s["valuations"]) >= MAX_VALUATIONS:
+                raise LedgerError(f"Đã có {MAX_VALUATIONS} thẻ định giá (tối đa): xoá bớt bằng /tsdinhgia MÃ xoa.")
+            s["valuations"][symbol] = card
+        self._update_state(change)
+        return card
+
+    def clear_valuation(self, symbol: str) -> str:
+        symbol = (symbol or "").strip().upper()
+        if symbol not in self.valuations():
+            raise LedgerError(f"Không có thẻ định giá {symbol}.")
+        self._update_state(lambda s: s["valuations"].pop(symbol, None))
+        return f"✅ Đã xoá thẻ định giá {symbol}."
+
+    def valuation_status(self, symbol: str, card: dict, day: str | None = None) -> dict:
+        """{"expired": past the card's own date, "stale": the first ex-date ({ex, what}) after the day
+        it was entered, up to ``day`` - its per-share levels are then on the old basis}. The events
+        are asked once a day per card and kept in it (asked again at the next look after a failure)."""
+        day = day or today_vn()
+        if card.get("checked") != day:
+            start = (_date.fromisoformat(card["day"]) - timedelta(days=EX_LOOKBACK_DAYS)).isoformat()
+            try:
+                found = sorted({(ev["ex"], ev["what"]) for raw in self.market.events(symbol, start, day)
+                                if (ev := ex_event(raw)) and card["day"] < ev["ex"] <= day})
+            except Exception as exc:  # noqa: BLE001 - the last list kept; asked again at the next look
+                logger.warning("Tài sản: events of %s for its valuation card unavailable: %s", symbol, exc)
+            else:
+                ex = [{"ex": d, "what": w} for d, w in found]
+
+                def change(s):
+                    kept = s["valuations"].get(symbol)
+                    if kept and kept.get("at") == card.get("at"):       # not a card entered meanwhile
+                        kept.update(checked=day, ex=ex)
+                self._update_state(change)
+                card = {**card, "checked": day, "ex": ex}
+        return {"expired": bool(card.get("expires")) and card["expires"] < day,
+                "stale": (card.get("ex") or [None])[0]}
+
+    def valuation_line(self, symbol: str, card: dict, price: float | None, status: dict) -> str:
+        """One card: its levels, today's zone and MOS, its date, and HẾT HẠN / cần cập nhật."""
+        now = f" → giá {vnd(price)}: {card_zone(card, price)}, {mos_text(card, price)}" if price else " → chưa có giá"
+        flags = []
+        if status.get("stale"):
+            flags.append(f"⚠️ cần cập nhật: GDKHQ {ddmmyyyy(status['stale']['ex'])} ({status['stale']['what']})")
+        if status.get("expired"):
+            flags.append(f"⌛ HẾT HẠN {ddmmyyyy(card['expires'])}")
+        elif card.get("expires"):
+            flags.append(f"hạn {ddmmyyyy(card['expires'])}")
+        return (f"• {symbol} {card_levels(card)}{now} · nhập {ddmmyyyy(card['day'])}" + "".join(f" · {f}" for f in flags)
+                + (f" · nguồn: {card['note']}" if card.get("note") else ""))
+
+    def valuations_text(self, symbols: list[str] | None = None) -> str:
+        """``/tsdinhgia``: every card (or those of ``symbols``) with today's price."""
+        cards = self.valuations()
+        if symbols:
+            missing = [s for s in symbols if s not in cards]
+            if missing:
+                return f"Chưa có thẻ định giá {', '.join(missing)}. {VALUATION_USAGE}"
+            cards = {s: cards[s] for s in symbols}
+        if not cards:
+            return f"Chưa có thẻ định giá nào. {VALUATION_USAGE}"
+        prices, label = self.current_prices(sorted(cards))
+        day = today_vn()
+        lines = [f"📐 THẺ ĐỊNH GIÁ ANH NHẬP · {label} (tham khảo; không đổi cắt lỗ, mục tiêu hay quyết định của bot)"]
+        lines += [self.valuation_line(s, c, prices.get(s), self.valuation_status(s, c, day)) for s, c in sorted(cards.items())]
+        lines.append("Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. Bot báo trong phiên khi giá vào Rẻ "
+                     "hoặc Đắt; thẻ hết hạn hoặc qua ngày GDKHQ thì ngừng báo. " + VALUATION_USAGE)
+        return "\n".join(lines)
+
+    def valuation_set_text(self, symbol: str, card: dict) -> str:
+        prices, label = self.current_prices([symbol])
+        price = prices.get(symbol)
+        now = (f"Giá {vnd(price)} ({label}) → {card_zone(card, price)}, {mos_text(card, price)} (Rẻ: giá ≤ Base · "
+               "Đắt: giá ≥ Bull)" if price else "Chưa có giá của mã này.")
+        return (f"✅ Thẻ định giá {symbol} (anh nhập, chỉ để tham khảo; không đổi cắt lỗ, mục tiêu hay quyết định của bot):\n"
+                + card_levels(card) + (f" · hạn {ddmmyyyy(card['expires'])}" if card.get("expires") else "")
+                + (f" · nguồn: {card['note']}" if card.get("note") else "") + f"\n{now}\n"
+                "Bot báo trong phiên khi giá vào vùng Rẻ hoặc Đắt (một lần mỗi lần vào vùng); thẻ ngừng báo khi hết hạn "
+                "hoặc qua ngày GDKHQ (cổ tức, thưởng, quyền mua): khi đó nhập lại thẻ.")
 
     # ── allocation and risk ──
     def allocation(self, summary: dict) -> dict:
@@ -1524,8 +1740,10 @@ class TaiSan:
         lines = ["", "🧪 KẾT QUẢ CẢNH BÁO (giá sau cảnh báo, so với đóng cửa ngày cảnh báo)"]
         for s in stats:
             lines.append(f"{s['icon']} {s['name']}: {s['settled']} lần · sau 5 phiên {pct(s['r5'])}"
-                         + (f" · sau 10 phiên {pct(s['r10'])} · giá thấp hơn {s['right']:.0f}% số lần" if s["r10"] is not None else ""))
-        lines.append("(giá giảm sau cảnh báo = bán theo cảnh báo là đúng)")
+                         + (f" · sau 10 phiên {pct(s['r10'])} · giá {'cao' if s['up'] else 'thấp'} hơn {s['right']:.0f}% số lần"
+                            if s["r10"] is not None else ""))
+        lines.append("(giá giảm sau cảnh báo = bán theo cảnh báo là đúng"
+                     + ("; sau 🟢 Rẻ: giá tăng là đúng)" if any(s["up"] for s in stats) else ")"))
         return lines
 
     def journal_text(self, n: int = 20) -> str:
@@ -1581,7 +1799,7 @@ class TaiSan:
     # ── commands (Telegram and Zoom) ──
     COMMANDS = ("/ts", "/taisan", "/tsmua", "/tsban", "/tsthuong", "/tscotuc", "/tsnap", "/tsrut", "/tstien",
                 "/tscatlo", "/tsnhatky", "/tshuy", "/tsbaocao", "/tsxuat", "/tsnhap", "/tsnguong",
-                "/tskiemtra", "/tsgiu", "/tssan", "/tsmuctieu")
+                "/tskiemtra", "/tsgiu", "/tssan", "/tsmuctieu", "/tsdinhgia")
     HELP = (
         "💼 Tài sản (danh mục tiền thật của anh, tách khỏi bot):\n"
         "/ts - tổng quan · /tsbaocao - báo cáo ngay · trang web /taisan\n"
@@ -1595,7 +1813,9 @@ class TaiSan:
         "/tsmuctieu 2026-12-24 · /tsmuctieu xoa · /tsmuctieu - mốc hoàn vốn; bot đặt số đo cạnh mốc, không dự báo\n"
         "/tsnhatky - 20 dòng gần nhất · /tshuy - huỷ dòng cuối · /tshuy 27 - huỷ dòng số 27\n"
         "/tsxuat - file Excel (Zoom: link tải) · /tsnhap - gửi file .xlsx kèm lệnh này, rồi /tsnhap xacnhan\n"
-        "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)"
+        "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)\n"
+        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - thẻ định giá anh nhập (Bear Base "
+        "Bull, mã nào cũng được): bot báo trong phiên khi giá vào vùng Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
     )
 
     # ── recording (the commands and the web page share these) ──
@@ -1720,7 +1940,8 @@ class TaiSan:
         return f"↩️ Đã huỷ #{target.id}: {ddmmyyyy(target.day)} {self.entry_text(target)}."
 
     def reset(self) -> str:
-        """Start the portfolio over: the journal is kept as a dated copy, the settings stay."""
+        """Start the portfolio over: the journal is kept as a dated copy, the settings and the
+        valuation cards stay."""
         with self._lock:
             if not self.journal_path.exists():
                 return "Danh mục Tài sản đang trống, không có gì để xoá."
@@ -1828,6 +2049,17 @@ class TaiSan:
             if not word:
                 return kyluat.goal_text(self, self.report_day())
             return kyluat.set_goal(self, word)
+        if command == "/tsdinhgia":
+            words = args.split()                 # its own words: "han 2026-10-30" is not the entry's day
+            if not words:
+                return self.valuations_text()
+            symbol = code(words[0])
+            if len(words) == 1:
+                return self.valuations_text([symbol])
+            if words[1].lower() in ("xoa", "xoá", "xóa"):
+                return self.clear_valuation(symbol)
+            card = self.set_valuation(symbol, **parse_valuation(words[1:]), source=source)
+            return self.valuation_set_text(symbol, card)
         if command == "/tsnhatky":
             n = int(rest[0]) if rest and rest[0].isdigit() else 20
             return self.journal_text(max(1, min(n, 60)))

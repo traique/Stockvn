@@ -12,7 +12,13 @@ of:
   or T2, at the floor of yesterday's close;
 - the Quant Engine paper book: its holdings (same checks) and its limit buy
   orders for today (the price is in the buy zone, or already under the planned stop);
-- VNINDEX down ``intraday_vni_drop_pct`` % (and twice that) from the last close.
+- VNINDEX down ``intraday_vni_drop_pct`` % (and twice that) from the last close;
+- the valuation cards the owner entered (``/tsdinhgia``, any stock, held or not): the
+  price entering the Rẻ zone (≤ Base) or the Đắt zone (≥ Bull). Once per entry, not
+  once a day: the last zone of each card is kept in ``valuation_zones.json`` (across
+  days and restarts) and is left only ``taisan.ZONE_BUFFER_PCT`` back past its level. A
+  card past its date, or past an ex-date since it was entered (its levels are on the old
+  basis), is silenced, said once.
 
 On an ex-date (cash or stock dividend, bonus shares) the stop and targets of a
 book are on yesterday's price basis: when the source's history already shows
@@ -123,6 +129,7 @@ class IntradayMonitor:
         self.price, self.index_change, self.exchange_of = price, index_change, exchange_of
         self.closes = closes                # (code, session, day) -> that session's close as the source gives it now
         self.path = Path(settings.data_dir) / "intraday_alerts.json"
+        self.zones_path = Path(settings.data_dir) / "valuation_zones.json"     # the last zone of each card
         self._last_check = 0.0
         self._thread = threading.Thread(target=self._loop, name="intraday", daemon=True)
 
@@ -292,13 +299,76 @@ class IntradayMonitor:
         alerts += self._ticket_reminders(day, now)
         new = [(k, text) for k, text in alerts if k not in sent]
         self._keep_taisan_alerts(new, prices, day)
-        if new:
+        texts = [text for _, text in new] + self._zone_alerts(day, price_of)     # their own memory, not the day's keys
+        if texts:
             at = vn_rules.now_vn().strftime("%H:%M")
-            self._remember(day, sent | {k for k, _ in new}, [text for _, text in new], at)
-            self.notify(f"🔔 Cảnh báo trong phiên {at} (không gọi AI)\n"
-                        + "\n".join(text for _, text in new)
-                        + "\n" + FOOTER)
-        return [text for _, text in new]
+            self._remember(day, sent | {k for k, _ in new}, texts, at)
+            self.notify(f"🔔 Cảnh báo trong phiên {at} (không gọi AI)\n" + "\n".join(texts) + "\n" + FOOTER)
+        return texts
+
+    def _zone_alerts(self, day: str, price_of) -> list[str]:
+        """🟢 a card's Rẻ zone entered (price ≤ Base), 🔺 its Đắt zone (price ≥ Bull), for every
+        valuation card of the Tài sản portfolio (``vnbot.taisan``). Kept in its shadow results
+        ("re", "dat"; no AI call). The memory is the last zone per card: a card entered again
+        starts afresh; an expired or stale card is said once and then left out."""
+        from vnbot import taisan as ts
+
+        account = getattr(self.trader, "taisan", None)
+        if account is None:
+            return []
+        try:
+            cards = account.valuations()
+        except Exception as exc:  # noqa: BLE001 - the other alerts go out
+            logger.warning("Intraday: valuation cards unavailable: %s", exc)
+            return []
+        if not cards and not self.zones_path.exists():
+            return []
+        try:
+            memory = json.loads(self.zones_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            memory = {}
+        memory = memory if isinstance(memory, dict) else {}
+        out, kept = [], {}
+        for symbol, card in sorted(cards.items()):
+            ident = "|".join(str(card.get(k)) for k in ("at", "bear", "base", "bull"))
+            seen = memory.get(symbol) if isinstance(memory.get(symbol), dict) else {}
+            seen = dict(seen) if seen.get("card") == ident else {"card": ident, "zone": None}
+            kept[symbol] = seen
+            if seen.get("muted"):
+                continue
+            try:
+                status = account.valuation_status(symbol, card, day)
+            except Exception as exc:  # noqa: BLE001 - judged at the next check
+                logger.warning("Intraday: valuation card of %s: %s", symbol, exc)
+                continue
+            again = f"nhập lại: /tsdinhgia {symbol} BEAR BASE BULL"
+            if status["expired"]:
+                seen["muted"] = "expired"
+                out.append(f"⌛ {symbol}: thẻ định giá hết hạn {ts.ddmmyyyy(card['expires'])} → bot ngừng báo vùng Rẻ/Đắt; {again}")
+                continue
+            if status["stale"]:
+                seen["muted"] = "stale"
+                out.append(f"⚠️ {symbol}: thẻ định giá cần cập nhật - GDKHQ {ts.ddmmyyyy(status['stale']['ex'])} "
+                           f"({status['stale']['what']}) sau ngày anh nhập {ts.ddmmyyyy(card['day'])}, các mốc còn theo giá "
+                           f"cũ → bot ngừng báo vùng Rẻ/Đắt; {again}")
+                continue
+            p = price_of(symbol)
+            if not p:
+                continue
+            zone = ts.card_zone(card, p, seen.get("zone"))
+            if zone != seen.get("zone") and zone in ("Rẻ", "Đắt"):
+                what = (f"🟢 {symbol} vào vùng Rẻ: giá {_fmt(p)} ≤ Base {_fmt(card['base'])}" if zone == "Rẻ"
+                        else f"🔺 {symbol} vào vùng Đắt: giá {_fmt(p)} ≥ Bull {_fmt(card['bull'])}")
+                out.append(f"{what}, {ts.mos_text(card, p)} (thẻ anh nhập {ts.ddmm(card['day'])}: {ts.card_levels(card)}; "
+                           "tham khảo, không phải lệnh)")
+                try:
+                    account.record_alert("re" if zone == "Rẻ" else "dat", symbol, p, day, hook=False)
+                except Exception as exc:  # noqa: BLE001 - the alert is sent anyway
+                    logger.warning("Tài sản: zone alert of %s not kept: %s", symbol, exc)
+            seen["zone"] = zone
+        if kept != memory:
+            write_text_atomic(self.zones_path, json.dumps(kept, ensure_ascii=False))
+        return out
 
     def _ticket_reminders(self, day: str, now) -> list[tuple[str, str]]:
         """The reminder of an exit ticket due today (``kyluat.ticket_reminders``), [] outside
