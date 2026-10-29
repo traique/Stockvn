@@ -63,6 +63,18 @@ Mọi file trong zip mang thời điểm của commit mới nhất: cùng commit
 
 Zip không ghi mục thư mục, để giữ số mục dưới 250. Nếu Botkeep giải nén thiếu thư mục lồng (`vnbot/static`, `tradingagents/agents/analysts`), tạo lại gói với `--dir-entries`.
 
+### Deploy từ GitHub: nhánh `botkeep`
+
+Không trỏ Botkeep vào `main`: cả repo có khoảng 270 mục (file + thư mục) và 3,7 MB, vượt giới hạn 250 mục. Mỗi lần `main` đổi, GitHub Actions (`.github/workflows/botkeep-branch.yml`) tạo gói như trên, rồi đẩy **đúng nội dung gói** lên nhánh **`botkeep`** (≈186 mục, kèm một `.gitignore` cho `data/` và `.env`). Gói vượt giới hạn hoặc sai mã bản dựng thì lượt chạy báo đỏ và nhánh giữ bản cũ. File zip của mỗi lượt cũng nằm ở mục **Artifacts** trên trang Actions, tải về để upload tay khi cần.
+
+Trên Botkeep chọn nguồn GitHub, repo `traique/Stockvn`, nhánh **`botkeep`**, lệnh khởi động `main_botkeep.py`. Trước khi bỏ cách upload zip:
+
+- Bí mật để ở mục Secrets của panel, không để trong file `.env` trên server, vì một lần deploy lại từ GitHub có thể tạo lại thư mục code.
+- Sao lưu `data/` rồi thử một lần redeploy để chắc `data/` (lịch sử, tài sản, `data/altcoin/`) còn nguyên. Nếu bị xoá, dùng `DATABASE_URL` (và `ALT_DATABASE_URL`) Postgres để dữ liệu không nằm trên ổ server, hoặc quay lại upload zip.
+- Repo riêng tư thì Botkeep cần được cấp quyền đọc repo trên GitHub.
+
+Chạy tay (ví dụ khi Actions tắt): `python scripts/build_botkeep_bundle.py && scripts/publish_botkeep_branch.sh dist/botkeep`.
+
 ## 3. Tạo server trên Botkeep
 
 1. Tạo workload **Python 3.12 trở lên** (Botkeep hiện chạy 3.13). Nếu gói cho phép chia tài nguyên, cấp khoảng 1,5 GB RAM.
