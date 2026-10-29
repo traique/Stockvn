@@ -10,9 +10,16 @@ altcoin/bot/**/*.py, altcoin/run.py, altcoin/hosted.py, altcoin/requirements.txt
 từ git (file đã theo dõi và file mới không bị .gitignore), không có git thì duyệt thư mục.
 
 Thoát 1, kèm danh sách vi phạm, và không ghi gì khi: gói có file bị cấm (.env, *.db, data/, tests/,
-__pycache__/...), thiếu file, vượt giới hạn upload của Botkeep (250 file, tính cả thư mục; 4.000.000 B
-giải nén và zip), có .py không biên dịch được, mã bản dựng của bản dàn dựng khác RELEASE_BUILD (quên
---stamp), hoặc file được đóng gói có thay đổi chưa commit (--allow-dirty để bỏ qua kiểm tra này).
+__pycache__/...), thiếu file (kể cả .py git theo dõi mà đã mất trên đĩa), vượt giới hạn upload của
+Botkeep (250 file, tính cả thư mục; 4.000.000 B giải nén và zip), có .py không biên dịch được, mã bản
+dựng của bản dàn dựng khác RELEASE_BUILD (quên --stamp), hoặc file được đóng gói có thay đổi chưa commit
+(--allow-dirty để bỏ qua kiểm tra này). Chạy bằng Python mới hơn Botkeep (3.13) cũng bị từ chối
+(--allow-python để bỏ qua): compile() của bản mới nhận cú pháp mà 3.13 báo lỗi.
+
+Mọi mục của zip mang một thời điểm: của commit mới nhất (cùng commit, cùng zip), hoặc mtime mới nhất
+của file chưa commit / khi không có git. Không dùng hằng số: Botkeep giữ __pycache__/ qua các lần
+upload và Python chỉ so mtime + kích thước của file nguồn, nên sửa không đổi kích thước mà giữ thời
+điểm cũ thì server vẫn chạy bytecode cũ.
 """
 from __future__ import annotations
 
@@ -25,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -34,7 +42,8 @@ MAX_FILES = 250                   # Botkeep: files per upload (files + folders k
 MAX_BYTES = 4_000_000             # Botkeep: upload size, unpacked and zipped
 WARN_SHARE = 0.85                 # warn above this share of any limit
 MIN_PYTHON = (3, 12)              # vnbot uses PEP 701 f-strings: a SyntaxError on 3.11
-ZIP_TIME = (1980, 1, 1, 0, 0, 0)  # fixed, so the same files give the same zip
+BOTKEEP_PYTHON = (3, 13)          # a newer compile() accepts syntax Botkeep rejects (PEP 758, PEP 750)
+ZIP_EPOCH = 315_532_800           # 1980-01-01 UTC, the earliest time a zip entry can hold
 
 FILES = ("main_botkeep.py", "requirements.txt", ".env.example", "README.md", "LICENSE",
          "tradingagents/assets/tauric-logo.svg",       # read by report_html.py on import
@@ -78,12 +87,13 @@ def _git(root: Path, *args: str) -> list[str]:
 
 
 def source_files(root: Path) -> tuple[list[str], bool]:
-    """The tree's files (relative, posix) and whether git listed them: git's tracked and new
-    not-ignored files; without git, a walk that skips forbidden folders and files."""
+    """The tree's files (relative, posix) and whether git listed them: git's tracked (even when
+    deleted on disk, so a lost file is reported) and new not-ignored files; without git, a walk
+    that skips forbidden folders and files."""
     if (root / ".git").exists():
         try:
             names = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
-            return sorted(p for p in set(names) if (root / p).is_file()), True
+            return sorted(set(names)), True
         except (OSError, subprocess.SubprocessError):
             print("⚠️  Không chạy được git: duyệt thư mục thay cho danh sách của git.")
     found = []
@@ -101,8 +111,24 @@ def uncommitted(root: Path) -> list[str]:
     for entry in entries:
         paths.append(entry[3:])
         if "R" in entry[:2] or "C" in entry[:2]:
-            next(entries, None)            # the old name of a rename
+            paths.append(next(entries, ""))    # the old name of a rename or copy
     return sorted(p for p in paths if allowed(p))
+
+
+def zip_time(root: Path, paths: list[str], from_git: bool, dirty: list[str]) -> tuple[int, ...]:
+    """The one time of every zip entry (UTC, even seconds as a zip stores them): the newest
+    commit's, or newer mtime of a file not committed; without git or a commit, the newest mtime."""
+    newest = 0
+    if from_git:
+        try:
+            newest = int(_git(root, "log", "-1", "--format=%ct")[0])
+        except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+            pass
+    for p in (dirty if newest else paths):
+        if (root / p).is_file():
+            newest = max(newest, int((root / p).stat().st_mtime))
+    when = time.gmtime(max(newest, ZIP_EPOCH))
+    return (*when[:5], when[5] - when[5] % 2)
 
 
 def fingerprint(base: Path, module: str) -> tuple[str, str, str]:
@@ -117,14 +143,14 @@ def fingerprint(base: Path, module: str) -> tuple[str, str, str]:
     return version, build, release
 
 
-def make_zip(stage: Path, paths: list[str], dir_entries: bool = False) -> bytes:
-    """A flat zip that is the same every time: sorted names, fixed time and modes, deflate 9;
-    no folder entries unless asked (each entry counts against Botkeep's 250)."""
+def make_zip(stage: Path, paths: list[str], when: tuple[int, ...], dir_entries: bool = False) -> bytes:
+    """A flat zip that is the same every time: sorted names, one time (``when``), fixed modes,
+    deflate 9; no folder entries unless asked (each entry counts against Botkeep's 250)."""
     names = sorted(paths + ([d + "/" for d in folders(paths)] if dir_entries else []))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         for name in names:
-            info = zipfile.ZipInfo(name, ZIP_TIME)
+            info = zipfile.ZipInfo(name, when)
             info.create_system = 3                     # unix modes, whatever builds it
             if name.endswith("/"):
                 info.external_attr = (0o40755 << 16) | 0x10
@@ -162,18 +188,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-bytes", type=int, default=MAX_BYTES, help=f"số byte tối đa, giải nén và zip ({MAX_BYTES})")
     ap.add_argument("--dir-entries", action="store_true", help="ghi cả mục thư mục vào zip")
     ap.add_argument("--allow-dirty", action="store_true", help="cho đóng gói file có thay đổi chưa commit")
+    ap.add_argument("--allow-python", action="store_true", help="cho chạy bằng Python mới hơn Botkeep (3.13)")
     args = ap.parse_args(argv)
+    running, botkeep = platform.python_version(), "{}.{}".format(*BOTKEEP_PYTHON)
     if sys.version_info < MIN_PYTHON:
-        print(f"❌ Cần Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} trở lên (đang chạy {platform.python_version()}; "
-              "Botkeep chạy 3.13): bản cũ hơn báo lỗi cú pháp ở code của bot.")
+        print(f"❌ Cần Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} trở lên (đang chạy {running}; "
+              f"Botkeep chạy {botkeep}): bản cũ hơn báo lỗi cú pháp ở code của bot.")
         return 1
+    if sys.version_info[:2] > BOTKEEP_PYTHON:
+        newer = (f"Python {running} mới hơn Botkeep ({botkeep}): kiểm tra biên dịch không thấy cú pháp "
+                 "chỉ bản mới có, gói qua kiểm tra vẫn có thể lỗi trên Botkeep")
+        if not args.allow_python:
+            print(f"❌ {newer}. Chạy bằng Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} hoặc {botkeep} "
+                  "(hoặc thêm --allow-python).")
+            return 1
+        print(f"⚠️  {newer}.")
 
     sources, from_git = source_files(ROOT)
-    paths = [p for p in sources if allowed(p)]
-    alt = (ROOT / "altcoin" / "bot").is_dir()
+    paths = [p for p in sources if allowed(p) and (ROOT / p).is_file()]
+    alt = any(p.startswith("altcoin/bot/") and p.endswith(".py") for p in sources)
+    dirty = uncommitted(ROOT) if from_git else []
     errors = []
-    if from_git and not args.allow_dirty:
-        errors += [f"{p}: có thay đổi chưa commit (commit trước, hoặc thêm --allow-dirty)" for p in uncommitted(ROOT)]
+    if not args.allow_dirty:
+        errors += [f"{p}: có thay đổi chưa commit (commit trước, hoặc thêm --allow-dirty)" for p in dirty]
     needed = [*REQUIRED, *(ALT_REQUIRED if alt else ()),
               *(p for p in sources if p.endswith(".py") and p.startswith(PY_TREES))]
     bundled = set(paths)
@@ -208,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
 
         stock_version = (builds["stock"] or {}).get("version", "unknown")
         name = f"stockvn-botkeep-{stock_version}" + (f"-alt{builds['altcoin']['version']}" if builds["altcoin"] else "") + ".zip"
-        data = make_zip(stage, paths, args.dir_entries)
+        data = make_zip(stage, paths, zip_time(ROOT, paths, from_git, dirty), args.dir_entries)
         sizes = {p: (stage / p).stat().st_size for p in paths}
         problems, warnings = check(sizes, len(data), args.max_files, args.max_bytes)
         errors += problems

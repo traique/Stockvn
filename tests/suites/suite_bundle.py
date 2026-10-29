@@ -1,11 +1,16 @@
 """The Botkeep bundle (scripts/build_botkeep_bundle.py): only the allow list goes in, never a
 secret, a database, the tests or a cache; Botkeep's limits (250 files counting the folders,
-4,000,000 B unpacked and zipped) hold; the zip is flat and the same every time; the staged
+4,000,000 B unpacked and zipped) hold; the zip is flat, the same for the same commit and timed
+by it (a new release never carries the old time, so a kept __pycache__/ goes stale); the staged
 copy's build fingerprints are the released ones (offline, on copies of the repository)."""
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
+import os
 import shutil
+import time
 import subprocess
 import sys
 import zipfile
@@ -39,14 +44,25 @@ def write(root: Path, rel: str, data: str | bytes = "decoy\n") -> None:
     path.write_bytes(data.encode() if isinstance(data, str) else data)
 
 
-def copy_repo(dest: Path) -> Path:
+def copy_repo(dest: Path, skip: str = "\0") -> Path:
     for rel in bb.source_files(REPO)[0]:
-        write(dest, rel, (REPO / rel).read_bytes())
+        if (REPO / rel).is_file() and not rel.startswith(skip):
+            write(dest, rel, (REPO / rel).read_bytes())
     return dest
 
 
-# ── 1. the limits ──
+# ── 1. the limits, and the Python that checks the code ──
 t.ok("Botkeep's limits: 250 files, 4,000,000 B", bb.MAX_FILES == 250 and bb.MAX_BYTES == 4_000_000)
+t.ok("Botkeep runs Python 3.13; the bot needs 3.12+", bb.BOTKEEP_PYTHON == (3, 13) and bb.MIN_PYTHON == (3, 12))
+_saved = bb.BOTKEEP_PYTHON
+bb.BOTKEEP_PYTHON = (sys.version_info[0], sys.version_info[1] - 1)    # as if this Python were newer than Botkeep's
+try:
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        code = bb.main(["--check"])
+finally:
+    bb.BOTKEEP_PYTHON = _saved
+t.ok("Python newer than Botkeep's: refused (exit 1), says --allow-python", code == 1
+     and "mới hơn Botkeep" in said.getvalue() and "--allow-python" in said.getvalue(), said.getvalue())
 
 # ── 2. the repository's bundle ──
 out = _common.ROOT / "out"
@@ -72,11 +88,12 @@ t.ok("every .py of tradingagents/, vnbot/ (and altcoin/bot/) in", packages_py <=
      sorted(packages_py - set(names))[:5])
 with zipfile.ZipFile(zip_path) as archive:
     infos = archive.infolist()
-t.ok("fixed time, unix file mode, deflate", all(i.date_time == bb.ZIP_TIME and i.compress_type == zipfile.ZIP_DEFLATED
-                                                and i.external_attr >> 16 == 0o100644 for i in infos))
+t.ok("one time for every entry (not 1980), unix file mode, deflate", len({i.date_time for i in infos}) == 1
+     and infos[0].date_time > (1980, 1, 1, 0, 0, 0) and all(i.compress_type == zipfile.ZIP_DEFLATED
+                                                           and i.external_attr >> 16 == 0o100644 for i in infos))
 t.ok("stock fingerprint of the staged copy = RELEASE_BUILD", report["builds"]["stock"]
      == {"version": ver.VERSION, "build": ver.RELEASE_BUILD, "release_build": ver.RELEASE_BUILD}, report["builds"])
-alt = (REPO / "altcoin" / "bot").is_dir()
+alt = any(p.startswith("altcoin/bot/") and p.endswith(".py") for p in bb.source_files(REPO)[0])
 t.ok("altcoin fingerprint checked only when altcoin/bot exists", (report["builds"]["altcoin"] is not None) == alt
      and (not alt or report["builds"]["altcoin"]["build"] == report["builds"]["altcoin"]["release_build"]))
 free = report["free"]
@@ -154,6 +171,12 @@ t.ok("every other decoy is a forbidden name (refused even if it were listed)",
      [rel for rel in DECOYS if rel not in NOT_LISTED and not bb.check({rel: 1})[0]])
 t.ok("allow list: altcoin's .env.example, README, check_db.py and stray images stay out",
      not any(bb.allowed(p) for p in NOT_LISTED + ("requirements-dev.txt", "vnbot/notes.txt")))
+walk = _common.ROOT / "walk"
+for rel, stamp in (("a.py", 1_767_225_600), ("b/c.py", 1_767_225_603)):
+    write(walk, rel)
+    os.utime(walk / rel, (stamp, stamp))
+t.ok("zip time without git: the newest mtime, in even seconds (UTC)", bb.zip_time(walk, ["a.py", "b/c.py"], False, [])
+     == (2026, 1, 1, 0, 0, 2) and bb.zip_time(walk, ["a.py"], False, []) == (2026, 1, 1, 0, 0, 0))
 
 # ── 5. fingerprints: code changed without --stamp is refused ──
 web = copy / "vnbot" / "web.py"
@@ -172,15 +195,28 @@ t.ok("altcoin/bot without run.py: exit 1 (missing file)", code == 1 and "altcoin
 
 # ── git: uncommitted changes to bundled files are refused without --allow-dirty ──
 if shutil.which("git"):
-    repo = copy_repo(_common.ROOT / "gitcopy")
+    # stock only, with the ignored __pycache__/ git leaves behind when a tag before altcoin is checked out
+    repo = copy_repo(_common.ROOT / "gitcopy", skip="altcoin/")
     git = ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.invalid",
            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
-    subprocess.run(git + ["init", "-q"], check=True, capture_output=True)
-    subprocess.run(git + ["add", "-A"], check=True, capture_output=True)
-    subprocess.run(git + ["commit", "-qm", "copy", "--no-verify"], check=True, capture_output=True)
+
+    def sh(*args: str, when: int | None = None) -> None:
+        env = {**os.environ, **({"GIT_COMMITTER_DATE": f"{when} +0000", "GIT_AUTHOR_DATE": f"{when} +0000"} if when else {})}
+        subprocess.run(git + list(args), check=True, capture_output=True, env=env)
+
+    def zip_times(out: Path) -> set:
+        with zipfile.ZipFile(next(out.glob("stockvn-botkeep-*.zip"))) as archive:
+            return {i.date_time for i in archive.infolist()}
+
+    T1, T2 = 1_767_225_600, 1_767_312_000             # 2026-01-01 and 2026-01-02, 00:00 UTC
+    sh("init", "-q")
+    sh("add", "-A")
+    sh("commit", "-qm", "copy", "--no-verify", when=T1)
     write(repo, "notes.txt")       # an untracked file outside the bundle: not a change that counts
+    write(repo, "altcoin/bot/__pycache__/main.cpython-313.pyc", b"\0")
     code, log = build(repo, "--check")
-    t.ok("git copy, clean: exit 0", code == 0 and "danh sách từ git" in log, log[-800:])
+    t.ok("git copy, clean, stray altcoin/bot/__pycache__/: exit 0, altcoin skipped", code == 0
+         and "danh sách từ git" in log and "Altcoin: chưa có altcoin/bot/" in log, log[-800:])
     web = repo / "vnbot" / "web.py"
     web.write_bytes(web.read_bytes() + b"# edited\n")
     code, log = build(repo, "--check")
@@ -189,6 +225,33 @@ if shutil.which("git"):
     code, log = build(repo, "--check", "--allow-dirty")
     t.ok("--allow-dirty: the fingerprint still refuses unstamped code", code == 1 and "chưa commit" not in log
          and "--stamp" in log, log[-800:])
+    sh("reset", "-q", "--hard")
+    sh("mv", "README.md", "README.old")
+    code, log = build(repo, "--check")
+    t.ok("bundled file renamed away (staged): exit 1, the old name reported", code == 1
+         and "README.md: có thay đổi chưa commit" in log, log[-800:])
+    sh("reset", "-q", "--hard")
+    (repo / "vnbot" / "channels.py").unlink()
+    code, log = build(repo, "--check", "--allow-dirty")
+    t.ok("tracked .py deleted on disk, --allow-dirty: exit 1, missing from the bundle", code == 1
+         and "vnbot/channels.py: thiếu trong gói" in log, log[-800:])
+    sh("reset", "-q", "--hard")
+
+    out = _common.ROOT / "gitout"
+    code, log = build(repo, "--out", str(out))
+    t.ok("zip time = the newest commit's", code == 0 and zip_times(out) == {time.gmtime(T1)[:6]}, log[-800:])
+    readme = repo / "README.md"
+    before = readme.read_bytes()
+    readme.write_bytes(before[:-2] + b"!\n")            # same size: Python's .pyc check alone would miss it
+    sh("commit", "-qam", "same size", "--no-verify", when=T2)
+    code, log = build(repo, "--out", str(out))
+    t.ok("same-size edit, committed: a new time on every entry", code == 0 and len(readme.read_bytes()) == len(before)
+         and zip_times(out) == {time.gmtime(T2)[:6]}, log[-800:])
+    readme.write_bytes(before)
+    os.utime(readme, (T2 + 3600, T2 + 3600))
+    code, log = build(repo, "--out", str(out), "--allow-dirty")
+    t.ok("not committed (--allow-dirty): the newer mtime of the changed file", code == 0
+         and zip_times(out) == {time.gmtime(T2 + 3600)[:6]}, log[-800:])
     tracked = len(bb._git(REPO, "ls-files", "-z")) if (REPO / ".git").exists() else 0
     if tracked > 240:
         print(f"⚠️  git theo dõi {tracked} file (> 240): không deploy cả repo, chỉ upload gói zip")

@@ -24,7 +24,7 @@ Dữ liệu thị trường (DNSE, VCI, CafeF, Google News) không cần key.
 
 ## 2. Tạo gói upload
 
-Trong thư mục mã nguồn, trên máy có **Python 3.12 trở lên** (Botkeep chạy 3.13):
+Trong thư mục mã nguồn, trên máy có **Python 3.12 hoặc 3.13** (Botkeep chạy 3.13):
 
 ```bash
 python scripts/build_botkeep_bundle.py            # tạo gói
@@ -40,7 +40,10 @@ Script dừng (thoát 1) và không ghi gì khi:
 - vượt giới hạn upload của Botkeep: 250 file (tính cả thư mục), 4.000.000 B khi giải nén và 4.000.000 B file zip. Gần 85% giới hạn thì cảnh báo;
 - gói thiếu file, có file bị cấm, hoặc có file `.py` lỗi cú pháp;
 - mã bản dựng khác bản phát hành, tức sửa code mà quên `python -m vnbot.version --stamp` (mục 11);
-- file được đóng gói có thay đổi chưa commit. Thêm `--allow-dirty` để bỏ qua riêng kiểm tra này.
+- file được đóng gói có thay đổi chưa commit. Thêm `--allow-dirty` để bỏ qua riêng kiểm tra này;
+- chạy bằng Python mới hơn 3.13: bản mới nhận cú pháp mà Botkeep báo lỗi. Thêm `--allow-python` để bỏ qua (chỉ cảnh báo).
+
+Mọi file trong zip mang thời điểm của commit mới nhất: cùng commit cho cùng một zip, còn bản mới luôn có thời điểm mới, nên Python trên server không chạy nhầm `__pycache__/` cũ.
 
 Zip không ghi mục thư mục, để giữ số mục dưới 250. Nếu Botkeep giải nén thiếu thư mục lồng (`vnbot/static`, `tradingagents/agents/analysts`), tạo lại gói với `--dir-entries`.
 
