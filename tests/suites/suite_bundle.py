@@ -150,7 +150,8 @@ t.ok("altcoin runtime in: bot/**/*.py, run.py (+ hosted.py, requirements.txt whe
      sorted(n for n in copy_names if n.startswith("altcoin/")))
 t.ok("altcoin fingerprint checked and named in the zip", copy_report.get("builds", {}).get("altcoin")
      and copy_report["zip"].endswith(f"-alt{copy_report['builds']['altcoin']['version']}.zip"), copy_report.get("zip"))
-t.ok("same stock code as the repository: same files in the bundle", sorted(n for n in copy_names if not n.startswith("altcoin/")) == names)
+t.ok("same code as the repository: same files in the bundle", copy_names == names if alt else
+     sorted(n for n in copy_names if not n.startswith("altcoin/")) == names, sorted(set(copy_names) ^ set(names)))
 
 # ── 4. the limits fail the build ──
 code, log = build(copy, "--check", "--max-files", "10")

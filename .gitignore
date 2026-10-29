@@ -5,3 +5,7 @@ data/
 dist/
 .pytest_cache/
 docs/backtest_2026-10-23/out/
+bot.env
+.bt_cache/
+bt_result*.json
+!altcoin/dist/

@@ -31,15 +31,15 @@ python scripts/build_botkeep_bundle.py            # tạo gói
 python scripts/build_botkeep_bundle.py --check    # chỉ kiểm tra, không ghi gì
 ```
 
-Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 137 file trong 18 thư mục, 2,13 MB khi giải nén, zip 0,78 MB.
+Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 160 file trong 20 thư mục, 2,49 MB khi giải nén, zip 0,90 MB.
 
-Gói chỉ gồm `main_botkeep.py`, `requirements.txt`, `.env.example`, README này, LICENSE, các file `.py` của `tradingagents/` và `vnbot/`, cùng 3 file ảnh (`vnbot/static/favicon.png`, `vnbot/static/logo.png`, `tradingagents/assets/tauric-logo.svg`). Không bao giờ có `.env`, `data/`, file `.db`, `__pycache__/`, `tests/`, `docs/`.
+Gói chỉ gồm `main_botkeep.py`, `requirements.txt`, `.env.example`, README này, LICENSE, các file `.py` của `tradingagents/` và `vnbot/`, cùng 3 file ảnh (`vnbot/static/favicon.png`, `vnbot/static/logo.png`, `tradingagents/assets/tauric-logo.svg`), và phần chạy của altcoin (`altcoin/bot/`, `altcoin/run.py`, `altcoin/requirements.txt`). Không bao giờ có `.env`, `bot.env`, `data/`, file `.db`, `__pycache__/`, `tests/`, `docs/`, script thử, `tools/` và `dist/` của altcoin.
 
 Script dừng (thoát 1) và không ghi gì khi:
 
 - vượt giới hạn upload của Botkeep: 250 file (tính cả thư mục), 4.000.000 B khi giải nén và 4.000.000 B file zip. Gần 85% giới hạn thì cảnh báo;
 - gói thiếu file, có file bị cấm, hoặc có file `.py` lỗi cú pháp;
-- mã bản dựng khác bản phát hành, tức sửa code mà quên `python -m vnbot.version --stamp` (mục 11);
+- mã bản dựng khác bản phát hành, tức sửa code mà quên `python -m vnbot.version --stamp` (mục 11), hoặc với altcoin `cd altcoin && python -m bot.version --stamp`;
 - file được đóng gói có thay đổi chưa commit. Thêm `--allow-dirty` để bỏ qua riêng kiểm tra này;
 - chạy bằng Python mới hơn 3.13: bản mới nhận cú pháp mà Botkeep báo lỗi. Thêm `--allow-python` để bỏ qua (chỉ cảnh báo).
 
@@ -582,7 +582,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `23/23 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `24/24 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -596,6 +596,7 @@ Kết quả `23/23 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `store` | Kho dữ liệu (SQLite, migration, chọn dòng cho thống kê), cổng chặn MUA và quyết định khi nhấc cổng thị trường, kế hoạch bóng (T+2, khoảng trống giá, không khớp), kết quả 5/10/20 phiên, thống kê và t, che bí mật trong log, trang `/tinhieu` `/dulieu`, tải CSV/JSON, lệnh `/vikhongmua` |
 | `breakout` | Công tắc MUA breakout: breakout thành THEO DÕI (đang giữ: GIỮ không kèm kế hoạch), pullback không đổi, kết quả bóng nhóm riêng, hiệu chỉnh đêm không đổi công tắc, nút trên trang `/bot` (mật khẩu, chặn POST chéo trang) |
 | `bundle` | Gói Botkeep: chỉ file trong danh sách cho phép, không `.env`/`.db`/`data/`/`__pycache__`/`tests/` (thử với file mồi), giới hạn 250 file và 4 MB, zip tái lập được, mã bản dựng đúng bản phát hành, thay đổi chưa commit bị chặn |
+| `altcoin_scripts` | Các script thử offline của altcoin (`altcoin/test_engine.py`, `test_learner`, `test_risk`, `test_strategy`, `test_web`) trên bản chép tạm, không đọc `.env`/`bot.env`; `altcoin/check_db.py` chỉ đọc `.env`/`bot.env` cạnh nó, ưu tiên `ALT_DATABASE_URL`. `test_smoke.py` cần OKX thật: chạy tay `cd altcoin && python test_smoke.py` |
 | `web`, `security_web`, `security_zoom`, `security_telegram` | Mật khẩu web, chặn POST chéo trang, giới hạn kích thước request, chữ ký Zoom, ghép đôi Zoom, chỉ người được phép mới ra lệnh Telegram, token không lộ trong log |
 
 Một số kiểm tra so với **số đã ghi lại** (ví dụ kết quả chiến lược Phòng thủ trên dữ liệu giả lập). Sửa chiến lược **có chủ đích** thì kiểm tra đó báo đổi: xem lại số mới rồi cập nhật trong file bộ kiểm thử. Bot không bao giờ chạy bộ kiểm thử; script tạo gói Botkeep bỏ thư mục `tests/` ra (có upload kèm cũng không sao).

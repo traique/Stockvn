@@ -1,16 +1,29 @@
 """Kiểm tra kết nối Supabase/Postgres trước khi deploy:  python check_db.py
-Đọc DATABASE_URL từ .env hoặc biến môi trường."""
+Đọc ALT_DATABASE_URL (ưu tiên) hoặc DATABASE_URL từ .env / bot.env CẠNH file này (bot.env thắng .env,
+giá trị trong file thắng biến môi trường, như bot/config.py), hoặc từ biến môi trường. Không đi ngược
+lên .env ở gốc Stockvn: file đó là của bot cổ phiếu, kiểm nhầm DB stock."""
 import os
 import sys
 import time
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
-url = os.getenv("DATABASE_URL", "").strip()
-if not url:
-    sys.exit("Chưa có DATABASE_URL trong .env")
+from dotenv import dotenv_values
+
+env, source = dict(os.environ), {}
+for name in (".env", "bot.env"):                     # bot.env nạp sau → thắng .env
+    path = Path(__file__).resolve().parent / name
+    if path.is_file():
+        for k, v in dotenv_values(path).items():
+            v = (v or "").strip()
+            if k and v and not (v.startswith("<") and v.endswith(">")):
+                env[k], source[k] = v, name
+key = next((k for k in ("ALT_DATABASE_URL", "DATABASE_URL") if (env.get(k) or "").strip()), "")
+if not key:
+    sys.exit("Chưa có ALT_DATABASE_URL / DATABASE_URL trong .env, bot.env (cạnh check_db.py) hay biến môi trường")
+url = env[key].strip()
+print(f"Kiểm tra {key} (từ {source.get(key, 'biến môi trường')})")
 if "pooler.supabase.com" not in url and "supabase.co" in url:
-    print("⚠️  Đang dùng kết nối TRỰC TIẾP của Supabase (db.xxx.supabase.co) – chỉ có IPv6, Render free sẽ KHÔNG kết nối được.")
+    print("⚠️  Đang dùng kết nối TRỰC TIẾP của Supabase (db.xxx.supabase.co) – chỉ có IPv6, máy không có IPv6 sẽ KHÔNG kết nối được.")
     print("    Hãy lấy chuỗi 'Session pooler' (aws-0-<region>.pooler.supabase.com:5432) trong Supabase → Connect.")
 if "sslmode=" not in url:
     url += ("&" if "?" in url else "?") + "sslmode=require"
@@ -27,7 +40,7 @@ try:
         conn.execute("drop table _ping")
         conn.commit()
     print(f"✅ Kết nối OK ({time.time()-t:.1f}s): {v[:60]}")
-    print("   Ghi/xoá bảng thử thành công – bot sẽ chạy được với DATABASE_URL này.")
+    print(f"   Ghi/xoá bảng thử thành công – bot sẽ chạy được với {key} này.")
 except Exception as e:
     print("❌ Lỗi:", e)
     print("   Kiểm tra: mật khẩu có ký tự đặc biệt phải mã hoá URL (@ → %40, # → %23, / → %2F...),")

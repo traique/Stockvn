@@ -362,7 +362,7 @@ git rm altcoin/render.yaml && git commit -m "altcoin: bỏ render.yaml – khôn
 
 - **Kiểm tra:**
   - `git log --oneline <commit-subtree-add>^2 | wc -l` = 8;
-  - `git log --oneline <commit-subtree-merge>^2 | wc -l` = 10;
+  - `git log --oneline <commit-subtree-add>^2 <commit-subtree-merge>^2 | wc -l` = 10 (riêng `<commit-subtree-merge>^2` là 7: nhánh tách từ `9c1a566`);
   - `git log <commit-subtree-add>^2 -- bot/main.py` thấy 2 commit (v3.1.0, v3.2.0);
   - `git show <commit-subtree-add>^2:render.yaml` vẫn in được blueprint cũ.
 - **Cách khác:** `git filter-repo --to-subdirectory-filter altcoin` cho lịch sử liền mạch, nhưng đổi mọi SHA và mất `subtree pull`. Không khuyến nghị.
