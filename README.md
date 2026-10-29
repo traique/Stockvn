@@ -10,6 +10,22 @@ Hướng dẫn chạy TradingAgents VN liên tục trên Botkeep (hoặc bất k
 
 Hành động (BUY / HOLD / WATCH / SELL / NO_TRADE) và mọi mức giá do **Quant Engine** chốt bằng code. Các agent AI (4 analyst, Bull/Bear, Trader, 3 risk, Portfolio Manager) diễn giải quanh quyết định đó, rồi **Output Guard** kiểm tra lại bằng code. Mỗi lần chỉ phân tích một mã để vừa gói free (2 GB RAM, 2 GB ổ đĩa).
 
+## Hai phần: Cổ phiếu (`/`) và Altcoin (`/altcoin/`)
+
+Cùng server còn chạy được **bot Altcoin** (futures OKX, thư mục `altcoin/`, mặc định **tắt**): một server Botkeep, một gói zip, một lệnh `python main_botkeep.py`.
+
+| | Cổ phiếu | Altcoin |
+|---|---|---|
+| Trang web | `/` | `/altcoin/` (thanh "Cổ phiếu / Altcoin" ở đầu trang) |
+| Mật khẩu | `WEB_PASSWORD` | cùng `WEB_PASSWORD` |
+| Telegram | bot của `TELEGRAM_TOKEN` | cùng bot: `/alt <lệnh>` (`/alt close` → `/alt close xacnhan`) |
+| Zoom | app `vnbot` | cùng app: `alt <lệnh>` (trong kênh `/vnbot alt <lệnh>`) |
+| Thông báo | các chat báo cáo, Zoom | cùng các chat và Zoom, mở đầu `🪙 Altcoin ›`, công tắc riêng trên `/ai#kenh` |
+| Dữ liệu | `data/`, `DATABASE_URL` | riêng: `data/altcoin/`, `ALT_DATABASE_URL` |
+| Bật | luôn chạy | `ALTCOIN_ENABLED=1`; biến riêng mang tiền tố `ALT_` |
+
+Altcoin là tiến trình con: khởi động sau Cổ phiếu, dừng cùng Cổ phiếu, lỗi thì tự chạy lại, không bao giờ cầm token Telegram hay khoá Zoom. Altcoin lỗi hay tắt thì Cổ phiếu vẫn chạy như thường. Cấu hình, lệnh, chuyển từ server altcoin cũ sang, chạy live, quay lui và xử lý sự cố: [`docs/ALTCOIN_TRONG_STOCKVN.md`](docs/ALTCOIN_TRONG_STOCKVN.md).
+
 ---
 
 ## 1. Chuẩn bị
@@ -31,7 +47,7 @@ python scripts/build_botkeep_bundle.py            # tạo gói
 python scripts/build_botkeep_bundle.py --check    # chỉ kiểm tra, không ghi gì
 ```
 
-Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 165 file trong 20 thư mục, 2,60 MB khi giải nén, zip 0,94 MB.
+Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 165 file trong 20 thư mục, 2,61 MB khi giải nén, zip 0,94 MB.
 
 Gói chỉ gồm `main_botkeep.py`, `requirements.txt`, `.env.example`, README này, LICENSE, các file `.py` của `tradingagents/` và `vnbot/`, cùng 3 file ảnh (`vnbot/static/favicon.png`, `vnbot/static/logo.png`, `tradingagents/assets/tauric-logo.svg`), và phần chạy của altcoin (`altcoin/bot/`, `altcoin/run.py`, `altcoin/hosted.py`, `altcoin/requirements.txt`). Không bao giờ có `.env`, `bot.env`, `data/`, file `.db`, `__pycache__/`, `tests/`, `docs/`, script thử, `tools/` và `dist/` của altcoin.
 
@@ -537,6 +553,13 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `STORE` | 1 | 0 = tắt kho dữ liệu (không ghi quyết định, kết quả bóng, nhật ký) |
 | `STORE_KEEP_DAYS` | 730 | Số ngày giữ quyết định, lượt quét, VNINDEX, NAV |
 | `EVENTS_KEEP_DAYS` | 14 | Số ngày giữ nhật ký hoạt động trên trang `/dulieu` |
+| `ALTCOIN_ENABLED` | 0 | 1 = chạy bot Altcoin kèm theo (trang `/altcoin/`, lệnh `/alt`) |
+| `ALTCOIN_FRESH_START` | - | 1 = cho Altcoin chạy lần đầu trên DB trống (chỉ paper); bỏ đi sau lần chạy đầu |
+| `ALT_MODE`, `ALT_I_UNDERSTAND_THE_RISK`, `ALT_LIVE_ACK`, `ALT_OKX_API_KEY`, `ALT_OKX_API_SECRET`, `ALT_OKX_PASSPHRASE` | `paper` / - | Altcoin chạy thật chỉ khi `ALT_MODE=live`, `ALT_I_UNDERSTAND_THE_RISK=yes`, `ALT_LIVE_ACK` = tên instance và đủ 3 khoá OKX; thiếu một cái thì Altcoin không chạy |
+| `ALT_DATABASE_URL` | - | Postgres riêng của Altcoin; trống = SQLite trong `ALT_DATA_DIR`. Không bao giờ là `DATABASE_URL` |
+| `ALT_DATA_DIR`, `ALT_INSTANCE_NAME`, `ALT_PUBLIC_URL` | `data/altcoin` / `botkeep` / `<PUBLIC_URL>/altcoin` | Thư mục dữ liệu, tên instance, địa chỉ trang Altcoin |
+| `ALT_OPENROUTER_API_KEY`, `ALT_NINEROUTER_*` | khoá của Cổ phiếu | AI riêng của Altcoin; trống thì dùng chung `OPENROUTER_API_KEY`, `ROUTER9_*` |
+| `ALT_<TÊN>` | - | Mọi biến khác của Altcoin, ví dụ `ALT_LEVERAGE=5`. Không có `ALT_TELEGRAM_*`, `ALT_ZOOM_*` (bị bỏ qua). Đủ danh sách: `docs/ALTCOIN_TRONG_STOCKVN.md` mục 4 |
 
 ## 10. Giới hạn và xử lý sự cố
 
@@ -557,6 +580,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | Link báo cáo trong Telegram thiếu | Đặt `PUBLIC_URL` |
 | `/hieuchinh` báo "chưa chạy" | Hiệu chỉnh chạy sau phiên đầu tiên lúc `TRADE_TIME`; cần đủ 80 phiên lịch sử |
 | Bot không đặt lệnh nhiều ngày | Bình thường khi VNINDEX risk-off hoặc dưới MA200; xem `/vikhongmua` (thị trường, cổng chặn, mã suýt MUA, kết quả bóng) hoặc trang `/tinhieu`; một mã: `/nhanh MÃ` |
+| Altcoin không chạy, nhãn "Altcoin (tắt)" / "(chờ instance khác)" / "(lỗi)" | Xem lý do ở `/altcoin/hub.json` (cần mật khẩu) hoặc trả lời của `/alt status`; bảng xử lý ở `docs/ALTCOIN_TRONG_STOCKVN.md` mục 12. Tắt hẳn: `ALTCOIN_ENABLED=0` |
 | Trang `/dulieu` báo dùng SQLite dù đã đặt `DATABASE_URL` | Chuỗi kết nối sai hoặc Supabase đang tạm dừng: chạy `python check_db.py`, lấy chuỗi "Session pooler" (không phải Direct connection), mã hoá URL ký tự đặc biệt của mật khẩu |
 
 ## 11. Phiên bản
@@ -568,6 +592,8 @@ Bot ghi số phiên bản ở một chỗ (`vnbot/version.py`) và hiện ở:
 - **Tự báo khi cập nhật:** lần khởi động đầu tiên sau khi upload bản mới, bot nhắn vào Telegram/Zoom “🆕 Bot đã cập nhật: v1.0.0 → v1.1.0” kèm những gì mới; khởi động lại bình thường thì không nhắn.
 
 **Mã bản dựng** (7 ký tự, ví dụ `1a2b3c4`) là dấu vân tay của toàn bộ code đang chạy. Cùng một bộ file cho cùng một mã trên mọi máy, nên bot biết server có chạy **đúng bản phát hành** không. Báo **khác bản phát hành** nghĩa là upload thiếu file, lẫn file của bản cũ, hoặc code đã bị sửa: hãy upload lại đủ gói.
+
+Bot Altcoin có phiên bản riêng (`altcoin/bot/version.py`, hiện 3.2.1): xem ở `/altcoin/phienban` hoặc `/alt phienban`, đóng dấu bằng `cd altcoin && python -m bot.version --stamp`.
 
 Số phiên bản theo dạng `vMAJOR.MINOR.PATCH` (bản đầu tiên `v1.0.0`, lịch sử trước đó đã bỏ). Khi tự sửa code và muốn đánh số bản mới: tăng `VERSION`, thêm dòng vào `NOTES` trong `vnbot/version.py`, rồi chạy `python -m vnbot.version --stamp` để ghi mã bản dựng mới.
 
@@ -597,7 +623,7 @@ Kết quả `28/28 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `store` | Kho dữ liệu (SQLite, migration, chọn dòng cho thống kê), cổng chặn MUA và quyết định khi nhấc cổng thị trường, kế hoạch bóng (T+2, khoảng trống giá, không khớp), kết quả 5/10/20 phiên, thống kê và t, che bí mật trong log, trang `/tinhieu` `/dulieu`, tải CSV/JSON, lệnh `/vikhongmua` |
 | `breakout` | Công tắc MUA breakout: breakout thành THEO DÕI (đang giữ: GIỮ không kèm kế hoạch), pullback không đổi, kết quả bóng nhóm riêng, hiệu chỉnh đêm không đổi công tắc, nút trên trang `/bot` (mật khẩu, chặn POST chéo trang) |
 | `bundle` | Gói Botkeep: chỉ file trong danh sách cho phép, không `.env`/`.db`/`data/`/`__pycache__`/`tests/` (thử với file mồi), giới hạn 250 file và 4 MB, zip tái lập được, mã bản dựng đúng bản phát hành, thay đổi chưa commit bị chặn |
-| `altcoin_scripts` | Các script thử offline của altcoin (`altcoin/test_engine.py`, `test_learner`, `test_risk`, `test_strategy`, `test_web`) trên bản chép tạm, không đọc `.env`/`bot.env`; `altcoin/check_db.py` chỉ đọc `.env`/`bot.env` cạnh nó (ưu tiên `ALT_DATABASE_URL`) và `ALT_DATABASE_URL` của biến môi trường, không bao giờ `DATABASE_URL` của stock. `test_smoke.py` cần OKX thật: chạy tay `cd altcoin && python test_smoke.py` |
+| `altcoin_scripts` | Các script thử offline của altcoin (`altcoin/test_engine.py`: cả vùng găng – SIGTERM giữa đặt lệnh live và ghi DB; `test_learner`, `test_risk`, `test_strategy`, `test_web`) trên bản chép tạm, không đọc `.env`/`bot.env`; `altcoin/check_db.py` chỉ đọc `.env`/`bot.env` cạnh nó (ưu tiên `ALT_DATABASE_URL`) và `ALT_DATABASE_URL` của biến môi trường, không bao giờ `DATABASE_URL` của stock. `test_smoke.py` cần OKX thật: chạy tay `cd altcoin && python test_smoke.py` |
 | `altcoin_host` | Altcoin là tiến trình con của stock (`ALTCOIN_ENABLED=1`): env của nó chỉ từ danh sách cho phép, không bao giờ có token Telegram/Zoom, mật khẩu web hay `DATABASE_URL` của stock; khoá kênh, Render và đăng nhập riêng trong `altcoin/bot.env` bị xoá; chỉ chạy live khi đủ `ALT_MODE`, `ALT_I_UNDERSTAND_THE_RISK`, `ALT_LIVE_ACK`, `ALT_OKX_*` (thiếu thì không chạy, không lùi về paper); chặn DB của stock, DB rỗng (`ALTCOIN_FRESH_START` chỉ cho paper, `hosted.funded`), lệnh đang mở của chế độ khác và instance thứ hai (75, cả lúc đang chạy); khung trạng thái/thông báo qua pipe; khởi động lại, backoff, dừng khi stock dừng; che bí mật trong log `[altcoin]` |
 | `altcoin_proxy` | Hub trước trang web (`/altcoin/`): đường dẫn lạ (`..`, `//`, `#`, `%2e`, `%5F`…) bị chặn 400 trước mọi bước; `/altcoin/_hub*` và các đường Zoom/công tắc kênh cũ của altcoin 404 (kể cả có mật khẩu); trang công khai và `/altcoin/zoom` chuyển sang trang của stock; cùng `WEB_PASSWORD`, cùng bộ đếm khoá khi sai mật khẩu và cùng kiểm tra chống gửi form từ trang khác như stock; `/altcoin/hub.json` cần mật khẩu, không có token; altcoin không nhận `Authorization` hay `X-Hub-*` của client; body ≤ 64 KB, ≤ 8 yêu cầu cùng lúc, viết lại `Location`; trang 503 khi altcoin chưa chạy, stock vẫn chạy |
 | `altcoin_web` | Trang altcoin sau khi `hosted.py` thích nghi: mọi link nằm dưới `/altcoin/` trừ đúng 3 link sang stock (`/`, `/ai#kenh`, `/zoom`); `/altcoin/caidat` có thẻ “Kênh do Stock quản lý” thay hai thẻ kênh; altcoin chỉ nhận yêu cầu có `X-Hub-Token` (trừ `GET /health`); thanh chuyển Cổ phiếu / Altcoin ở cả hai phía, chỉ khi bật altcoin; `/_hub/command` chỉ với `X-Hub-Cmd-Token`, chỉ lệnh trong danh sách, lệnh ghi chỉ khi giữ quyền giao dịch và từng lệnh một (close quá giờ chờ rồi close lần hai: "đang có lệnh", không đóng hai lần) |

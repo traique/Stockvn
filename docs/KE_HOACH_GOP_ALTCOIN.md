@@ -1,6 +1,57 @@
 # Kế hoạch gộp altcoin_bot vào Stockvn
 
-Tài liệu này là kế hoạch, chưa sửa code. Nguồn: repo `traique/stockvn` (v1.14.0) và `traique/altcoin_bot` (nhánh mặc định `ccr-78e45817-g8v8rx`, build `380dfca`), khảo sát ngày 2026-10-29. **Bản 2** (cùng ngày): bốn quyết định dưới đây đã được áp vào mọi mục, không chỉ §7.
+Tài liệu này là kế hoạch, viết trước khi sửa code (đã triển khai: xem mục ngay dưới). Nguồn: repo `traique/stockvn` (v1.14.0) và `traique/altcoin_bot` (nhánh mặc định `ccr-78e45817-g8v8rx`, build `380dfca`), khảo sát ngày 2026-10-29. **Bản 2** (cùng ngày): bốn quyết định dưới đây đã được áp vào mọi mục, không chỉ §7.
+
+## Trạng thái triển khai (2026-10-29)
+
+Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `5bd7c8e`) và **Altcoin 3.2.1** (build `b182102`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
+
+**Quyết định cuối của anh/chị** (đè lên kế hoạch):
+
+1. Một mật khẩu `WEB_PASSWORD` cho cả hai mục; đăng nhập cookie của altcoin luôn tắt.
+2. Một bot Telegram và một app Zoom, đều của **stock** (`TELEGRAM_TOKEN`, app `vnbot`). Không có nhánh `okxbot` làm app chung.
+3. Lệnh altcoin riêng: `/alt <lệnh>` (bí danh `/altcoin`); lệnh stock giữ nguyên.
+4. Thông báo altcoin tới **cùng** chat/Zoom của stock, tiêu đề `🪙 Altcoin ›`. Không có `ALTCOIN_REPORT_CHAT_IDS`.
+5. Một người dùng: không có `ALTCOIN_ADMIN_IDS`. Lệnh ghi altcoin theo đúng quyền lệnh stock, cộng bước `xacnhan` cho `close`/`apply`/`resume`.
+6. Botkeep chạy Python 3.13 và cài lại `requirements.txt` mỗi lần upload: không có `ALTCOIN_AUTO_INSTALL`; cần Python ≥ 3.12.
+7. Không Render, không peer/failover, không `ALTCOIN_LEGACY_HOSTS`. Một server Botkeep chạy tất cả.
+8. Giai đoạn 0 (khảo sát, sao lưu) và 6 (cut-over trên Botkeep) do anh/chị làm, theo checklist trong hướng dẫn vận hành.
+
+**Đã làm** (giai đoạn theo §15):
+
+| Giai đoạn | Commit | Nội dung |
+|---|---|---|
+| 1. Bộ đóng gói | `9924923`, `7595098` | `scripts/build_botkeep_bundle.py`, `suite_bundle`, `pytest.ini` |
+| 2. Nhập altcoin | `f833aeb` … `cd95452` | Subtree kèm lịch sử, nhánh `backtest_sessions`, bỏ `render.yaml`, `altcoin/check_db.py`, `suite_altcoin_scripts` |
+| 3. Supervisor | `d44dec7`, `198cdb5` | `vnbot/altcoin_host.py`, `altcoin/hosted.py`, `main_botkeep.py`, `suite_altcoin_host` |
+| 4. Hai mục trên web | `69151dc`, `e10b290` | `vnbot/hub.py`, `vnbot/webguard.py`, thanh chuyển mục, `suite_altcoin_proxy`, `suite_altcoin_web` |
+| 5. Cầu nối kênh | `d042488`, `4bb41e8` | `vnbot/altcoin_bridge.py`, `/alt`, thông báo, công tắc `altcoin`, `/_hub/command`, `suite_altcoin_bridge` |
+| 7. Gia cố (phần bắt buộc) + tài liệu | `47a68cf` và commit tài liệu | Vùng găng `LiveEngine.open/partial/close` (Altcoin 3.2.1); `docs/ALTCOIN_TRONG_STOCKVN.md`, README, `.env.example` |
+
+**Còn lại cho anh/chị:**
+
+- Giai đoạn 0, canary trên Botkeep, Giai đoạn 6 và việc sau 1–2 tuần (xoá server cũ, gỡ app `okxbot`, revoke token bot OKX, archive repo `altcoin_bot`): hướng dẫn vận hành, mục 7–9.
+- Giấy phép (§17 mục 16): chưa ghi gì cho `altcoin/`, chờ anh/chị quyết.
+- Giai đoạn 7 phần tuỳ chọn chưa làm: đưa `HubChannel` và `/_hub/command` vào `bot/`, seam `WEB_PREFIX` trong `ui.py`, `config.py` bỏ qua `__BOTKEEP_KEEP_SECRET_`, thẻ Altcoin trên `/phienban` của stock, xoá heartbeat `render` cũ.
+
+**Khác với kế hoạch** (chi tiết trong message của từng commit):
+
+- Bỏ theo quyết định cuối: `ALTCOIN_ADMIN_IDS`, `ALTCOIN_REPORT_CHAT_IDS`, `ALTCOIN_AUTO_INSTALL`, `ALTCOIN_LEGACY_HOSTS`, lớp "chỉ JID Zoom đã ghép đôi" cho lệnh ghi, mọi nhánh `okxbot` và Render. `settings.py` không đổi; `broadcast()` chỉ thêm `on_fail=`.
+- Builder: danh sách file là `git ls-files --cached --others --exclude-standard` (file mới chưa commit bị chặn trừ khi `--allow-dirty`); từ chối Python mới hơn 3.13 (`--allow-python`); mỗi mục zip mang thời điểm commit (không phải 1980) để server không chạy `__pycache__` cũ; `--check` không ghi gì; tên cấm so không phân biệt hoa thường.
+- §3: lệnh đếm lịch sử cho 7, không phải 10 (10 là hợp hai nhánh). `render.yaml` lấy lại bằng `git show 8332222:render.yaml`. `altcoin/README.md` giữ phần tạo Supabase thành mục "3b. Postgres dùng chung trên Supabase".
+- `--deny-db` mang hash 16 ký tự của `user@host:port/db`, không mang URL (argv hiện trong `ps`). Kiểm bảng `market`/`fills` chạy cả trên SQLite. `state()` có thêm `live_error`.
+- Hub chỉ bọc `LateApp` khi `ALTCOIN_ENABLED=1` (tắt thì `/altcoin` là 404 của stock, y như v1.14). Không có `--prefix`: tiền tố cố định `PREFIX="/altcoin"` ở cả `hub.py` lẫn `hosted.py`. Hub 308 các trang Zoom/công khai dưới `/altcoin` và chặn 404 mọi method của các đường cũ; đường dẫn có `#` cũng bị 400.
+- `webguard.check_basic` tự đọc header Basic: `WEB_PASSWORD` có ký tự ngoài ASCII nay dùng được; header Basic hỏng tính là sai mật khẩu.
+- `zoom.handle` giữ chữ ký cũ; `ZoomChannel.sender(target)` trả JID người gửi cho bước `xacnhan`.
+- Giới hạn nhịp là cửa sổ trượt 15 tin/60 s và 5 tin/20 s, cách nhau ≥ 1 s (token bucket cho lọt 20 tin trong phút đầu). Tin dài được chia trước, mỗi phần có tiêu đề `🪙 Altcoin › (i/n)`.
+- Vùng găng: ngoài việc giữ SIGTERM/SIGINT ở luồng chính, một khoá chung cho lệnh sàn của mọi luồng, và lúc thoát tiến trình chờ tối đa 12 s cho lệnh đang chạy ở luồng khác (`/alt close`). Chỉ `LiveEngine` (paper không có lệnh trên sàn). Altcoin lên 3.2.1 nên câu "build `380dfca`" ở dưới là lịch sử.
+
+**Vấn đề còn mở (đã cân nhắc, chấp nhận):**
+
+- Thông báo bị bỏ trong child (hàng đợi `HubChannel` đầy) chưa được báo về stock.
+- Kiểm instance trùng tên khi đang chạy dùng chung kết nối DB của bot: Postgres treo làm khung `state` chậm tới khoảng 40 s.
+- Mất cả `data/` (SQLite) thì mất luôn `hosted.funded`: `ALTCOIN_FRESH_START=1` để quên vẫn mở được DB trống. Hướng dẫn ghi rõ bỏ biến này sau lần chạy đầu.
+- `#` trong query (`/altcoin/x?a#b`) bị httpx bỏ trước khi tới child; vô hại.
 
 ## Quyết định đã chốt (2026-10-29)
 

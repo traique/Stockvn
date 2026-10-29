@@ -47,6 +47,7 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "/alt close, apply, resume phải gõ thêm xacnhan trong 120 giây; /close, /status... gõ trần chỉ nhận gợi ý",
         "Tin Altcoin tới cùng chat và Zoom của Cổ phiếu, mọi phần mở đầu “🪙 Altcoin ›”; công tắc Altcoin trên /ai",
         "Thông báo Altcoin chống trùng, tối đa 15 tin/phút (tin 🛑/⚠️ luôn gửi); /alt zoomtest gửi thử từng kênh",
+        "Kèm Altcoin 3.2.1: khởi động lại server không còn cắt giữa lúc đặt lệnh live và lúc ghi DB",
         "Cần Python 3.12 trở lên",
     )),
     ("v1.14.0", "2026-10-28", (

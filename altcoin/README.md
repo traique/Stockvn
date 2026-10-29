@@ -3,8 +3,8 @@
 > **Trong Stockvn:** bot này nằm ở thư mục `altcoin/` của repo `traique/stockvn` và chạy trên cùng server Botkeep với bot cổ phiếu (một gói zip, `python main_botkeep.py`); web ở `/altcoin/`, cùng mật khẩu `WEB_PASSWORD` của stock.
 > Lệnh gõ qua bot Telegram và app Zoom của stock: `/alt <lệnh>` (hoặc `/altcoin <lệnh>`); thông báo về cùng các chat của stock, có tiêu đề "🪙 Altcoin ›". Không dùng token Telegram hay app Zoom riêng.
 > Không còn Render: chỉ một server Botkeep, không chạy song song hay failover (xem mục 3b).
-> Kế hoạch gộp và cấu hình: [`docs/KE_HOACH_GOP_ALTCOIN.md`](../docs/KE_HOACH_GOP_ALTCOIN.md) ở gốc repo.
-> `bot/` và `run.py` giữ nguyên từng byte (mã bản dựng). Phần dưới là hướng dẫn gốc cho chế độ chạy độc lập (`python run.py`).
+> Cấu hình và vận hành trong Stockvn: [`docs/ALTCOIN_TRONG_STOCKVN.md`](../docs/ALTCOIN_TRONG_STOCKVN.md) ở gốc repo (thiết kế: [`docs/KE_HOACH_GOP_ALTCOIN.md`](../docs/KE_HOACH_GOP_ALTCOIN.md)).
+> `bot/` và `run.py` dùng chung cho cả hai cách chạy (mã bản dựng ở `bot/version.py`). Phần dưới là hướng dẫn gốc cho chế độ chạy độc lập (`python run.py`).
 
 Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh cả Long lẫn Short. Bộ lọc kỹ thuật khắt khe tự tìm tín hiệu; AI (qua **9Router** hoặc **OpenRouter**, model free) chỉ được gọi **2 lần cho mỗi lệnh**: 1 lần xác nhận trước khi vào, 1 lần tổng kết sau khi đóng. Có chế độ **chạy ảo (paper)**, Telegram, dashboard web. Chạy được trên **Botkeep.cloud** với runtime Python (không cần Docker).
 
