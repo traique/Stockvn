@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Annotated
@@ -728,6 +729,8 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             ("zoom_commands", "Zoom · nhận lệnh", bool(zoom and zoom.commands_on), "Lệnh gõ trong Zoom (/webhook/zoom)"),
             ("intraday", "Cảnh báo trong phiên", trader is not None and settings.trade_mode != "off",
              f"Mỗi {settings.intraday_interval_min} phút trong giờ khớp lệnh · không dùng AI"),
+            ("altcoin", "Altcoin · thông báo", (os.environ.get("ALTCOIN_ENABLED") or "").strip() == "1",
+             "Tin của bot Altcoin, mở đầu “🪙 Altcoin ›”, qua Telegram và Zoom ở trên; lệnh: /alt"),
         ]
         chrow = [f'<tr><td><b>{label}</b><div class="muted small">{html.escape(note)}</div></td>'
                  f"<td class='num'>{_switch_form(key, switches.on(key)) if ready else _UNSET_BADGE}</td></tr>"
@@ -746,7 +749,8 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
                       flush=True)
             + "</div>"
             + '<div class="mt">' + ui.card("Kênh thông báo", ui.table([("Kênh", ""), ("", "")], chrow, ""), flush=True,
-                                            action='<a class="btn btn-ghost" href="/zoom">Cấu hình Zoom</a>') + "</div>"
+                                            action='<a class="btn btn-ghost" href="/zoom">Cấu hình Zoom</a>',
+                                            id="kenh") + "</div>"
         )
         return _page("AI & cảnh báo", body, active="ai", show_bot=trader is not None and settings.trade_mode != "off")
 

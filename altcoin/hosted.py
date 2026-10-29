@@ -37,6 +37,8 @@ process) starts and watches. Outside the altcoin fingerprint (``bot/**`` + ``run
    carrying HUB_TOKEN gets in (HUB_CMD_TOKEN for /_hub/*; GET /health is the supervisor's
    probe); "/x" links and redirects get the prefix; the section switch (Cổ phiếu / Altcoin)
    heads every page; the channel cards of /caidat become one "Kênh do Stock quản lý" card.
+8. POST /_hub/command: the stock's "/alt <lệnh>" (vnbot/altcoin_bridge.py), an allowlist of
+   ``handle_command``; a write command only on the leader and one at a time (409 otherwise).
 
 Exit codes: 78 = configuration refused (not restarted), 75 = wait (retried).
 """
@@ -99,6 +101,11 @@ STOCK_CHANNELS = ('Thông báo Altcoin đi qua bot Telegram và app Zoom của C
                   'trên Telegram, <code>alt status</code> trên Zoom (gõ <code>/alt</code> để xem lệnh).')
 STOCK_CARD_TITLE = "Kênh do Stock quản lý"
 TOKENS: dict[str, str] = {}    # HUB_TOKEN / HUB_CMD_TOKEN, for the web proxy and the /alt commands
+# The /alt commands (vnbot/altcoin_bridge.py READ + WRITE); the writes run one at a time
+COMMANDS = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version",
+            "pause", "resume", "close", "apply")
+WRITES = ("pause", "resume", "close", "apply")
+WRITE_LOCK = threading.Lock()
 HUB: Hub | None = None
 _LOCK = None                   # <DATA_DIR>/hosted.lock, held (flock) for the life of the process
 
@@ -506,8 +513,42 @@ class HubGate:
         await self.app(scope, receive, prefixed)
 
 
+def command_route(app, bot) -> None:
+    """POST /_hub/command {"cmd", "source"} (HubGate asked for X-Hub-Cmd-Token): one /alt command.
+    A write runs only on the leader and never beside another: the lock is held until
+    handle_command() returns, even long after the stock stopped waiting (close is not idempotent:
+    two at once would close a trade twice)."""
+    from fastapi import Body
+    from fastapi.responses import JSONResponse
+
+    def hub_command(body: dict = Body(...)):       # def: FastAPI's thread pool, never the event loop
+        cmd = str(body.get("cmd") or "").strip().lower()
+        source = "Zoom" if body.get("source") == "Zoom" else "Telegram"
+        if getattr(bot, "start_equity", None) is None:
+            return JSONResponse({"ok": False, "error": "đang khởi động"}, status_code=503)
+        if cmd not in COMMANDS:
+            return JSONResponse({"ok": False, "error": "lệnh không có trong danh sách"}, status_code=400)
+        write = cmd in WRITES
+        if write and not bot.is_leader:
+            return JSONResponse({"ok": False, "leader": False}, status_code=409)
+        if write and not WRITE_LOCK.acquire(blocking=False):
+            return JSONResponse({"ok": False, "busy": True}, status_code=409)
+        try:
+            return {"ok": True, "reply": str(bot.handle_command(cmd, source=source))}
+        except Exception as exc:  # noqa: BLE001 - said to the stock, logged here
+            from bot.eventlog import redact
+
+            log.exception("Lệnh /alt %s lỗi", cmd)
+            return {"ok": False, "error": redact(f"{type(exc).__name__}: {exc}")[:500]}
+        finally:
+            if write:
+                WRITE_LOCK.release()
+
+    app.add_api_route("/_hub/command", hub_command, methods=["POST"])
+
+
 def adapt() -> list[str]:
-    """Step 7 of the docstring, by wrapping bot.ui.page, bot.ui.card and bot.dashboard.build_app
+    """Steps 7 and 8 of the docstring, by wrapping bot.ui.page, bot.ui.card and bot.dashboard.build_app
     (looked up when called). Returns the seams that are gone, each logged: the pages still work
     without them (the Hub still asks for the password and still blocks the old channel routes)."""
     from bot import dashboard, ui
@@ -546,6 +587,7 @@ def adapt() -> list[str]:
 
         def gated_app(bot):
             app = build(bot)
+            command_route(app, bot)
             app.add_middleware(HubGate)
             return app
 

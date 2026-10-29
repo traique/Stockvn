@@ -31,7 +31,7 @@ python scripts/build_botkeep_bundle.py            # tạo gói
 python scripts/build_botkeep_bundle.py --check    # chỉ kiểm tra, không ghi gì
 ```
 
-Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 164 file trong 20 thư mục, 2,57 MB khi giải nén, zip 0,93 MB.
+Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 165 file trong 20 thư mục, 2,60 MB khi giải nén, zip 0,94 MB.
 
 Gói chỉ gồm `main_botkeep.py`, `requirements.txt`, `.env.example`, README này, LICENSE, các file `.py` của `tradingagents/` và `vnbot/`, cùng 3 file ảnh (`vnbot/static/favicon.png`, `vnbot/static/logo.png`, `tradingagents/assets/tauric-logo.svg`), và phần chạy của altcoin (`altcoin/bot/`, `altcoin/run.py`, `altcoin/hosted.py`, `altcoin/requirements.txt`). Không bao giờ có `.env`, `bot.env`, `data/`, file `.db`, `__pycache__/`, `tests/`, `docs/`, script thử, `tools/` và `dist/` của altcoin.
 
@@ -127,6 +127,7 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/thamdinh` · `/thamdinh lichsu` · `/thamdinh tuan` | AI thẩm định tín hiệu: phiên gần nhất (mã chọn, mã nên tránh, ý kiến về danh mục) và thành tích · các phiên gần đây · tổng kết tuần (cần 9Router và `SIEUTINHIEU=1`) |
 | `/thamdinh chay` (hoặc `ngay`) | Chạy ngay với dữ liệu mới nhất: trong phiên (09:15-15:10) là giá khớp hôm nay, sau 15:10 là tín hiệu đã chốt của hôm nay, trước giờ mở cửa hoặc ngày nghỉ là phiên gần nhất |
 | `/ts` ... | Danh mục tiền thật của anh (Tài sản): xem mục **Tài sản** bên dưới |
+| `/alt <lệnh>` (hoặc `/altcoin <lệnh>`) | Bot Altcoin chạy kèm (khi `ALTCOIN_ENABLED=1`): `/alt` xem lệnh, `/alt status`, `trades`, `signals`, `ai`, `learn`, `lessons`, `btc`, `phienban`, `pause`. `/alt close`, `apply`, `resume` phải gõ thêm `/alt <lệnh> xacnhan` trong 120 giây (cùng người, cùng cuộc trò chuyện). `/alt zoomtest` gửi thử một thông báo Altcoin và báo từng kênh nhận hay không. Lệnh Altcoin gõ trần (`/close`, `/status`...) không bao giờ chạy, chỉ nhận gợi ý `/alt`. Altcoin tắt thì `/alt` trả lời "Altcoin đang tắt" |
 | `/id` | Telegram id của bạn |
 
 Mã nhận được các dạng `FPT`, `fpt`, `FPT.VN`, `HOSE:FPT`. Chỉ số (`VNINDEX`, `VN30`...) không có quyết định giao dịch nên bị từ chối.
@@ -390,7 +391,7 @@ Mỗi cảnh báo gửi một lần mỗi ngày, kể cả khi khởi động l�
 
 ### Bật/tắt kênh thông báo và đổi vốn tài khoản ảo trên web
 
-- Trang **AI & cảnh báo** (`/ai`), thẻ **Kênh thông báo**: công tắc bật/tắt thật cho *Telegram · thông báo* (báo cáo, AI phản biện, cảnh báo; lệnh Telegram vẫn được trả lời khi tắt), *Zoom · thông báo*, *Zoom · nhận lệnh* và *Cảnh báo trong phiên*. Lưu trong `data/channels.json`, giữ qua lần khởi động lại. Kênh chưa cấu hình hiện "chưa cấu hình".
+- Trang **AI & cảnh báo** (`/ai`), thẻ **Kênh thông báo** (`/ai#kenh`): công tắc bật/tắt thật cho *Telegram · thông báo* (báo cáo, AI phản biện, cảnh báo; lệnh Telegram vẫn được trả lời khi tắt), *Zoom · thông báo*, *Zoom · nhận lệnh*, *Cảnh báo trong phiên* và *Altcoin · thông báo* (tin của bot Altcoin, mở đầu “🪙 Altcoin ›”, tới cùng chat Telegram và Zoom như tin Cổ phiếu; Telegram/Zoom tắt thì tin Altcoin cũng không qua kênh đó). Lưu trong `data/channels.json`, giữ qua lần khởi động lại. Kênh chưa cấu hình hiện "chưa cấu hình".
 - Trang **Bot giao dịch** (`/bot`), thẻ **Vốn tài khoản ảo**: nhập vốn mới (tối thiểu 10 triệu), chọn tài khoản (Phòng thủ, Quant Engine, Động lượng), đánh dấu ô xác nhận rồi bấm **Đổi vốn**. Tài khoản được chọn bắt đầu lại từ đầu với vốn mới từ lần chạy phiên tới (bấm "Chạy phiên ngay" để bắt đầu luôn); sổ cũ được giữ lại thành `data/trading/<file>.reset-<thời điểm>`. Vốn mới lưu trong `data/trading/paper_capital.json` và thay cho `PAPER_CAPITAL`. Không đổi được khi bot đang chạy phiên.
 
 ### Zoom Team Chat
@@ -398,7 +399,7 @@ Mỗi cảnh báo gửi một lần mỗi ngày, kể cả khi khởi động l�
 Ngang hàng Telegram, làm y như bot OKX (`vnbot/zoom.py`, `vnbot/pages.py`):
 
 - **Thông báo** (báo cáo hằng ngày, AI phản biện, cảnh báo trong phiên) gửi vào Zoom qua Incoming Webhook (`ZOOM_WEBHOOK_URL`, `ZOOM_WEBHOOK_TOKEN`; trong kênh gõ `/inc connect vnbot`) và/hoặc chatbot tới JID đã ghép đôi.
-- **Gõ lệnh trong Zoom** giống Telegram: `nhanh FPT`, `phanbien HPG`, `phantich FPT`, `danhmuc`, `lenh`, `trangthai`, `trogiup`... Trong kênh: `/vnbot nhanh FPT`.
+- **Gõ lệnh trong Zoom** giống Telegram: `nhanh FPT`, `phanbien HPG`, `phantich FPT`, `danhmuc`, `lenh`, `trangthai`, `trogiup`... Trong kênh: `/vnbot nhanh FPT`. Lệnh Altcoin cũng gõ ở đây: `alt status` (trong kênh: `/vnbot alt status`).
 - **Ghép đôi đúng một tài khoản** như bot OKX: người lạ nhắn bot bị từ chối, bạn được báo JID của họ qua Telegram; gõ `/zoompair <JID> [tên]` hoặc bấm **Ghép đôi** trên trang `/zoom`. `/zoomstatus` xem, `/zoomxoa` gỡ (chỉ trên Telegram). `ZOOM_ALLOWED_USERS` (JID/email) được tự ghép đôi ở tin nhắn đầu. Gỡ app khỏi Zoom thì bot tự xoá ghép đôi.
 
 **Các trang phục vụ Zoom** (có sẵn trong bot):
@@ -424,7 +425,7 @@ Các trang công khai song ngữ Việt–Anh, không đặt cookie. Botkeep đ�
 4. Local Test → **Add App Now** → Allow → về trang callback báo "Đã cài thành công".
 5. Zoom → Team Chat → Apps → nhắn `trangthai` → Telegram báo JID → gõ `/zoompair <JID>` (hoặc bấm Ghép đôi trên `/zoom`).
 
-**Dùng chung với bot OKX:** mỗi app Zoom chỉ có **một** Bot endpoint URL. Muốn gõ lệnh cho cả hai bot thì tạo **app thứ hai** cho bot này (cùng cách làm). Nếu chỉ cần nhận thông báo của bot này trong Zoom, có thể mượn app của bot OKX: điền cùng `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_BOT_JID`, `ZOOM_ACCOUNT_ID`, đặt `ZOOM_TO_JID` = JID bot OKX đang ghép đôi và để trống `ZOOM_SECRET_TOKEN`; tin của hai bot hiện chung một cuộc trò chuyện, cùng tên bot.
+**Một bot Telegram, một app Zoom cho cả Cổ phiếu và Altcoin:** bot Altcoin (OKX) chạy kèm trên cùng server không có token Telegram hay app Zoom riêng. Lệnh của nó gõ `/alt <lệnh>` trên bot Telegram này và `alt <lệnh>` trong app Zoom này; thông báo của nó tới cùng các chat và cùng người ghép đôi Zoom, mở đầu “🪙 Altcoin ›”. Không cần app thứ hai, không mượn app nào.
 
 File báo cáo HTML chỉ gửi qua Telegram; trên Zoom bot gửi kèm link trang web.
 
@@ -505,8 +506,8 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `TAISAN_MAX_WEIGHT_NEW` | 30 | Một mã tối đa bao nhiêu % tài sản sau khi mua (không quá ngưỡng nguy hiểm `/tsnguong`) |
 | `ZOOM_WEBHOOK_URL`, `ZOOM_WEBHOOK_TOKEN` | - | Gửi thông báo vào một kênh Zoom (Incoming Webhook) |
 | `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_BOT_JID`, `ZOOM_ACCOUNT_ID` | - | Chatbot Zoom (thông báo tới JID đã ghép đôi, nhận lệnh) |
-| `ZOOM_TO_JID` | - | Gửi thông báo tới JID này thay cho JID đã ghép đôi (mượn app của bot OKX) |
-| `ZOOM_SECRET_TOKEN`, `ZOOM_VERIFICATION_TOKEN` | - | Nhận lệnh gõ trong Zoom tại `/webhook/zoom` (cần app riêng); Verification Token là cơ chế cũ |
+| `ZOOM_TO_JID` | - | Gửi thông báo (cả của Altcoin) tới JID này thay cho JID đã ghép đôi |
+| `ZOOM_SECRET_TOKEN`, `ZOOM_VERIFICATION_TOKEN` | - | Nhận lệnh gõ trong Zoom tại `/webhook/zoom` (cả lệnh `alt …` của Altcoin); Verification Token là cơ chế cũ |
 | `ZOOM_ALLOWED_USERS` | - | JID/email được tự ghép đôi ở tin nhắn đầu |
 | `SUPPORT_EMAIL` | - | Email liên hệ trên `/privacy`, `/support` |
 | `SCAN_UNIVERSE` | `vn100` | Rổ mã lượt quét 15:30 xét, luôn cộng watchlist: `vn100`, `vn30`, `watchlist` |
@@ -582,7 +583,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `27/27 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì các bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `28/28 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì các bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -599,7 +600,8 @@ Kết quả `27/27 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `altcoin_scripts` | Các script thử offline của altcoin (`altcoin/test_engine.py`, `test_learner`, `test_risk`, `test_strategy`, `test_web`) trên bản chép tạm, không đọc `.env`/`bot.env`; `altcoin/check_db.py` chỉ đọc `.env`/`bot.env` cạnh nó (ưu tiên `ALT_DATABASE_URL`) và `ALT_DATABASE_URL` của biến môi trường, không bao giờ `DATABASE_URL` của stock. `test_smoke.py` cần OKX thật: chạy tay `cd altcoin && python test_smoke.py` |
 | `altcoin_host` | Altcoin là tiến trình con của stock (`ALTCOIN_ENABLED=1`): env của nó chỉ từ danh sách cho phép, không bao giờ có token Telegram/Zoom, mật khẩu web hay `DATABASE_URL` của stock; khoá kênh, Render và đăng nhập riêng trong `altcoin/bot.env` bị xoá; chỉ chạy live khi đủ `ALT_MODE`, `ALT_I_UNDERSTAND_THE_RISK`, `ALT_LIVE_ACK`, `ALT_OKX_*` (thiếu thì không chạy, không lùi về paper); chặn DB của stock, DB rỗng (`ALTCOIN_FRESH_START` chỉ cho paper, `hosted.funded`), lệnh đang mở của chế độ khác và instance thứ hai (75, cả lúc đang chạy); khung trạng thái/thông báo qua pipe; khởi động lại, backoff, dừng khi stock dừng; che bí mật trong log `[altcoin]` |
 | `altcoin_proxy` | Hub trước trang web (`/altcoin/`): đường dẫn lạ (`..`, `//`, `#`, `%2e`, `%5F`…) bị chặn 400 trước mọi bước; `/altcoin/_hub*` và các đường Zoom/công tắc kênh cũ của altcoin 404 (kể cả có mật khẩu); trang công khai và `/altcoin/zoom` chuyển sang trang của stock; cùng `WEB_PASSWORD`, cùng bộ đếm khoá khi sai mật khẩu và cùng kiểm tra chống gửi form từ trang khác như stock; `/altcoin/hub.json` cần mật khẩu, không có token; altcoin không nhận `Authorization` hay `X-Hub-*` của client; body ≤ 64 KB, ≤ 8 yêu cầu cùng lúc, viết lại `Location`; trang 503 khi altcoin chưa chạy, stock vẫn chạy |
-| `altcoin_web` | Trang altcoin sau khi `hosted.py` thích nghi: mọi link nằm dưới `/altcoin/` trừ đúng 3 link sang stock (`/`, `/ai#kenh`, `/zoom`); `/altcoin/caidat` có thẻ “Kênh do Stock quản lý” thay hai thẻ kênh; altcoin chỉ nhận yêu cầu có `X-Hub-Token` (trừ `GET /health`); thanh chuyển Cổ phiếu / Altcoin ở cả hai phía, chỉ khi bật altcoin |
+| `altcoin_web` | Trang altcoin sau khi `hosted.py` thích nghi: mọi link nằm dưới `/altcoin/` trừ đúng 3 link sang stock (`/`, `/ai#kenh`, `/zoom`); `/altcoin/caidat` có thẻ “Kênh do Stock quản lý” thay hai thẻ kênh; altcoin chỉ nhận yêu cầu có `X-Hub-Token` (trừ `GET /health`); thanh chuyển Cổ phiếu / Altcoin ở cả hai phía, chỉ khi bật altcoin; `/_hub/command` chỉ với `X-Hub-Cmd-Token`, chỉ lệnh trong danh sách, lệnh ghi chỉ khi giữ quyền giao dịch và từng lệnh một (close quá giờ chờ rồi close lần hai: "đang có lệnh", không đóng hai lần) |
+| `altcoin_bridge` | Lệnh `/alt` và thông báo Altcoin qua bot Telegram và app Zoom của stock: cú pháp `/alt`, `/altcoin`, Zoom `alt status`; lệnh lạ và lệnh Altcoin gõ trần không bao giờ tới altcoin; HELP, `/docs` và lệnh stock không đổi khi altcoin tắt; quyền như lệnh stock; `xacnhan` đúng người (Zoom: theo JID thật), đúng cuộc trò chuyện, trong 120 giây, một lần; câu trả lời khi altcoin tắt, đang khởi động, đang chờ, chưa giữ quyền, đang bận, quá giờ, lỗi; thông báo có tiền tố, mỗi chat một lần, lọc tin tiếp quản, chống trùng, tối đa 15 tin/phút (🛑/⚠️ luôn gửi), công tắc `altcoin`, đếm tin bỏ/lỗi, che bí mật; kênh bị treo không làm kẹt pipe; `/alt zoomtest` |
 | `web`, `security_web`, `security_zoom`, `security_telegram` | Mật khẩu web, chặn POST chéo trang, giới hạn kích thước request, chữ ký Zoom, ghép đôi Zoom, chỉ người được phép mới ra lệnh Telegram, token không lộ trong log |
 
 Một số kiểm tra so với **số đã ghi lại** (ví dụ kết quả chiến lược Phòng thủ trên dữ liệu giả lập). Sửa chiến lược **có chủ đích** thì kiểm tra đó báo đổi: xem lại số mới rồi cập nhật trong file bộ kiểm thử. Bot không bao giờ chạy bộ kiểm thử; script tạo gói Botkeep bỏ thư mục `tests/` ra (có upload kèm cũng không sao).

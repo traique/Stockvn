@@ -10,6 +10,8 @@ replaces the configuration (a Zoom app without credentials stays off).
 - ``zoom_commands``: commands typed in Zoom (validation and uninstall events
   are still handled).
 - ``intraday``: the intraday alerts; its default is ``INTRADAY_ALERTS``.
+- ``altcoin``: the altcoin bot's notifications (vnbot.altcoin_bridge), which go where the
+  stock's go, ``telegram`` and ``zoom_notify`` included; the stock's never depend on it.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 
 from vnbot.jobs import write_text_atomic
 
-NAMES = ("telegram", "zoom_notify", "zoom_commands", "intraday")
+NAMES = ("telegram", "zoom_notify", "zoom_commands", "intraday", "altcoin")
 
 
 class Switches:

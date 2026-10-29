@@ -11,7 +11,8 @@ watchlist each weekday at DAILY_REPORT_TIME and runs the trading bot after the
 close at TRADE_TIME (never before 15:05, when the day's bar is final). With
 ALTCOIN_ENABLED=1 it also runs the altcoin bot (altcoin/) as a child process, started
 once the stock is up and stopped with it (vnbot.altcoin_host), its pages under /altcoin/
-behind the same password (vnbot.hub).
+behind the same password (vnbot.hub), its commands (/alt) and notifications through this
+process's Telegram bot and Zoom app (vnbot.altcoin_bridge).
 """
 
 import logging
@@ -60,10 +61,11 @@ def main() -> None:
     eventlog.install_redaction()    # tokens, keys and passwords masked in every log line
 
     web = LateApp()
-    from vnbot import altcoin_host, boot, webguard
+    from vnbot import altcoin_bridge, altcoin_host, boot, webguard
 
     throttle = webguard.LoginThrottle()     # one wrong-password counter for both sections
     altcoin = altcoin_host.Supervisor(SETTINGS.data_dir, SETTINGS.public_url)
+    bridge = altcoin_bridge.Bridge(altcoin)     # always: /alt then says why the altcoin is off
     app = web
     if altcoin.enabled:
         from vnbot import hub, ui
@@ -76,7 +78,7 @@ def main() -> None:
                  "not responding, its assigned port must match: set SERVER_PORT to it.", SETTINGS.port,
                  os.environ.get("SERVER_PORT", "-"), os.environ.get("PORT", "-"), os.environ.get("APP_PORT", "-"))
     stock_ready = threading.Event()
-    threading.Thread(target=_boot, args=(web, stock_ready, throttle), name="boot", daemon=True).start()
+    threading.Thread(target=_boot, args=(web, stock_ready, throttle, bridge), name="boot", daemon=True).start()
     altcoin.start(stock_ready)      # its own thread: waits for the stock, then starts the child
     try:
         # asyncio, not uvloop: ccxt (the altcoin's) installs uvloop; the stock keeps the loop it was tested on
@@ -98,10 +100,10 @@ def _stop_on_signal(stop) -> None:
         signal.signal(sig, handler)
 
 
-def _boot(web: LateApp, ready: threading.Event | None = None, throttle=None) -> None:
+def _boot(web: LateApp, ready: threading.Event | None = None, throttle=None, bridge=None) -> None:
     """Everything but the port: runs while the port already answers."""
     try:
-        web.ready(_start(throttle))
+        web.ready(_start(throttle, bridge))
     except Exception as exc:  # noqa: BLE001 - shown on every page and /health, and logged
         logging.exception("Start failed")
         web.failed(f"{type(exc).__name__}: {exc}"[:300])
@@ -110,7 +112,7 @@ def _boot(web: LateApp, ready: threading.Event | None = None, throttle=None) -> 
             ready.set()
 
 
-def _start(throttle=None):
+def _start(throttle=None, bridge=None):
     from tradingagents.llm_clients.fallback_client import configured_order
     from vnbot.channels import Switches
     from vnbot.intraday import IntradayMonitor
@@ -147,6 +149,7 @@ def _start(throttle=None):
     bot = TelegramBot(SETTINGS, jobs, watchlist)
     switches = Switches(SETTINGS.data_dir, {"intraday": SETTINGS.intraday_alerts})   # the switches on /ai
     bot.switches = switches
+    bot.alt = bridge                    # /alt <lệnh>: the altcoin bot (vnbot.altcoin_bridge)
     zoom = ZoomChannel(state_path=SETTINGS.data_dir / "zoom_state.json")
     zoom.public_url = SETTINGS.public_url
     if zoom.enabled:
@@ -175,6 +178,8 @@ def _start(throttle=None):
                  SETTINGS.trade_mode, "on" if SETTINGS.calibrate else "off", SETTINGS.trade_time,
                  SETTINGS.daily_report_time)
 
+    if bridge is not None:
+        bridge.attach(bot)              # the altcoin's notifications: from now on to the stock's channels
     return create_app(SETTINGS, jobs, watchlist, trader=trader, zoom=zoom, switches=switches, throttle=throttle)
 
 

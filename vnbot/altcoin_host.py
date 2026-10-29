@@ -23,8 +23,10 @@ Off unless ALTCOIN_ENABLED=1: then nothing starts and nothing changes but one lo
   (back to 20 s after 15 minutes of good run).
 - Its output is printed as "[altcoin] ..." with every known secret masked, and the last 200
   lines kept (shown on the 503 page of /altcoin/). Its state and its notifications come
-  through a pipe (one JSON line each); the notifications are printed as "[altcoin-notify] ..."
-  for now. Its pages are served under /altcoin/ by vnbot.hub, through ``upstream()``.
+  through a pipe (one JSON line each); each notification is printed as "[altcoin-notify] ..."
+  and handed to ``on_notify`` (vnbot.altcoin_bridge: the stock's channels). Its pages are
+  served under /altcoin/ by vnbot.hub, through ``upstream()``; the /alt commands reach it
+  through ``command_target()``.
 - ``stop()``: SIGTERM, 15 s to release the leader lock, SIGKILL. The child also dies with
   the stock process and is the first the kernel kills when memory runs out.
 
@@ -223,13 +225,15 @@ class Supervisor:
         self._proc: subprocess.Popen | None = None
         self._readers: list[threading.Thread] = []
         self._tokens = ("", "")                 # HUB_TOKEN, HUB_CMD_TOKEN of the running child
+        self.on_notify = None                   # (text) -> None, never blocking: vnbot.altcoin_bridge
         self._panel = {"ignored_keys": [], "dropped_secrets": []}
         self._child: dict = {}
         self._spawns = 0
         self._snap = {"state": "starting" if self.enabled else "off", "reason": None, "pid": None, "port": None,
                       "started": None, "restarts": 0, "last_exit": None, "version": None, "build": None,
                       "leader": False, "mode": self.mode, "live_error": self.live_error, "seam_ok": None,
-                      "bridge": {"notified": 0, "dropped": 0, "last_notify_ts": None},
+                      "bridge": {"notified": 0, "muted": 0, "dropped": 0, "deduped": 0, "send_failed": 0,
+                                 "last_notify_ts": None, "last_cmd_ts": None},
                       "dropped_secrets": [], "ignored_keys": []}
 
     # ── what the stock reads ──
@@ -247,14 +251,23 @@ class Supervisor:
         snap = self._snap
         return (snap["port"], self._tokens[0]) if snap["state"] == "running" and snap["port"] else None
 
+    def command_target(self) -> tuple[int, str] | None:
+        """(port, HUB_CMD_TOKEN) of the running child, for the /alt bridge; None while it is not running."""
+        snap = self._snap
+        return (snap["port"], self._tokens[1]) if snap["state"] == "running" and snap["port"] else None
+
     def _set(self, **fields) -> None:
         with self._state_lock:
             self._snap = {**self._snap, **fields}
 
-    def _count(self, name: str, **extra) -> None:
+    def count(self, name: str | None = None, **extra) -> None:
+        """One more in a counter of ``bridge`` (notified, muted, dropped, deduped, send_failed), and
+        ``extra`` fields set (last_notify_ts, last_cmd_ts); vnbot.altcoin_bridge counts here too."""
         with self._state_lock:
-            bridge = self._snap["bridge"]
-            self._snap = {**self._snap, "bridge": {**bridge, name: bridge[name] + 1, **extra}}
+            bridge = {**self._snap["bridge"], **extra}
+            if name:
+                bridge[name] += 1
+            self._snap = {**self._snap, "bridge": bridge}
 
     # ── start / stop ──
     def start(self, stock_ready: threading.Event | None = None) -> None:
@@ -457,12 +470,12 @@ class Supervisor:
                     if skip:                 # the end of a line already dropped
                         skip = False
                     elif len(line) > MAX_LINE:
-                        self._count("dropped")
+                        self.count("dropped")
                     else:
                         self._frame(line)
                 if len(buf) > MAX_LINE:
                     if not skip:
-                        self._count("dropped")
+                        self.count("dropped")
                     buf, skip = b"", True
 
     def _frame(self, line: bytes) -> None:
@@ -485,7 +498,13 @@ class Supervisor:
         elif kind == "notify":
             from vnbot.eventlog import redact
 
-            print(f"[altcoin-notify] {redact(str(frame.get('text', ''))).replace(chr(10), ' | ')}\n", end="", flush=True)
-            self._count("notified", last_notify_ts=time.time())
+            text = str(frame.get("text", ""))
+            print(f"[altcoin-notify] {redact(text).replace(chr(10), ' | ')}\n", end="", flush=True)
+            self.count("notified", last_notify_ts=time.time())
+            if self.on_notify is not None:
+                try:
+                    self.on_notify(text)
+                except Exception:  # noqa: BLE001 - this thread must keep draining the pipe
+                    logger.exception("Altcoin: chuyển thông báo cho cầu nối lỗi")
         else:
-            self._count("dropped")
+            self.count("dropped")
