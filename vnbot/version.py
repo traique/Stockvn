@@ -26,7 +26,7 @@ from pathlib import Path
 
 VERSION = "v1.15.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "bc6c262"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "b07a8e5"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -39,6 +39,10 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Tự chặn DB rỗng, DB của Cổ phiếu và instance Altcoin thứ hai; Altcoin lỗi thì tự chạy lại",
         "Chặn chạy paper khi DB còn lệnh live đang mở (và ngược lại); ALTCOIN_FRESH_START chỉ cho paper",
         "/health thêm trạng thái Altcoin; log Altcoin có tiền tố [altcoin], đã che bí mật",
+        "Trang Altcoin ở /altcoin/, cùng mật khẩu WEB_PASSWORD; thanh chuyển Cổ phiếu / Altcoin trên mọi trang",
+        "Sai mật khẩu ở Cổ phiếu hay Altcoin đều tính chung để khoá; form gửi từ trang khác bị chặn ở cả hai",
+        "/altcoin/hub.json (cần mật khẩu): trạng thái chi tiết của Altcoin; Altcoin tắt hay lỗi thì báo rõ lý do",
+        "Cài đặt Altcoin: kênh Telegram/Zoom do Cổ phiếu quản lý; /altcoin/zoom chuyển sang /zoom của Cổ phiếu",
         "Cần Python 3.12 trở lên",
     )),
     ("v1.14.0", "2026-10-28", (

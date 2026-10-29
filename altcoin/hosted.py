@@ -33,6 +33,10 @@ process) starts and watches. Outside the altcoin fingerprint (``bot/**`` + ``run
    While the bot runs, it also reads ``heartbeats``: this instance name alive on another
    host (the old server started again: same name, same leader lock, both would trade)
    stops this child with exit 75.
+7. The web pages, served by the stock's Hub under /altcoin/ (vnbot/hub.py): only a request
+   carrying HUB_TOKEN gets in (HUB_CMD_TOKEN for /_hub/*; GET /health is the supervisor's
+   probe); "/x" links and redirects get the prefix; the section switch (Cổ phiếu / Altcoin)
+   heads every page; the channel cards of /caidat become one "Kênh do Stock quản lý" card.
 
 Exit codes: 78 = configuration refused (not restarted), 75 = wait (retried).
 """
@@ -43,6 +47,7 @@ import argparse
 import ctypes
 import fcntl
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -78,6 +83,21 @@ FUNDED = "hosted.funded"       # in DATA_DIR: written once the bot has run on a 
 OPEN_OTHER = {"paper": "DB có lệnh live đang mở – chạy paper sẽ đóng ảo chúng, lệnh thật trên OKX bị bỏ mặc: "
                        "bật lại live hoặc đóng lệnh trước",
               "live": "DB có lệnh paper đang mở – chạy live sẽ quản lý chúng như lệnh thật: đóng chúng ở paper trước"}
+PREFIX = "/altcoin"             # where the stock's Hub serves these pages (vnbot/hub.py PREFIX)
+# The section switch, as the stock's pages have it (vnbot/ui.py sections()), the current one marked
+SECTIONS = ('<nav class="seg sections" aria-label="Khu vực"><a href="/">Cổ phiếu</a>'
+            f'<a href="{PREFIX}/" class="on" aria-current="true">Altcoin</a></nav>')
+SECTIONS_CSS = (".sections{display:flex;gap:2px;padding:3px;border-radius:12px;background:var(--surface-2);"
+                "border:1px solid var(--line);flex:none}.sections a{padding:6px 11px;border-radius:9px;color:var(--ink-2);"
+                "font-weight:600;font-size:13px;white-space:nowrap}.sections a:hover{text-decoration:none;color:var(--ink)}"
+                ".sections a.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}")
+# The channels are the stock's: its switches (/ai#kenh), its Zoom pairing (/zoom), the /alt commands.
+# "@stock/" links: left alone by the prefix rewrite, then made "/".
+STOCK_CHANNELS = ('Thông báo Altcoin đi qua bot Telegram và app Zoom của Cổ phiếu, mở đầu bằng “🪙 Altcoin ›”. '
+                  'Bật/tắt ở <a href="@stock/ai#kenh">Kênh thông báo</a> của Cổ phiếu (công tắc Altcoin, Telegram, '
+                  'Zoom); ghép đôi Zoom ở <a href="@stock/zoom">Cấu hình Zoom</a>. Lệnh: <code>/alt status</code> '
+                  'trên Telegram, <code>alt status</code> trên Zoom (gõ <code>/alt</code> để xem lệnh).')
+STOCK_CARD_TITLE = "Kênh do Stock quản lý"
 TOKENS: dict[str, str] = {}    # HUB_TOKEN / HUB_CMD_TOKEN, for the web proxy and the /alt commands
 HUB: Hub | None = None
 _LOCK = None                   # <DATA_DIR>/hosted.lock, held (flock) for the life of the process
@@ -452,10 +472,92 @@ def install_seams(bm) -> None:
         log.error("Seam bot.main.Telegram không còn: thông báo Altcoin không tới được Cổ phiếu")
 
 
+class HubGate:
+    """ASGI middleware of the dashboard: only the stock process gets in. X-Hub-Token on every
+    request (X-Hub-Cmd-Token on /_hub/*: the Hub never sends it), compared in constant time;
+    GET /health alone goes without (the supervisor's probe). A "/x" Location gets the prefix."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if not (path == "/health" and scope.get("method") == "GET"):
+            cmd = path == "/_hub" or path.startswith("/_hub/")
+            want = TOKENS.get("cmd" if cmd else "hub", "")
+            name = b"x-hub-cmd-token" if cmd else b"x-hub-token"
+            got = next((v for k, v in scope.get("headers") or [] if k == name), b"")
+            if not want or not hmac.compare_digest(got, want.encode()):
+                await send({"type": "http.response.start", "status": 403,
+                            "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", b"9")]})
+                await send({"type": "http.response.body", "body": b"Forbidden"})
+                return
+
+        async def prefixed(message):
+            if message["type"] == "http.response.start":
+                message["headers"] = [(k, PREFIX.encode() + v if k.lower() == b"location" and v.startswith(b"/")
+                                       and not v.startswith((b"//", PREFIX.encode() + b"/")) else v)
+                                      for k, v in message.get("headers") or []]
+            await send(message)
+
+        await self.app(scope, receive, prefixed)
+
+
+def adapt() -> list[str]:
+    """Step 7 of the docstring, by wrapping bot.ui.page, bot.ui.card and bot.dashboard.build_app
+    (looked up when called). Returns the seams that are gone, each logged: the pages still work
+    without them (the Hub still asks for the password and still blocks the old channel routes)."""
+    from bot import dashboard, ui
+
+    seams = {"ui.page": (ui, "page"), "ui.card": (ui, "card"), "dashboard.build_app": (dashboard, "build_app")}
+    missing = [name for name, (mod, attr) in seams.items() if not callable(getattr(mod, attr, None))]
+    for name in missing:
+        log.error("Seam %s không còn: trang Altcoin chạy thiếu phần thích nghi của nó", name)
+    if "ui.card" not in missing:
+        card = ui.card
+
+        def stock_card(title, *args, **kw):
+            if title == "Thông báo & tin nhắn":
+                return card(STOCK_CARD_TITLE, f"<p>{STOCK_CHANNELS}</p>", sub="Telegram và Zoom dùng chung với Cổ phiếu")
+            if title == "Zoom" and kw.get("sub") == "Kiểm tra và gửi thử thông báo":
+                return ""
+            return card(title, *args, **kw)
+
+        ui.card = stock_card
+    if "ui.page" not in missing:
+        page = ui.page
+
+        def prefixed_page(*args, **kw):
+            html = page(*args, **kw)
+            if kw.get("active") == "settings" and STOCK_CARD_TITLE not in html:     # the card seam is gone
+                html = html.replace('<main id="main">',
+                                    f'<main id="main"><div class="alert alert-info" role="status">{STOCK_CHANNELS}</div>', 1)
+            html = re.sub(r'\b(href|action|formaction)="/(?!/)', rf'\1="{PREFIX}/', html)
+            html = html.replace('="@stock/', '="/')
+            html = html.replace("</style></head>", SECTIONS_CSS + "</style></head>", 1)
+            return html.replace('<div class="top-in">', '<div class="top-in">' + SECTIONS, 1)
+
+        ui.page = prefixed_page
+    if "dashboard.build_app" not in missing:
+        build = dashboard.build_app
+
+        def gated_app(bot):
+            app = build(bot)
+            app.add_middleware(HubGate)
+            return app
+
+        dashboard.build_app = gated_app
+    return missing
+
+
 def launch() -> None:
     import bot.main as bm
 
     install_seams(bm)
+    adapt()
     try:
         bm.main()
     except KeyboardInterrupt:       # SIGTERM outside the loop's own try (the 10 s pause after an error)

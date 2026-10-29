@@ -22,8 +22,9 @@ Off unless ALTCOIN_ENABLED=1: then nothing starts and nothing changes but one lo
   LEADER_TTL + 10 s; anything else: started again after 20 s, doubling up to 10 minutes
   (back to 20 s after 15 minutes of good run).
 - Its output is printed as "[altcoin] ..." with every known secret masked, and the last 200
-  lines kept. Its state and its notifications come through a pipe (one JSON line each);
-  the notifications are printed as "[altcoin-notify] ..." for now.
+  lines kept (shown on the 503 page of /altcoin/). Its state and its notifications come
+  through a pipe (one JSON line each); the notifications are printed as "[altcoin-notify] ..."
+  for now. Its pages are served under /altcoin/ by vnbot.hub, through ``upstream()``.
 - ``stop()``: SIGTERM, 15 s to release the leader lock, SIGKILL. The child also dies with
   the stock process and is the first the kernel kills when memory runs out.
 
@@ -241,6 +242,11 @@ class Supervisor:
         """The public /health gets the state alone: no mode, reason, leader or counters."""
         return {"altcoin": {"state": self._snap["state"]}}
 
+    def upstream(self) -> tuple[int, str] | None:
+        """(port, HUB_TOKEN) of the running child, for the Hub's proxy; None while it is not running."""
+        snap = self._snap
+        return (snap["port"], self._tokens[0]) if snap["state"] == "running" and snap["port"] else None
+
     def _set(self, **fields) -> None:
         with self._state_lock:
             self._snap = {**self._snap, **fields}
@@ -437,7 +443,7 @@ class Supervisor:
             for raw in stream:
                 line = redact(raw.decode("utf-8", "replace").rstrip("\r\n"))
                 self.lines.append(line)
-                print(f"[altcoin] {line}", flush=True)
+                print(f"[altcoin] {line}\n", end="", flush=True)      # one write: the hub thread prints too
 
     def _read_hub(self, fd: int) -> None:
         """The pipe, to its end (the child's exit): one JSON frame per line. Never waits on
@@ -479,7 +485,7 @@ class Supervisor:
         elif kind == "notify":
             from vnbot.eventlog import redact
 
-            print(f"[altcoin-notify] {redact(str(frame.get('text', ''))).replace(chr(10), ' | ')}", flush=True)
+            print(f"[altcoin-notify] {redact(str(frame.get('text', ''))).replace(chr(10), ' | ')}\n", end="", flush=True)
             self._count("notified", last_notify_ts=time.time())
         else:
             self._count("dropped")
