@@ -309,6 +309,9 @@ input.switch:checked::after{transform:translateX(12px);box-shadow:none}
   cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .seg button.on,.seg button[aria-selected=true],.seg a.on,.seg button[aria-pressed=true]{background:var(--surface);color:var(--text);box-shadow:var(--edge-stock)}
 .seg a:hover{text-decoration:none;color:var(--text)}
+/* the two sections of the site (with the altcoin on): in the sidebar, compact in the phone bar */
+.sidebar .sections{margin:0 var(--space-xs) var(--space-sm)}
+.topbar .sections{display:inline-flex;width:auto;flex:none}.topbar .sections a{flex:none;min-height:28px;padding:0 var(--space-xs)}
 .tabs{display:flex;gap:var(--space-lg);border-bottom:1px solid var(--border);margin-bottom:var(--gap);overflow-x:auto}
 .tabs button{position:relative;min-height:36px;padding:var(--space-xs) 0;border:0;background:none;color:var(--muted);cursor:pointer;white-space:nowrap}
 .tabs button[aria-selected=true]{color:var(--text)}
@@ -525,6 +528,11 @@ MOON = icon("moon", "i-moon")
 e = html.escape
 NONE = "chưa có"   # a figure that is missing (a zero is a zero)
 
+# Set by main_botkeep when the altcoin runs beside the stock: a callable giving its state
+# (vnbot.altcoin_host.Supervisor.state). Unset, the pages are the stock's alone, as before.
+SECTIONS = None
+_ALT_LABEL = {"running": "", "starting": " (đang khởi động)", "waiting": " (chờ instance khác)", "backoff": " (lỗi)"}
+
 # The sidebar: the main screens, then the tools and the system pages (key, path, label, icon).
 NAV = (("home", "/", "Tổng quan", "home"), ("taisan", "/taisan", "Danh mục", "wallet"))
 TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("thamdinh", "/thamdinh", "AI thẩm định tín hiệu", "spark"),
@@ -568,15 +576,34 @@ def sidebar_nav(active: str, show_bot: bool) -> str:
             f'<div class="group-label">Hệ thống</div>{system}</nav>')
 
 
+def sections(compact: bool = False) -> str:
+    """The switch between the two sections, Cổ phiếu (/) and Altcoin (/altcoin/, its state
+    beside its name); the altcoin's pages carry the same (altcoin/hosted.py). Empty unless
+    SECTIONS is set. ``compact``: the phone bar's, names only."""
+    if SECTIONS is None:
+        return ""
+    try:
+        snap = SECTIONS()
+        state = _ALT_LABEL.get(snap.get("state"), " (tắt)")
+        if snap.get("state") == "running" and snap.get("seam_ok") is False:
+            state = " (lỗi kênh)"
+    except Exception:  # noqa: BLE001 - a page never fails on it
+        state = ""
+    return ('<nav class="seg sections" aria-label="Khu vực"><a href="/" class="on" aria-current="true">Cổ phiếu</a>'
+            f'<a href="/altcoin/">Altcoin{"" if compact else e(state)}</a></nav>')
+
+
 def theme_button() -> str:
     return (f'<button class="nav-item" id="theme-toggle" type="button" aria-label="Đổi giao diện sáng/tối">{MOON}{SUN}'
             "<span>Sáng / tối</span></button>")
 
 
 def shell(title: str, body: str, *, nav: str, bottom: str = "", foot: str = "", refresh: int | None = None,
-          brand_href: str = "/", brand_sub: str = "TradingAgents VN", head: str = "") -> str:
+          brand_href: str = "/", brand_sub: str = "TradingAgents VN", head: str = "", sections: str = "",
+          sections_compact: str = "") -> str:
     """The page: the sidebar (``nav`` and ``bottom``), the canvas with ``body`` and the
-    footer lines ``foot``. ``title`` is the document title and the phone bar's name."""
+    footer lines ``foot``. ``title`` is the document title and the phone bar's name;
+    ``sections``: the section switch under the brand, ``sections_compact`` in the phone bar."""
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
     return (
         '<!doctype html><html lang="vi"><head><meta charset="utf-8">'
@@ -589,9 +616,9 @@ def shell(title: str, body: str, *, nav: str, bottom: str = "", foot: str = "", 
         '<div class="app">'
         f'<aside class="sidebar" id="sidebar"><a class="sheet-close" href="#main" aria-label="Đóng menu">{icon("x")}</a>'
         f'<a class="brand" href="{brand_href}" aria-label="LCTA, về trang đầu"><span class="bm">LCTA</span><span class="bs">{e(brand_sub)}</span></a>'
-        f'{nav}<div class="bottom">{bottom}</div></aside>'
+        f'{sections}{nav}<div class="bottom">{bottom}</div></aside>'
         '<div class="canvas">'
-        f'<header class="topbar"><span class="tt">{e(title)}</span>'
+        f'<header class="topbar"><span class="tt">{e(title)}</span>{sections_compact}'
         f'<a class="menu-toggle" href="#sidebar" aria-label="Mở menu">{icon("menu")}</a></header>'
         f'<main id="main" tabindex="-1">{body}</main>'
         f"<footer>{foot}</footer></div></div>{THEME_TOGGLE}</body></html>"
@@ -614,7 +641,10 @@ def page(title: str, body: str, *, active: str = "", refresh: int | None = None,
     bottom = date_line() + theme_button() + pill
     foot = ("<span>Thông tin chỉ mang tính tham khảo, không phải khuyến nghị đầu tư.</span>"
             "<span>Bot không đặt lệnh tới công ty chứng khoán.</span>" + foot)
-    return shell(title, body, nav=sidebar_nav(active, show_bot), bottom=bottom, foot=foot, refresh=refresh)
+    # The section switch shows the altcoin's state: not on the error pages, seen without the password
+    return shell(title, body, nav=sidebar_nav(active, show_bot), bottom=bottom, foot=foot, refresh=refresh,
+                 sections=sections() if show_version else "",
+                 sections_compact=sections(compact=True) if show_version else "")
 
 
 def title(text: str, lead: str = "", right: str = "") -> str:

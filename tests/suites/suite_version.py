@@ -28,8 +28,9 @@ t.ok("every release says what changed (short lines)", all(notes and all(0 < len(
 b = ver.build()
 t.ok("build: 7 hex characters, stable", re.fullmatch(r"[0-9a-f]{7}", b) and ver.build() == b, b)
 files = [p.relative_to(ver.ROOT).as_posix() for p in ver._code_files()]
-t.ok("build covers the code: tradingagents/, vnbot/, main_botkeep.py", "main_botkeep.py" in files
-     and any(f.startswith("tradingagents/") for f in files) and "vnbot/trader.py" in files, files[:5])
+t.ok("build covers the code: tradingagents/, vnbot/, main_botkeep.py, altcoin/hosted.py (not altcoin/bot/)",
+     "main_botkeep.py" in files and any(f.startswith("tradingagents/") for f in files) and "vnbot/trader.py" in files
+     and "altcoin/hosted.py" in files and not any(f.startswith("altcoin/bot/") for f in files), files[:5])
 t.ok("build leaves out version.py itself and the tests", "vnbot/version.py" not in files
      and not any(f.startswith("tests/") for f in files))
 

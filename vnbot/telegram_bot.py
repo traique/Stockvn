@@ -11,6 +11,7 @@ Commands (Vietnamese, like lananh-main's bot):
     /khop mua|ban MÃ KL GIÁ [NGÀY]  record a fill in the real book (signal mode)
     /von SỐ_TIỀN               set the real book's cash (signal mode)
     /id                        your Telegram id (to put in TELEGRAM_ALLOWED_IDS)
+    /alt <lệnh>                the altcoin bot (ALTCOIN_ENABLED=1), through vnbot.altcoin_bridge
 
 Only ids in TELEGRAM_ALLOWED_IDS are served; the analyses cost LLM quota.
 
@@ -35,6 +36,7 @@ from pathlib import Path
 
 import requests
 
+from vnbot import altcoin_bridge
 from vnbot.jobs import Job, JobQueue
 from vnbot.service import Watchlist, check_request, quick_text
 from vnbot.settings import Settings
@@ -130,7 +132,7 @@ HELP = (
     "đã chốt · /thamdinh lichsu - các phiên gần đây\n"
     "/thamdinh tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
-    "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n\n"
+    "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n{altcoin}\n"
     "Hành động và mọi mức giá do hệ thống định lượng chốt; các agent AI chỉ diễn giải."
 )
 
@@ -203,6 +205,7 @@ class TelegramBot:
         self.zoom = None          # vnbot.zoom.ZoomChannel: broadcasts go there too, its commands come here
         self.switches = None      # vnbot.channels.Switches: the on/off of each channel (all on when None)
         self.taisan = None        # vnbot.taisan.TaiSan: the owner's real-money portfolio (/ts...)
+        self.alt = None           # vnbot.altcoin_bridge.Bridge: the /alt commands (set by main_botkeep)
         # Commands of one chat run in order on one lane; a burst waits instead of
         # spawning a thread per message (the host has 2 GB).
         self._lanes = [ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"telegram-cmd-{i}")
@@ -222,8 +225,9 @@ class TelegramBot:
 
         from vnbot.taisan import TaiSan
 
+        altcoin = "/alt <lệnh> - bot Altcoin (OKX): gõ /alt để xem lệnh\n" if self.alt and self.alt.enabled else ""
         return HELP.format(trade_time=max(self.settings.trade_time, MIN_TRADE_TIME), version=VERSION,
-                           taisan=TaiSan.HELP)
+                           taisan=TaiSan.HELP, altcoin=altcoin)
 
     @property
     def enabled(self) -> bool:
@@ -264,26 +268,71 @@ class TelegramBot:
             raise RuntimeError(f"Telegram {method}: {payload.get('description')}")
         raise RuntimeError(f"Telegram {method}: still rate limited")
 
-    def send(self, chat_id: int, text: str) -> None:
+    def send(self, chat_id: int, text: str) -> bool:
+        """True when every part was sent (a Zoom reply: queued)."""
         if isinstance(chat_id, str) and chat_id.startswith("zoom:"):
             if self.zoom is not None:
                 self.zoom.reply(chat_id, redact(text))
-            return
+            return self.zoom is not None
+        sent = True
         for part in chunks(redact(text)):
             try:
                 self._call("sendMessage", chat_id=chat_id, text=part, disable_web_page_preview="true")
             except Exception:  # noqa: BLE001 - delivery failures are logged, not fatal
                 logger.exception("Telegram sendMessage to %s failed", chat_id)
+                sent = False
+        return sent
 
-    def broadcast(self, text: str) -> None:
+    def broadcast(self, text: str, on_fail=None) -> None:
         """Send to the report chats (the daily bot report, the calibration result) and Zoom,
-        each when its switch on the web page is on."""
+        each when its switch on the web page is on. ``on_fail()``: once per report chat that
+        did not get it, and when Zoom (with somewhere to send) did not."""
         if self.zoom is not None and self._switch("zoom_notify"):
-            self.zoom.send(redact(text))
+            self.zoom.send(redact(text), on_fail=on_fail if self.zoom.notify_on else None)
         if not self.enabled or not self._switch("telegram"):
             return
         for chat_id in sorted(self.settings.telegram_report_chat_ids):
-            self.send(chat_id, text)
+            if not self.send(chat_id, text) and on_fail is not None:
+                on_fail()
+
+    def alt_on(self) -> bool:
+        """The "altcoin" switch on /ai: the altcoin's notifications (the stock's never depend on it)."""
+        return self._switch("altcoin")
+
+    def alt_broadcast(self, text: str, on_fail=None) -> bool:
+        """An altcoin notification (vnbot.altcoin_bridge): where the stock's go, with the same
+        switches; False, and nothing sent, when the "altcoin" switch is off."""
+        if not self.alt_on():
+            return False
+        self.broadcast(text, on_fail=on_fail)
+        return True
+
+    def alt_test(self) -> str:
+        """/alt zoomtest: one test message where the altcoin's notifications go (no rate limit),
+        Zoom sent at once (not queued), and what each channel did."""
+        text = altcoin_bridge.PREFIX + "🧪 Tin thử kênh chung (thông báo Altcoin qua bot Cổ phiếu)"
+        if not self.alt_on():
+            return altcoin_bridge.PREFIX + "zoomtest\nCông tắc Altcoin đang tắt (trang /ai, Kênh thông báo): không gửi gì."
+        lines = []
+        if self.zoom is None:
+            lines.append("Zoom: chưa cấu hình")
+        elif not self._switch("zoom_notify"):
+            lines.append("Zoom: công tắc đang tắt")
+        else:
+            try:
+                took = self.zoom.deliver(("notify", redact(text), None))
+            except Exception:  # noqa: BLE001 - reported as not received
+                logger.exception("Zoom: altcoin test message failed")
+                took = False
+            lines.append("Zoom: nhận" if took else "Zoom: không nhận")
+        if not self.enabled:
+            lines.append("Telegram: chưa cấu hình (TELEGRAM_TOKEN)")
+        elif not self._switch("telegram"):
+            lines.append("Telegram: công tắc đang tắt")
+        else:
+            lines += [f"Telegram {chat_id}: {'OK' if self.send(chat_id, text) else 'lỗi'}"
+                      for chat_id in sorted(self.settings.telegram_report_chat_ids)]
+        return altcoin_bridge.PREFIX + "zoomtest\n" + "\n".join(lines)
 
     def _switch(self, name: str) -> bool:
         return self.switches is None or self.switches.on(name)
@@ -404,8 +453,10 @@ class TelegramBot:
             raise
 
     def zoom_command(self, target: str, text: str) -> None:
-        """A command typed in Zoom by an allowed sender; runs on a lane like a Telegram one."""
-        message = {"chat": {"id": target}, "from": {"id": ZOOM_USER}, "text": text}
+        """A command typed in Zoom by an allowed sender; runs on a lane like a Telegram one. The
+        sender's real JID and the chat ride along (the two-step /alt commands); its id stays ZOOM_USER."""
+        jid, chat = self.zoom.sender(target) if self.zoom is not None else ("", "")
+        message = {"chat": {"id": target}, "from": {"id": ZOOM_USER, "jid": jid, "chat": chat}, "text": text}
         with self._queued_lock:
             if self._queued >= MAX_QUEUED_COMMANDS:
                 full = True
@@ -532,6 +583,10 @@ class TelegramBot:
                 self._why(chat_id, args)
             elif command in ("/danhmuc", "/lenh", "/hieuchinh", "/khop", "/von", "/chay", "/thuong"):
                 self._trading(chat_id, command, args)
+            elif command in ("/alt", "/altcoin") and self.alt is not None:
+                self._altcoin(chat_id, args, message)
+            elif command in altcoin_bridge.BARE and self.alt is not None and self.alt.enabled:
+                self.send(chat_id, f"Lệnh Altcoin giờ gõ /alt <lệnh>, ví dụ /alt {command[1:]} (gõ /alt để xem lệnh).")
             else:
                 self.send(chat_id, self._help())
         except ValueError as exc:
@@ -539,6 +594,19 @@ class TelegramBot:
         except Exception as exc:  # noqa: BLE001
             logger.exception("Command %s failed", command)
             self.send(chat_id, f"⚠️ Lỗi: {redact(exc)}")
+
+    def _altcoin(self, chat_id, args: str, message: dict) -> None:
+        """/alt <lệnh>: the altcoin bot (vnbot.altcoin_bridge). A two-step command is keyed by who
+        typed it and where: Telegram (user id, chat), Zoom (the sender's JID, the reply JID)."""
+        sender = message.get("from") or {}
+        if sender.get("id") == ZOOM_USER:
+            key, source = ("zoom", sender.get("jid") or "", sender.get("chat") or ""), "Zoom"
+        else:
+            key, source = ("telegram", sender.get("id"), chat_id), "Telegram"
+        if self.alt.enabled and (args.split() or [""])[0].lower() == "zoomtest":   # off: the bridge says so
+            self.send(chat_id, self.alt_test())
+        else:
+            self.alt.command(args, key, source, lambda text: self.send(chat_id, text))
 
     def _analyze(self, chat_id: int, args: str) -> None:
         parts = args.split()

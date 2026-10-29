@@ -6,18 +6,16 @@ Two independent parts, either one or both:
    critic, intraday alerts) also goes to Zoom:
    - an Incoming Webhook into one channel: ``ZOOM_WEBHOOK_URL`` + ``ZOOM_WEBHOOK_TOKEN``;
    - or a chatbot message (``ZOOM_CLIENT_ID``, ``ZOOM_CLIENT_SECRET``, ``ZOOM_BOT_JID``,
-     ``ZOOM_ACCOUNT_ID``) to the paired JID, or to ``ZOOM_TO_JID`` when set. Sending needs
-     only these credentials, so the OKX bot's chatbot app can be reused for
-     notifications: put the same values and, as ``ZOOM_TO_JID``, the JID the OKX
-     bot is paired with.
-2. Commands (``/webhook/zoom``): the same commands as Telegram, typed in Zoom.
+     ``ZOOM_ACCOUNT_ID``) to the paired JID, or to ``ZOOM_TO_JID`` when set.
+   The altcoin bot's notifications (vnbot.altcoin_bridge) come the same way.
+2. Commands (``/webhook/zoom``): the same commands as Telegram, typed in Zoom, the
+   altcoin bot's included ("alt status"): one app for both sections.
    Requests are checked by HMAC (``ZOOM_SECRET_TOKEN``). Exactly one JID may
    command the bot, paired like the OKX bot: a stranger who writes is refused,
    the owner is told their JID on Telegram and pairs it with ``/zoompair <JID>``
    or the button on ``/zoom``; ``ZOOM_ALLOWED_USERS`` (JIDs or emails) are let in
    and paired on their first message. Uninstalling the app deletes the pairing.
-   A Zoom app has a single bot endpoint URL, so commands need an app of this
-   bot's own: an app already pointed at the OKX bot sends its commands there.
+   The handler gets (target, text); ``sender(target)`` tells who typed it and where.
 
 Zoom specifics kept from the OKX bot: a 1:1 reply goes to the sender's JID (the
 message's toJid is the bot itself there, error 7004), Markdown is converted to
@@ -284,6 +282,12 @@ class ZoomChannel:
             return
         self._put(("reply", text, where))
 
+    def sender(self, target: str) -> tuple[str, str]:
+        """(sender JID, reply JID) of the command that made ``target``: who typed it, and where."""
+        with self._lock:
+            where = self._targets.get(target) or {}
+        return where.get("user_jid", ""), where.get("to_jid", "")
+
     def _put(self, item) -> bool:
         try:
             self.queue.put_nowait(item)
@@ -306,6 +310,7 @@ class ZoomChannel:
                     on_fail()
                 except Exception:  # noqa: BLE001
                     logger.exception("Zoom: fallback of an undelivered notification failed")
+            self.queue.task_done()      # vnbot.altcoin_bridge flush(): waits for unfinished_tasks at shutdown
 
     def deliver(self, item) -> bool:
         """Send one queued item; for a notification, True when a Zoom channel took it."""

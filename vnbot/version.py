@@ -4,7 +4,8 @@ changes.
 
 - ``VERSION`` / ``RELEASED``: the release, with ``NOTES`` (newest first).
 - ``build()``: a short fingerprint of the code that is running (every ``.py`` file of
-  ``tradingagents/``, ``vnbot/`` and ``main_botkeep.py``, this file excepted). The same
+  ``tradingagents/``, ``vnbot/``, ``main_botkeep.py`` and ``altcoin/hosted.py`` - the altcoin's
+  glue, outside its own fingerprint -, this file excepted). The same
   files give the same fingerprint on any machine, so it tells whether the server runs
   exactly the released code (``RELEASE_BUILD``) or a partial upload / a local edit.
 - After changing the code on purpose: raise ``VERSION`` (vMAJOR.MINOR.PATCH), add its ``NOTES``, then
@@ -24,13 +25,36 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.14.0"
-RELEASED = "2026-10-28"
-RELEASE_BUILD = "7eaa3df"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.15.0"
+RELEASED = "2026-10-29"
+RELEASE_BUILD = "3733221"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.15.0", "2026-10-29", (
+        "Bot Altcoin (OKX) chạy cùng server, là tiến trình con có giám sát; mặc định tắt, bật bằng ALTCOIN_ENABLED=1",
+        "Altcoin dùng DB riêng (data/altcoin), không bao giờ dùng DB, token Telegram hay khoá Zoom của Cổ phiếu",
+        "Chạy thật (live) chỉ khi đủ ALT_MODE, ALT_I_UNDERSTAND_THE_RISK, ALT_LIVE_ACK và khoá ALT_OKX_*",
+        "ALT_MODE=live mà thiếu điều kiện: Altcoin không chạy (không lùi về paper trên DB live)",
+        "Tự chặn DB rỗng, DB của Cổ phiếu và instance Altcoin thứ hai; Altcoin lỗi thì tự chạy lại",
+        "Chặn chạy paper khi DB còn lệnh live đang mở (và ngược lại); ALTCOIN_FRESH_START chỉ cho paper",
+        "/health thêm trạng thái Altcoin; log Altcoin có tiền tố [altcoin], đã che bí mật",
+        "Trang Altcoin ở /altcoin/, cùng mật khẩu WEB_PASSWORD; thanh chuyển Cổ phiếu / Altcoin trên mọi trang",
+        "Sai mật khẩu ở Cổ phiếu hay Altcoin đều tính chung để khoá; form gửi từ trang khác bị chặn ở cả hai",
+        "/altcoin/hub.json (cần mật khẩu): trạng thái chi tiết của Altcoin; Altcoin tắt hay lỗi thì báo rõ lý do",
+        "Cài đặt Altcoin: kênh Telegram/Zoom do Cổ phiếu quản lý; /altcoin/zoom chuyển sang /zoom của Cổ phiếu",
+        "Lệnh Altcoin trên bot Telegram và app Zoom của Cổ phiếu: /alt <lệnh> (hoặc /altcoin), Zoom gõ alt <lệnh>",
+        "/alt close, apply, resume phải gõ thêm xacnhan trong 120 giây; /close, /status... gõ trần chỉ nhận gợi ý",
+        "Tin Altcoin tới cùng chat và Zoom của Cổ phiếu, mọi phần mở đầu “🪙 Altcoin ›”; công tắc Altcoin trên /ai",
+        "Thông báo Altcoin chống trùng, tối đa 15 tin/phút (tin 🛑/⚠️ luôn gửi); /alt zoomtest gửi thử từng kênh",
+        "Kèm Altcoin 3.2.1: khởi động lại server không còn cắt giữa lúc đặt lệnh live và lúc ghi DB",
+        "Khởi động lại server: tin Altcoin của những giây cuối (mở, đóng lệnh) được gửi xong rồi mới tắt",
+        "Altcoin bị kill giữa lúc ghi SQLite không còn kẹt khi chạy lại: DB tự phục hồi như bot chạy riêng",
+        "Trang /altcoin/ báo đỏ khi tin Altcoin không tới được Cổ phiếu hoặc có khoá bị che đã bị bỏ",
+        "Mã bản dựng của Cổ phiếu tính cả altcoin/hosted.py (file nối hai bot)",
+        "Cần Python 3.12 trở lên",
+    )),
     ("v1.14.0", "2026-10-28", (
         "Công tắc MUA breakout của Quant Engine (trang Bot giao dịch): tắt để thử trên sổ ảo, mặc định bật như cũ",
         "Tắt: mã breakout chỉ được THEO DÕI; kết quả bóng của chúng thành nhóm riêng ở /tinhieu và /vikhongmua",
@@ -153,8 +177,8 @@ _VN = timezone(timedelta(hours=7))
 def _code_files() -> list[Path]:
     files = sorted(p for d in ("tradingagents", "vnbot") for p in (ROOT / d).rglob("*.py")
                    if "__pycache__" not in p.parts)
-    main = ROOT / "main_botkeep.py"
-    return [p for p in files + ([main] if main.exists() else []) if p.resolve() != Path(__file__).resolve()]
+    extra = [p for p in (ROOT / "main_botkeep.py", ROOT / "altcoin" / "hosted.py") if p.exists()]
+    return [p for p in files + extra if p.resolve() != Path(__file__).resolve()]
 
 
 @lru_cache(maxsize=1)

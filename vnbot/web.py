@@ -10,29 +10,27 @@ out for a few minutes.
 
 from __future__ import annotations
 
-import base64
 import html
 import json
 import logging
-import secrets
-import threading
+import os
 import time
 from datetime import datetime
 from typing import Annotated
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from starlette.concurrency import run_in_threadpool
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from vnbot import ui
+from vnbot import ui, webguard
 from vnbot.jobs import Job, JobQueue
 from vnbot.service import Watchlist, check_request, quick_text, today_vn
 from vnbot.settings import Settings
+from vnbot.webguard import LoginThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -168,11 +166,6 @@ def _switch_form(key: str, on: bool) -> str:
             f'<span class="st">{"Bật" if on else "Tắt"}</span></button></form>')
 
 
-# Module level: the dependency annotations below are strings (postponed
-# evaluation), which FastAPI resolves in module scope.
-_BASIC = HTTPBasic(auto_error=False)
-
-
 def _page(title: str, body: str, refresh: int | None = None, *, active: str = "", status_code: int = 200,
           show_bot: bool = True) -> HTMLResponse:
     # Error pages (status >= 400) can be seen without the password: no version on them.
@@ -183,57 +176,6 @@ def _page(title: str, body: str, refresh: int | None = None, *, active: str = ""
 def _when(ts: float | None) -> str:
     """An epoch time in Vietnam time, whatever the server's own zone (often UTC)."""
     return datetime.fromtimestamp(ts, VN_TZ).strftime("%d/%m %H:%M") if ts else ""
-
-
-class LoginThrottle:
-    """Wrong-password counter per client: after ``max_failures`` within ``window``
-    seconds that client is refused for ``lockout`` seconds, right password or not.
-
-    In memory only (one process); the table is bounded so a scan of many
-    addresses cannot grow it without limit.
-    """
-
-    def __init__(self, max_failures: int = 8, window: float = 600.0, lockout: float = 300.0,
-                 max_clients: int = 10_000, clock=time.monotonic):
-        self.max_failures, self.window, self.lockout = max_failures, window, lockout
-        self.max_clients, self.clock = max_clients, clock
-        self._failures: dict[str, list[float]] = {}
-        self._locked: dict[str, float] = {}
-        self._lock = threading.Lock()
-
-    def retry_after(self, client: str) -> int:
-        """Seconds left on ``client``'s lockout, 0 when it may try."""
-        with self._lock:
-            until = self._locked.get(client)
-            if until is None:
-                return 0
-            left = until - self.clock()
-            if left <= 0:
-                del self._locked[client]
-                return 0
-            return int(left) + 1
-
-    def failure(self, client: str) -> None:
-        with self._lock:
-            now = self.clock()
-            recent = [t for t in self._failures.get(client, []) if now - t < self.window] + [now]
-            if len(recent) >= self.max_failures:
-                self._failures.pop(client, None)
-                self._locked[client] = now + self.lockout
-            else:
-                self._failures[client] = recent
-            if len(self._failures) + len(self._locked) > self.max_clients:
-                self._prune(now)
-
-    def success(self, client: str) -> None:
-        with self._lock:
-            self._failures.pop(client, None)
-
-    def _prune(self, now: float) -> None:
-        self._locked = {c: u for c, u in self._locked.items() if u > now}
-        self._failures = {c: ts for c, ts in self._failures.items() if ts and now - ts[-1] < self.window}
-        while self._failures and len(self._failures) + len(self._locked) > self.max_clients:
-            self._failures.pop(next(iter(self._failures)))   # the oldest first seen
 
 
 def _client(request: Request) -> str:
@@ -249,16 +191,6 @@ def _job_row(job: Job) -> str:
             f"<td>{ui.status_badge(job.status)}</td>"
             f'<td class="muted small">{_SOURCE_VI.get(job.source, html.escape(job.source))}</td>'
             f'<td class="muted small num">{_when(job.created)}</td></tr>')
-
-
-LOCKED_MESSAGE = (
-    "Trang web đang được khoá do chưa thiết lập WEB_PASSWORD. Vui lòng bổ sung WEB_PASSWORD trong cấu hình "
-    "rồi khởi động lại máy chủ; bot Telegram vẫn hoạt động bình thường."
-)
-
-
-def _host(value: str) -> str:
-    return (urlsplit(value).netloc if "//" in value else value).strip().lower()
 
 
 def _money(value) -> str:
@@ -456,7 +388,8 @@ def _bot_page(trader, msg: str = "") -> str:
 
 
 def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=None, zoom=None,
-               switches=None) -> FastAPI:
+               switches=None, throttle: LoginThrottle | None = None) -> FastAPI:
+    """``throttle``: the wrong-password counter, shared with the Hub (/altcoin/) when given."""
     from vnbot.channels import Switches
 
     app = FastAPI(title="TradingAgents VN", docs_url=None, redoc_url=None, openapi_url=None)
@@ -473,16 +406,8 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
 
     def password_in(scope) -> bool:
         """The request carries WEB_PASSWORD (HTTP Basic); the guard still checks it, throttled."""
-        if not settings.web_password:
-            return False
-        for name, value in scope.get("headers") or []:
-            if name == b"authorization":
-                kind, _, token = value.decode("latin-1").partition(" ")
-                if kind.lower() != "basic":
-                    return False
-                password = base64.b64decode(token.strip(), validate=True).decode("utf-8").partition(":")[2]
-                return secrets.compare_digest(password.encode("utf-8"), settings.web_password.encode("utf-8"))
-        return False
+        header = next((v.decode("latin-1") for k, v in scope.get("headers") or [] if k == b"authorization"), None)
+        return webguard.password_ok(header, settings.web_password)
 
     from vnbot import taisan_web
 
@@ -490,44 +415,19 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES,
                        wide={taisan_web.IMPORT_PATH: (taisan_web.MAX_UPLOAD_BYTES + 64 * 1024, password_in)})
 
-    throttle = LoginThrottle()
+    throttle = throttle or LoginThrottle()
     app.state.login_throttle = throttle
 
-    def guard(request: Request,
-              credentials: Annotated[HTTPBasicCredentials | None, Depends(_BASIC)] = None) -> None:
-        if not settings.web_password:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, LOCKED_MESSAGE)
-        client = _client(request)
-        wait = throttle.retry_after(client)
-        if wait:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
-                                f"Nhập sai mật khẩu quá nhiều lần. Vui lòng thử lại sau {wait // 60 + 1} phút.",
-                                headers={"Retry-After": str(wait)})
-        if credentials is None:   # the browser's first request, before it asks for the password
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Basic"})
-        if not secrets.compare_digest(credentials.password.encode("utf-8"), settings.web_password.encode("utf-8")):
-            throttle.failure(client)
-            logger.warning("Web: wrong password from %s", client)
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Basic"})
-        throttle.success(client)
+    def guard(request: Request) -> None:
+        refused = webguard.check_basic(request.headers.get("authorization"), settings.web_password, throttle,
+                                       _client(request))
+        if refused:
+            raise HTTPException(*refused)
 
     def same_origin(request: Request) -> None:
         """Refuse a form posted from another site (CSRF): Basic auth rides along with it."""
-        allowed = {_host(h) for h in (
-            request.headers.get("host", ""),
-            request.headers.get("x-forwarded-host", "").split(",")[0],
-            settings.public_url,
-        ) if h}
-        origin = request.headers.get("origin")
-        if origin is not None:
-            if origin == "null" or _host(origin) not in allowed:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "Yêu cầu gửi từ trang khác đã bị từ chối.")
-            return
-        if request.headers.get("sec-fetch-site") == "cross-site":
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Yêu cầu gửi từ trang khác đã bị từ chối.")
-        referer = request.headers.get("referer")
-        if referer and _host(referer) not in allowed:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Yêu cầu gửi từ trang khác đã bị từ chối.")
+        if not webguard.same_origin_ok(request.headers, settings.public_url):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, webguard.CROSS_SITE_MESSAGE)
 
     post_guard = [Depends(guard), Depends(same_origin)]
 
@@ -535,9 +435,9 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     async def health() -> JSONResponse:
         # Async: it must answer even when every threadpool worker is busy (a burst of sync
         # requests), or Botkeep sees "not responding" and restarts the bot.
-        from vnbot import version as ver
+        from vnbot import boot, version as ver
 
-        return JSONResponse({"ok": True, "time": time.time(), "version": ver.VERSION})
+        return JSONResponse({"ok": True, "time": time.time(), "version": ver.VERSION, **boot.health_fields()})
 
     @app.get("/phienban", dependencies=[Depends(guard)])
     def version_page() -> HTMLResponse:
@@ -829,6 +729,8 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             ("zoom_commands", "Zoom · nhận lệnh", bool(zoom and zoom.commands_on), "Lệnh gõ trong Zoom (/webhook/zoom)"),
             ("intraday", "Cảnh báo trong phiên", trader is not None and settings.trade_mode != "off",
              f"Mỗi {settings.intraday_interval_min} phút trong giờ khớp lệnh · không dùng AI"),
+            ("altcoin", "Altcoin · thông báo", (os.environ.get("ALTCOIN_ENABLED") or "").strip() == "1",
+             "Tin của bot Altcoin, mở đầu “🪙 Altcoin ›”, qua Telegram và Zoom ở trên; lệnh: /alt"),
         ]
         chrow = [f'<tr><td><b>{label}</b><div class="muted small">{html.escape(note)}</div></td>'
                  f"<td class='num'>{_switch_form(key, switches.on(key)) if ready else _UNSET_BADGE}</td></tr>"
@@ -847,7 +749,8 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
                       flush=True)
             + "</div>"
             + '<div class="mt">' + ui.card("Kênh thông báo", ui.table([("Kênh", ""), ("", "")], chrow, ""), flush=True,
-                                            action='<a class="btn btn-ghost" href="/zoom">Cấu hình Zoom</a>') + "</div>"
+                                            action='<a class="btn btn-ghost" href="/zoom">Cấu hình Zoom</a>',
+                                            id="kenh") + "</div>"
         )
         return _page("AI & cảnh báo", body, active="ai", show_bot=trader is not None and settings.trade_mode != "off")
 

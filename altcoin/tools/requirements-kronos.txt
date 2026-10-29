@@ -1,0 +1,12 @@
+# Thư viện cho tools/kronos_eval.py – CHỈ cài trên máy tính / VPS, KHÔNG cài cho bot trên Botkeep.
+# Cài torch bản CPU trước (bản mặc định trên Linux kéo CUDA 3–4 GB):
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch
+# rồi:
+#   pip install -r tools/requirements-kronos.txt
+numpy
+pandas
+einops==0.8.1
+huggingface_hub==0.33.1
+safetensors==0.6.2
+tqdm
+ccxt>=4.4

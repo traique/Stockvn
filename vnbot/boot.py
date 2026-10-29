@@ -7,6 +7,9 @@ second: ``/health`` answers 200 and the other pages say the bot is starting
 (503 with ``Retry-After``, refreshed every few seconds), until the real app is
 handed over with ``ready``. If the start fails, every page says so and points
 to the log, and ``/health`` answers 500, instead of the port going quiet.
+
+``health_extra`` (set by main_botkeep when the altcoin is on): more fields for every
+/health answer, this page's and the app's; fast, never raising, never a secret.
 """
 
 from __future__ import annotations
@@ -16,6 +19,15 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+health_extra = None     # a callable returning a dict (vnbot.altcoin_host.Supervisor.health)
+
+
+def health_fields() -> dict:
+    """The extra /health fields; none when unset or failing (/health must always answer)."""
+    try:
+        return dict(health_extra()) if health_extra is not None else {}
+    except Exception:  # noqa: BLE001
+        return {}
 
 _PAGE = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">{refresh}<title>{title} · TradingAgents VN</title>
@@ -72,7 +84,7 @@ class LateApp:
         if path == "/health":
             status = 500 if self.error else 200
             body = json.dumps({"ok": not self.error, "booting": not self.error, "version": VERSION,
-                               **({"error": self.error} if self.error else {})}).encode()
+                               **({"error": self.error} if self.error else {}), **health_fields()}).encode()
             await _respond(send, status, body, "application/json")
             return
         if self.error:

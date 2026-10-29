@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import logging
+import os
 import secrets
 import threading
 import time
@@ -204,9 +205,16 @@ COMMANDS = (
 )
 
 
+# Listed only when the altcoin bot runs (ALTCOIN_ENABLED=1), before trogiup.
+ALT_COMMAND = ("alt status", "Bot Altcoin (OKX): gõ alt để xem lệnh", "The altcoin bot (OKX): type alt for its commands")
+
+
 def docs_body() -> str:
+    commands = COMMANDS
+    if (os.environ.get("ALTCOIN_ENABLED") or "").strip() == "1":
+        commands = COMMANDS[:-1] + (ALT_COMMAND,) + COMMANDS[-1:]
     rows = "".join(f"<tr><td class='cmd'><code>{c}</code></td><td>{vi}</td><td class='muted en'>{en}</td></tr>"
-                   for c, vi, en in COMMANDS)
+                   for c, vi, en in commands)
     return f"""
 <h1>Hướng dẫn sử dụng</h1>
 <p>{APP_NAME} gửi báo cáo, ý kiến AI phản biện và cảnh báo trong phiên, và nhận lệnh qua Zoom Team Chat.</p>

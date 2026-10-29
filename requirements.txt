@@ -14,7 +14,14 @@ typing-extensions>=4.14.0
 tzdata>=2024.1
 fastapi>=0.110
 uvicorn>=0.29
+httpx>=0.27
 python-multipart>=0.0.9
 openpyxl>=3.1
 # Kho lịch sử trên PostgreSQL dùng chung (DATABASE_URL); không đặt thì bot dùng SQLite có sẵn.
 psycopg[binary]>=3.1
+# The altcoin bot (altcoin/, a child process; only with ALTCOIN_ENABLED=1). ccxt pins its own
+# dependencies exactly (idna==3.18, urllib3==2.8.0, typing_extensions==4.16.0,
+# charset_normalizer==3.4.7, uvloop==0.22.1): the whole test suite runs with them. Upgrading
+# ccxt changes them for the stock too: pip install --dry-run -r requirements.txt, then
+# python tests/run_all.py.
+ccxt==4.5.90
