@@ -46,3 +46,32 @@ Cần mạng tới OKX (nến lịch sử, API công khai) và HuggingFace (tả
 **Kết luận**: không có giá trị dự báo (hai bản ngược dấu, đều xa ý nghĩa thống kê); xác suất dự báo lệch thực tế
 (dự báo thắng < 35% nhưng thực tế ~40%). 80 mẫu chỉ đủ phát hiện chênh lệch lớn (~0,6R) → **chưa tích hợp vào bot**.
 Chạy lại khi có 200–300 tín hiệu mới của v3.1; chỉ tính chế độ bóng nếu tương quan có ý nghĩa (p < 0,05).
+
+## Backtest phiên / phá giả biên độ / Volume Profile (`backtest_sessions.py`)
+
+Chỉ dùng thư viện chuẩn + code của bot (`strategy.diagnose`, `exits.simulate`), nến 5m lịch sử OKX (API công khai, có cache).
+
+- **A. orb** – phá giả biên độ 4h đầu phiên (mốc 0h / 4h / 8h / 12h UTC): nến 5m đóng ngoài biên rồi đóng quay lại trong biên
+  → vào ngược hướng cú phá, SL ở cực trị cú phá. Thử 6 cách thoát: giữa biên, biên đối diện, 1R, 2R, trail, hybrid.
+- **B. bot** – chạy lại strategy của bot trên từng nến 15m, chia nhóm theo giờ VN (như bộ tự học) và theo phiên Á / London / NY.
+- **C. vp** – POC / VAH / VAL của 24h trước tín hiệu: vị trí giá so với vùng giá trị, khoảng trống tới POC, TP tại mức VP kế tiếp.
+
+Không có AI, OI, funding, long/short → đây là kết quả của tín hiệu kỹ thuật trước AI. Báo cáo có `t_ngày` (kiểm định trên
+R trung bình mỗi ngày) vì các tín hiệu cùng ngày tương quan mạnh; chỉ tin nhóm có `t_ngày` đủ lớn và cùng dấu ở cả hai nửa thời gian.
+
+```bash
+python tools/backtest_sessions.py --days 90 --top 30 --cache .bt_cache --out bt_result.json > bt_report.md
+python tools/backtest_sessions.py --report bt_result.json
+```
+
+### Kết quả lần 1 (28/10/2026 – 30/07 → 28/10/2026, 30 coin, phí + trượt 0,15%/lệnh, bot v3.1.0)
+
+| | n | R/lệnh | t_ngày | Kết luận |
+|---|---|---|---|---|
+| A. Phá giả biên 4h – cách thoát tốt nhất (trail) | 7491 | −0,33 | −11,7 | **Không dùng.** Âm ở mọi mốc giờ, mọi phiên, mọi cách thoát, cả 2 nửa thời gian |
+| B. Tín hiệu bot đạt điểm, thoát trail | 1316 | +0,05 | −0,9 | Gần hoà vốn trước AI; trail > hybrid (−0,01) ≈ fixed (+0,01) |
+| B. LONG / SHORT (trail) | 646 / 670 | +0,17 / −0,08 | +0,5 / −2,7 | SHORT yếu ổn định theo ngày |
+| B. Giờ VN 13h–19h (bộ tự học đang chặn) | 334 | +0,04 | −0,6 | Không tệ hơn các khung khác → luật chặn là nhiễu 31 mẫu |
+| B. 21–24h UTC (4h–7h VN) | 135 | −0,20 | −1,3 | Khung yếu nhất – nằm trong luật chặn đêm sẵn có |
+| C. Vị trí so với vùng giá trị / khoảng tới POC | | ±0,1 | \|t\| < 1,6 | Không tách được tín hiệu tốt/xấu |
+| C. TP tại mức VP kế tiếp vs trail (cùng 249 tín hiệu) | 249 | +0,05 vs +0,17 | | TP theo VP kém hơn trail |
