@@ -1,9 +1,12 @@
 """A stock's valuation against its own history (tradingagents.dataflows.vn_valuation) and the
 fundamentals report around it: the percentile math, the book switching on its publicDate, the
-unadjusted price across a bonus issue, the P/E path of a non-bank, the day cache, VCI's minus
-signs. Data recorded from VCI on 29/10/2026 (tests/fixtures/valuation_*_2026-10-28.json)."""
+unadjusted price across a bonus issue, the P/E path of a non-bank, the session VCI has not posted
+yet (from the engine's bars), the cache (hourly re-ask, VCI breaker), VCI's minus signs, VCI's own
+period multiples withheld from a past run. Data recorded from VCI on 29/10/2026
+(tests/fixtures/valuation_*_2026-10-28.json)."""
 import json
 import tempfile
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -16,6 +19,7 @@ from tradingagents.dataflows.config import set_config  # noqa: E402
 CACHE = Path(tempfile.mkdtemp(prefix="valuation-cache-"))
 set_config({"data_cache_dir": str(CACHE)})
 
+from tradingagents.dataflows import money_flows, ohlcv  # noqa: E402
 from tradingagents.dataflows import vn_fundamentals as vf  # noqa: E402
 from tradingagents.dataflows import vn_valuation as vv  # noqa: E402
 from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError  # noqa: E402
@@ -65,8 +69,22 @@ def fake_ratios(symbol):
     return [dict(r) for r in FX[symbol]["ratios"]]
 
 
+BARS: dict[str, dict] = {}     # the engine's bars beyond / instead of the price-history closes
+BAR_CALLS: list[tuple[str, str]] = []
+
+
+def fake_bars(symbol, as_of_date, fill_gaps=True):
+    """ohlcv.load_ohlcv: closed sessions up to the run date, the price-history closes unless BARS says otherwise."""
+    BAR_CALLS.append((symbol, as_of_date))
+    closes = dict(zip(PRICES[symbol]["Date"], PRICES[symbol]["Close"])) | BARS.get(symbol, {})
+    rows = sorted((d, c) for d, c in closes.items() if d <= pd.Timestamp(as_of_date))
+    if not rows:
+        raise NoMarketDataError(symbol, symbol, "no bars")
+    return pd.DataFrame(rows, columns=["Date", "Close"])
+
+
 def no_adjusted_prices(*args, **kwargs):
-    raise AssertionError("the valuation must not read adjusted prices (vci.fetch_ohlcv)")
+    raise AssertionError("the valuation reads bars only through ohlcv.load_ohlcv, never VCI's adjusted history")
 
 
 def no_details(symbol):
@@ -77,6 +95,7 @@ flows.fetch_stock_flows = fake_flows
 vci.fetch_statement = fake_statement
 vci.fetch_ratios = fake_ratios
 vci.fetch_ohlcv = no_adjusted_prices
+ohlcv.load_ohlcv = fake_bars
 vci.fetch_details = no_details
 NOW = {"t": datetime(2026, 10, 29, 10, 0, tzinfo=vn_rules.VN_TZ)}
 vn_rules.now_vn = lambda: NOW["t"]
@@ -111,6 +130,7 @@ line = vv.multiple_line("CTG", "pb", "2026-10-28")
 t.ok("the line: today's P/B, its session and book, 'rẻ hơn 74% số phiên từ 05/2018 (2.123 phiên'",
      line.startswith("- P/B hôm nay 1,20 (giá đóng cửa 28/10/2026: 30.700; vốn chủ sở hữu công ty mẹ tới Q2/2026, "
                      "công bố 19/08/2026): rẻ hơn 74% số phiên từ 05/2018 (2.123 phiên;"), line)
+t.ok("VCI has the run date's session: the engine's bars are not read", BAR_CALLS == [], BAR_CALLS)
 
 # ───────────── 3. point-in-time: the book of the quarter published by each session ─────────────
 before, after = (vv.rank_of(vv.multiple_history("CTG", "pb", d), "pb") for d in ("2026-08-18", "2026-08-19"))
@@ -176,11 +196,36 @@ t.ok("ratio_value: other fields keep their sign (a negative growth stays negativ
      vf.ratio_value({"loansGrowth": -0.02}, "loansGrowth") == -0.02 and vf.ratio_value({"cir": None}, "cir") is None)
 
 # ───────────── 7. the fundamentals report ─────────────
+peer_calls = []
+real_peers = vf._peer_benchmark
+vf._peer_benchmark = lambda *a: peer_calls.append(a) or real_peers(*a)
 report = vf.get_fundamentals("CTG", "2026-10-28")
 t.ok("get_fundamentals: CIR printed positive", "CIR: 24,09%" in report and "CIR: -" not in report, report)
 t.ok("get_fundamentals: today's P/B line replaces the 20-quarter 'PB hiện tại' line",
      line in report and "PB hiện tại" not in report and "bách phân vị" not in report, report)
-t.ok("get_fundamentals: VCI's own P/E/P/B marked as not today's price", "không phải giá hôm nay" in report)
+# VCI prices a period's P/E, P/B, market value on its update day: Q2/2026 (out 19/08) at the 14/10 close
+q2 = FX["CTG"]["ratios"][-1]
+t.ok("VCI's Q2/2026 figures are priced at 29.550 (close of 14/10/2026), not at 30/06 nor at the publication",
+     q2["marketCap"] / q2["numberOfSharesMktCap"] == 29_550
+     and PRICES["CTG"].set_index("Date").loc[pd.Timestamp("2026-10-14"), "Close"] == 29_550
+     and PRICES["CTG"].set_index("Date").loc[pd.Timestamp("2026-06-30"), "Close"] == 33_950)
+sept = vf.get_fundamentals("CTG", "2026-09-01")
+t.ok("a past run (01/09/2026): VCI's P/E, P/B, market value withheld (priced 14/10, after the run date)",
+     "- P/E, P/B, P/S, EV/EBITDA, vốn hoá và số cổ phiếu của VCI: bị giữ lại cho lượt phân tích ngày 2026-09-01" in sept
+     and "P/E: 5,71" not in sept and "P/B: 1,15" not in sept and "Vốn hoá" not in sept and "229.513" not in sept, sept)
+t.ok("... and the peer average of VCI's figures: withheld, not asked",
+     "- So sánh ngành: bị giữ lại cho lượt phân tích ngày 2026-09-01" in sept and "trung bình" not in sept
+     and peer_calls == [], peer_calls)
+t.ok("... the run date's own P/B stays: 1,25 at the last close before it (31/08-02/09 are holidays)",
+     "- P/B phiên gần nhất có dữ liệu 1,25 (giá đóng cửa 28/08/2026:" in sept, sept)
+live = vf.get_fundamentals("CTG")
+t.ok("a live run: VCI's P/E, P/B, market value, labelled as priced when VCI updated them",
+     "- P/E: 5,71 | P/B: 1,15 | P/S:" in live and "(số VCI của kỳ, tính theo giá lúc VCI cập nhật, không phải giá hôm nay)" in live
+     and "- Vốn hoá theo giá VCI cập nhật: 229.513,2 tỷ | Số cổ phiếu: 7.766.944.637" in live
+     and "bị giữ lại cho lượt" not in live.split("## Hồ sơ hiện tại")[0] and len(peer_calls) == 1, live)
+t.ok("a live run at 10:00 (today's bar not final, VCI not posted): 'phiên gần nhất có dữ liệu', the 28/10 close",
+     "- P/B phiên gần nhất có dữ liệu 1,20 (giá đóng cửa 28/10/2026: 30.700;" in live, live)
+vf._peer_benchmark = real_peers
 old = vf.get_fundamentals("CTG", "2026-08-18")
 t.ok("get_fundamentals as_of 18/08/2026: Q1/2026 period and Q1/2026 book",
      "kỳ báo cáo mới nhất đã công bố: Q1/2026" in old and "tới Q1/2026, công bố 29/04/2026" in old
@@ -206,26 +251,82 @@ PRICES["CTG"] = pd.concat([PRICES["CTG"], pd.DataFrame(
 PRICES["CTG"].loc[PRICES["CTG"]["Date"] == pd.Timestamp("2026-10-28"), "Close"] = 30_750.0   # a late correction
 FAIL["flows"] = VendorUnavailableError("down")
 stale = vv.price_history("CTG")
-t.ok("next day, VCI down: the cached rows, and asked again on the next call",
+t.ok("next day, VCI down: the cached rows",
      len(stale) == 2201 and stale["Date"].iloc[-1] == pd.Timestamp("2026-10-28") and len(CALLS) == 1)
 FAIL["flows"] = None
+t.ok("... and the shared VCI breaker trips: the next minutes get the cached rows at once, VCI not asked",
+     len(vv.price_history("CTG")) == 2201 and len(CALLS) == 1, CALLS)
+money_flows.reset_breaker()
 fresh = vv.price_history("CTG")
 t.ok("next day: fetched from the last cached session on, merged without duplicates",
      CALLS[-1] == ("CTG", "2026-10-28", "2026-10-30") and len(fresh) == 2202 and fresh["Date"].is_unique
      and fresh["Close"].iloc[-2] == 30_750 and fresh["Close"].iloc[-1] == 31_000, CALLS)
 vv.price_history("CTG")
 vv.multiple_line("CTG", "pb", None)
-t.ok("... then not asked again that day", len(CALLS) == 2, CALLS)
+t.ok("... then not asked again while it holds the last session due (29/10 before 15:30)", len(CALLS) == 2, CALLS)
+
+
+def age_stamp(sym: str, seconds: float) -> None:
+    saved = json.loads((CACHE / "valuation" / f"{sym}-prices.json").read_text(encoding="utf-8"))
+    saved["asked_at"] = time.time() - seconds
+    (CACHE / "valuation" / f"{sym}-prices.json").write_text(json.dumps(saved), encoding="utf-8")
+
+
+NOW["t"] = datetime(2026, 10, 30, 16, 0, tzinfo=vn_rules.VN_TZ)   # 30/10 due from 15:30, not posted yet
+vv.price_history("CTG")
+t.ok("stamped today, the 30/10 session due and missing: not asked again within the hour", len(CALLS) == 2, CALLS)
+age_stamp("CTG", money_flows.RECHECK_SECONDS + 1)
+vv.price_history("CTG")
+vv.price_history("CTG")
+t.ok("... asked again an hour later (from the last cached session), once", len(CALLS) == 3
+     and CALLS[-1] == ("CTG", "2026-10-29", "2026-10-30"), CALLS)
+PRICES["CTG"] = pd.concat([PRICES["CTG"], pd.DataFrame(
+    {"Date": [pd.Timestamp("2026-10-30")], "Close": [31_200.0], "TotalShares": [7_766_944_637.0]})], ignore_index=True)
+age_stamp("CTG", money_flows.RECHECK_SECONDS + 1)
+got = vv.price_history("CTG")
+age_stamp("CTG", money_flows.RECHECK_SECONDS + 1)
+vv.price_history("CTG")
+t.ok("... VCI posts 30/10: it is kept, and not asked again that day however long after",
+     got["Date"].iloc[-1] == pd.Timestamp("2026-10-30") and got["Close"].iloc[-1] == 31_200 and len(CALLS) == 4, CALLS)
 (CACHE / "valuation" / "FPT-prices.json").unlink()
 FAIL["flows"] = VendorUnavailableError("down")
 t.ok("no cache and VCI down: 'chưa đủ dữ liệu'", vv.price_history("FPT").empty
      and vv.multiple_line("FPT", "pe", None) == "- P/E hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu")
 FAIL["flows"] = None
+money_flows.reset_breaker()
 PRICES["NEW"] = PRICES["FPT"].iloc[0:0]
 t.ok("a stock VCI has no sessions for: an empty history, kept for the day", vv.price_history("NEW").empty
      and vv.price_history("NEW").empty and [c[0] for c in CALLS].count("NEW") == 1, CALLS)
 
-# ───────────── 9. informational only ─────────────
+# ───────────── 9. the run date's session VCI has not posted yet: from the engine's bars ─────────────
+# Live 29/10/2026 22:09: VCI price-history ends 28/10, the engine's bars hold 29/10 (FPT 52.700, CTG 30.700).
+NOW["t"] = datetime(2026, 10, 29, 22, 0, tzinfo=vn_rules.VN_TZ)
+PRICES["FPT"] = fixture_prices("FPT")
+(CACHE / "valuation" / "FPT-prices.json").unlink(missing_ok=True)
+BARS["FPT"] = {pd.Timestamp("2026-10-29"): 52_700.0}
+BAR_CALLS.clear()
+topped = vv.rank_of(vv.multiple_history("FPT", "pe", None), "pe")
+t.ok("VCI lacks the run date's session (29/10): its close from the engine's bars, the shares carried forward",
+     topped.day == date(2026, 10, 29) and topped.close == 52_700 and topped.period == "Q2/2026"
+     and abs(topped.value - 52_700 * 1_885_727_648 / ttm) < 1e-9 and topped.sessions == fpt.sessions + 1
+     and BAR_CALLS == [("FPT", "2026-10-29")], (topped, BAR_CALLS))
+t.ok("... the line says 'hôm nay' with the 29/10 close",
+     vv.multiple_line("FPT", "pe", None).startswith("- P/E hôm nay 9,94 (giá đóng cửa 29/10/2026: 52.700;"),
+     vv.multiple_line("FPT", "pe", None))
+t.ok("... the session is not saved in the cache: VCI's own row replaces it once posted",
+     vv.price_history("FPT")["Date"].iloc[-1] == pd.Timestamp("2026-10-28"))
+BARS["FPT"][pd.Timestamp("2026-10-28")] = 53_200.0     # the bars' 28/10 is adjusted: an ex-date since
+t.ok("the bars' close of VCI's last session differs (a dividend or bonus issue went ex): not used, "
+     "'phiên gần nhất có dữ liệu'",
+     vv.multiple_line("FPT", "pe", None).startswith("- P/E phiên gần nhất có dữ liệu 10,18 (giá đóng cửa 28/10/2026: 54.000;"),
+     vv.multiple_line("FPT", "pe", None))
+BARS["FPT"] = {}
+ohlcv.load_ohlcv = lambda *a, **k: (_ for _ in ()).throw(VendorUnavailableError("bars down"))
+t.ok("the bars unavailable: VCI's last session, said so",
+     vv.multiple_line("FPT", "pe", "2026-10-29").startswith("- P/E phiên gần nhất có dữ liệu 10,18 (giá đóng cửa 28/10/2026"))
+ohlcv.load_ohlcv = fake_bars
+
+# ───────────── 10. informational only ─────────────
 repo = _common.REPO
 readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbot") for p in (repo / d).rglob("*.py")
                  if "vn_valuation" in p.read_text(encoding="utf-8", errors="replace"))

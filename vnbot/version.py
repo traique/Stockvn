@@ -27,17 +27,20 @@ from pathlib import Path
 
 VERSION = "v1.16.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "1b97f12"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "dcea0fc"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.16.0", "2026-10-29", (
-        "Định giá tham khảo: P/B (ngân hàng, chứng khoán, bảo hiểm, BĐS) hoặc P/E hôm nay, theo giá đóng cửa",
+        "Định giá tham khảo: P/B (ngân hàng, chứng khoán, bảo hiểm, BĐS) hoặc P/E theo giá đóng cửa phiên gần nhất",
         "So với mọi phiên từ 2018 của chính mã: “rẻ hơn X% số phiên”; sổ sách đúng quý đã công bố tại mỗi phiên",
         "Giá chưa điều chỉnh × số cổ phiếu của chính phiên đó: không lệch qua ngày chia thưởng",
-        "Bỏ dòng “P/B hiện tại” cũ (thật ra là số cuối kỳ của VCI); P/E tính từ LNST 4 quý, không từ EPS quý",
-        "CIR nay in số dương: VCI trả số âm cho CIR và vài tỷ số ngân hàng khác (đã sửa cả nhóm)",
+        "VCI chưa đăng phiên hôm nay: lấy giá đóng cửa từ nến của Quant; hỏi lại VCI mỗi giờ tới khi có",
+        "Bỏ dòng “P/B hiện tại” cũ (thật ra là P/B của VCI theo giá ngày VCI cập nhật, không phải hôm nay)",
+        "P/E tính từ LNST công ty mẹ 4 quý, không từ EPS quý (VCI có quý để EPS bằng 0)",
+        "Phân tích ngày cũ: bỏ P/E, P/B, vốn hoá của VCI và so sánh ngành (VCI tính theo giá sau ngày đó)",
+        "CIR nay in số dương (VCI trả số âm)",
         "Chỉ là thông tin cho AI phân tích: không đổi quyết định, stop/target của Quant Engine",
     )),
     ("v1.15.0", "2026-10-29", (

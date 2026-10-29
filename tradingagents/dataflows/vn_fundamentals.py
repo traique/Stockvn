@@ -8,7 +8,10 @@ regulatory deadline instead: 45 days after quarter end for quarterly reports
 audited annual report. TTM ratios follow the quarter they belong to.
 
 Live-only data (company profile, foreign ownership, today's price and the
-analyst target) is withheld from a past run.
+analyst target) is withheld from a past run, and so are VCI's own multiples
+and market value of a period (P/E, P/B, ...): VCI prices them on the day it
+last updated them, weeks after the publication (checked live 29/10/2026: CTG
+Q2/2026, published 19/08, at the close of 14/10).
 """
 
 from __future__ import annotations
@@ -181,7 +184,8 @@ def _growth_lines(symbol: str, as_of_date: str | None) -> list[str]:
 
 
 def _peer_benchmark(symbol: str, metric: str, as_of_date: str | None) -> tuple[float | None, int]:
-    """Average ``metric`` (pe/pb) of up to 8 sector peers at the run date."""
+    """Average ``metric`` (pe/pb) of up to 8 sector peers: VCI's own figure of their newest
+    published quarter, priced when VCI updated it (live runs only, see the module docstring)."""
     peers = sector.sector_peers(symbol)
 
     def value(peer: str) -> float | None:
@@ -226,6 +230,13 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
             logger.warning("VCI details unavailable for %s: %s", symbol, exc)
     profile = fundamental_profiles.get_profile(symbol, details.get("comTypeCode"))
     period = f"Q{latest.get('quarter')}/{latest.get('yearReport')}"
+    if historical:
+        vci_multiples = (f"- P/E, P/B, P/S, EV/EBITDA, vốn hoá và số cổ phiếu của VCI: bị giữ lại cho lượt phân tích "
+                         f"ngày {as_of_date} (VCI tính theo giá ngày VCI cập nhật, có thể sau ngày này)")
+    else:
+        vci_multiples = (f"- P/E: {_ratio(latest.get('pe'))} | P/B: {_ratio(latest.get('pb'))} | P/S: {_ratio(latest.get('ps'))} | "
+                         f"EV/EBITDA: {_ratio(latest.get('evToEbitda'))} (số VCI của kỳ, tính theo giá lúc VCI cập nhật, "
+                         "không phải giá hôm nay)")
 
     lines = [
         f"# Chỉ số cơ bản của {symbol} (nguồn VCI)",
@@ -233,8 +244,7 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
         f"# Hồ sơ định giá: {profile.label} - so sánh chính theo {profile.benchmark_metric.upper()}. {profile.note}",
         "",
         "## Định giá và hiệu quả (TTM theo kỳ báo cáo)",
-        f"- P/E: {_ratio(latest.get('pe'))} | P/B: {_ratio(latest.get('pb'))} | P/S: {_ratio(latest.get('ps'))} | EV/EBITDA: {_ratio(latest.get('evToEbitda'))} "
-        "(số VCI của kỳ, tính theo giá lúc VCI cập nhật, không phải giá hôm nay)",
+        vci_multiples,
         f"- ROE: {_pct(latest.get('roe'))} | ROA: {_pct(latest.get('roa'))} | ROIC: {_pct(latest.get('roic'))}",
     ]
     if profile.key == "banking":
@@ -247,23 +257,28 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
             f"- Biên lãi gộp: {_pct(latest.get('grossMargin'))} | Biên lãi ròng: {_pct(latest.get('afterTaxProfitMargin'))} | "
             f"Nợ vay/VCSH: {_ratio(latest.get('debtToEquity'))} | Thanh toán hiện hành: {_ratio(latest.get('currentRatio'))}"
         )
-    lines.append(
-        f"- Vốn hoá tại kỳ báo cáo: {_billion(latest.get('marketCap'))} | Số cổ phiếu: {rfmt.fmt_price(_num(latest.get('numberOfSharesMktCap')))}"
-    )
+    if not historical:
+        lines.append(
+            f"- Vốn hoá theo giá VCI cập nhật: {_billion(latest.get('marketCap'))} | "
+            f"Số cổ phiếu: {rfmt.fmt_price(_num(latest.get('numberOfSharesMktCap')))}"
+        )
 
     metric = profile.benchmark_metric
-    current = _num(latest.get(metric))
     lines.append(_own_history_line(symbol, metric, as_of_date))
-    peer_avg, peer_n = _peer_benchmark(symbol, metric, as_of_date)
-    if peer_avg is not None and current:
-        gap = (current - peer_avg) / peer_avg * 100
-        lines.append(
-            f"- {metric.upper()} trung bình {peer_n} mã cùng ngành ({sector.get_primary_sector_label(symbol)}): "
-            f"{rfmt.fmt_number(peer_avg)} → {symbol} {'cao hơn' if gap > 0 else 'thấp hơn'} {rfmt.fmt_pct(abs(gap))} "
-            "(cùng theo số VCI của kỳ)"
-        )
+    if historical:
+        lines.append(f"- So sánh ngành: bị giữ lại cho lượt phân tích ngày {as_of_date} (theo số VCI của kỳ, giá sau ngày này).")
     else:
-        lines.append("- So sánh ngành: chưa đủ dữ liệu mã cùng ngành.")
+        current = _num(latest.get(metric))
+        peer_avg, peer_n = _peer_benchmark(symbol, metric, as_of_date)
+        if peer_avg is not None and current:
+            gap = (current - peer_avg) / peer_avg * 100
+            lines.append(
+                f"- {metric.upper()} trung bình {peer_n} mã cùng ngành ({sector.get_primary_sector_label(symbol)}): "
+                f"{rfmt.fmt_number(peer_avg)} → {symbol} {'cao hơn' if gap > 0 else 'thấp hơn'} {rfmt.fmt_pct(abs(gap))} "
+                "(cùng theo số VCI của kỳ)"
+            )
+        else:
+            lines.append("- So sánh ngành: chưa đủ dữ liệu mã cùng ngành.")
 
     growth = _growth_lines(symbol, as_of_date)
     lines += ["", "## Tăng trưởng theo quý (từ báo cáo đã công bố)"] + (growth or ["- Chưa đủ quý để tính tăng trưởng."])

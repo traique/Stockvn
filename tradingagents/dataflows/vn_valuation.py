@@ -6,7 +6,9 @@ value is the session's UNADJUSTED close × the shares outstanding that same
 session (VCI price-history, ``flows.fetch_stock_flows``): both change on a
 bonus-share ex-date, so the multiple stays continuous. The adjusted bars of
 ``vci.fetch_ohlcv`` are not usable here: an old adjusted price over the book
-of its day gives a wrong multiple before every bonus issue.
+of its day gives a wrong multiple before every bonus issue. VCI posts a
+session's row hours after the close (sometimes the next morning), so the
+sessions it has not posted yet come from the engine's bars (``_top_up``).
 
 - P/B: market value / equity of the parent's shareholders (``bsa78`` total
   equity minus ``bsa210`` minority interest) of the newest quarter published
@@ -24,12 +26,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import date
 
 import numpy as np
 import pandas as pd
 
+from tradingagents.dataflows import money_flows, ohlcv
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import VendorError
 from tradingagents.dataflows.files import locked, replace_file
@@ -47,7 +51,7 @@ METRIC_LABELS = {"pb": "P/B", "pe": "P/E"}
 _PRICE_COLUMNS = ["Date", "Close", "TotalShares"]
 
 
-# ─── Unadjusted prices, cached for the day ────────────────────────────────────
+# ─── Unadjusted prices, cached ────────────────────────────────────────────────
 
 
 def _dir() -> str:
@@ -56,43 +60,58 @@ def _dir() -> str:
     return path
 
 
-def _load(path: str) -> tuple[str | None, pd.DataFrame]:
-    """(the day it was fetched, the cached rows) of one stock's file."""
+def _load(path: str) -> tuple[str | None, float, pd.DataFrame]:
+    """(the day it was last asked, when exactly, the cached rows) of one stock's file."""
     try:
         with open(path, encoding="utf-8") as handle:
             saved = json.load(handle)
         frame = pd.DataFrame({c: saved[c] for c in _PRICE_COLUMNS})
         frame["Date"] = pd.to_datetime(frame["Date"])
-        return saved.get("fetched"), frame
+        return saved.get("fetched"), float(saved.get("asked_at") or 0), frame
     except (OSError, ValueError, KeyError, TypeError):
-        return None, pd.DataFrame({"Date": pd.to_datetime([]), "Close": [], "TotalShares": []})
+        return None, 0.0, pd.DataFrame({"Date": pd.to_datetime([]), "Close": [], "TotalShares": []})
+
+
+def _due_session() -> pd.Timestamp:
+    """The newest session VCI may have posted by now: today's once the day's flows
+    are out (``money_flows.published_through``, 15:30), else the session before."""
+    day = money_flows.published_through()
+    while not vn_rules.is_session_day(day.strftime("%Y-%m-%d")):
+        day -= pd.Timedelta(days=1)
+    return day
 
 
 def price_history(symbol: str) -> pd.DataFrame:
     """Unadjusted close and shares outstanding of every session since ``HISTORY_START``.
 
-    Kept in ``<data_cache_dir>/valuation`` and asked of VCI at most once a day:
-    the day's first call fetches from the last cached session on (that session
-    again, in case it was saved before its close was final). A failed fetch
-    leaves the cached rows (possibly none) and is asked again on the next call.
+    Kept in ``<data_cache_dir>/valuation``. The day's first call asks VCI from
+    the last cached session on (that session again, in case it was saved before
+    its close was final); later calls that day ask again only while the file
+    lacks the last session due (``_due_session``), at most once an hour
+    (``money_flows.RECHECK_SECONDS``). A failed fetch leaves the cached rows
+    (possibly none) and trips the shared VCI breaker (``money_flows._guarded``):
+    the calls of the next minutes get the cached rows at once.
     """
     code = safe_ticker_component(symbol.upper())
     path = os.path.join(_dir(), f"{code}-prices.json")
     today = vn_rules.now_vn().date().isoformat()
     with locked(path):
-        fetched, cached = _load(path)
-        if fetched == today:
+        fetched, asked_at, cached = _load(path)
+        if fetched == today and (
+            (not cached.empty and cached["Date"].iloc[-1] >= _due_session())
+            or time.time() - asked_at < money_flows.RECHECK_SECONDS
+        ):
             return cached
         start = cached["Date"].iloc[-1].strftime("%Y-%m-%d") if not cached.empty else HISTORY_START
         try:
-            fresh = flows.fetch_stock_flows(code, start, today)[_PRICE_COLUMNS]
+            fresh = money_flows._guarded("VCI", lambda: flows.fetch_stock_flows(code, start, today))[_PRICE_COLUMNS]
         except VendorError as exc:
             logger.warning("Price history of %s for the valuation unavailable: %s", code, exc)
             return cached
         frames = [f for f in (cached, fresh) if not f.empty]
         frame = (pd.concat(frames).drop_duplicates("Date", keep="last").sort_values("Date").reset_index(drop=True)
                  if frames else cached)
-        saved = {"fetched": today, "Date": frame["Date"].dt.strftime("%Y-%m-%d").tolist(),
+        saved = {"fetched": today, "asked_at": time.time(), "Date": frame["Date"].dt.strftime("%Y-%m-%d").tolist(),
                  "Close": frame["Close"].astype(float).tolist(), "TotalShares": frame["TotalShares"].astype(float).tolist()}
 
         def write(temp: str) -> None:
@@ -137,11 +156,34 @@ def _base_steps(symbol: str, metric: str) -> pd.DataFrame:
     return pd.DataFrame(steps, columns=["Published", "Base", "Period", "PeriodPublished"])
 
 
+def _top_up(symbol: str, prices: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
+    """``prices`` with the sessions up to ``as_of`` VCI has not posted yet, from the engine's
+    bars (``ohlcv.load_ohlcv``: closed sessions only): after the last ex-date the adjusted
+    close is the unadjusted one, and the shares are carried forward. Left as they are when
+    the bars' close of VCI's last session differs from VCI's: a dividend or bonus issue
+    went ex since, so the bars are on another basis and the shares may have changed."""
+    if prices.empty or prices["Date"].iloc[-1] >= as_of:
+        return prices
+    try:
+        bars = ohlcv.load_ohlcv(symbol, as_of.strftime("%Y-%m-%d"), fill_gaps=False)
+    except VendorError as exc:
+        logger.info("Bars of %s for the valuation unavailable: %s", symbol, exc)
+        return prices
+    last = prices.iloc[-1]
+    same = bars.loc[bars["Date"] == last["Date"], "Close"]
+    newer = bars[bars["Date"] > last["Date"]]
+    if newer.empty or same.empty or round(float(same.iloc[-1])) != round(float(last["Close"])):
+        return prices
+    added = pd.DataFrame({"Date": newer["Date"], "Close": newer["Close"].astype(float), "TotalShares": last["TotalShares"]})
+    return pd.concat([prices, added], ignore_index=True)
+
+
 def multiple_history(symbol: str, metric: str, as_of_date: str | None) -> pd.DataFrame:
     """One row per session up to the run date: Date, Close, TotalShares, Base, Period,
     PeriodPublished, Multiple (NaN before the first statement or when the base is not positive)."""
+    as_of = pd.Timestamp(_as_of_day(as_of_date))
     prices = price_history(symbol)
-    prices = prices[prices["Date"] <= pd.Timestamp(_as_of_day(as_of_date))].reset_index(drop=True)
+    prices = _top_up(symbol, prices[prices["Date"] <= as_of].reset_index(drop=True), as_of)
     steps = _base_steps(symbol, metric)
     if steps.empty:
         return prices.assign(Base=np.nan, Period=None, PeriodPublished=None, Multiple=np.nan)
@@ -199,8 +241,10 @@ def multiple_line(symbol: str, metric: str, as_of_date: str | None) -> str:
     rank = rank_of(history, metric)
     if rank is None:
         return f"- {label} hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu"
+    # The run date's session not out yet: before the close, a holiday, or VCI and the bars both behind.
+    when = "hôm nay" if rank.day == _as_of_day(as_of_date) else "phiên gần nhất có dữ liệu"
     return (
-        f"- {label} hôm nay {rfmt.fmt_number(rank.value)} (giá đóng cửa {rank.day:%d/%m/%Y}: {rfmt.fmt_price(rank.close)}; "
+        f"- {label} {when} {rfmt.fmt_number(rank.value)} (giá đóng cửa {rank.day:%d/%m/%Y}: {rfmt.fmt_price(rank.close)}; "
         f"{base} tới {rank.period}, công bố {rank.published:%d/%m/%Y}): rẻ hơn {rfmt.fmt_number(rank.higher_pct, 0)}% "
         f"số phiên từ {rank.since:%m/%Y} ({rfmt.fmt_price(rank.sessions)} phiên; thấp nhất {rfmt.fmt_number(rank.low)}, "
         f"cao nhất {rfmt.fmt_number(rank.high)})"
