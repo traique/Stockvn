@@ -16,7 +16,7 @@ from .learner import current_veto_conf
 from .exchange import OKX
 from .storage import Store
 from .ai import AIFilter
-from .engine import PaperEngine, LiveEngine
+from .engine import PaperEngine, LiveEngine, critical
 from .risk import CircuitBreaker
 from .strategy import diagnose
 from collections import Counter
@@ -200,12 +200,13 @@ class Bot:
 
     def close_all(self, reason):
         n = 0
-        for t in self.store.open_trades():
-            try:
-                self.engine.close(t, self.okx.price(t["symbol"]), reason)
-                n += 1
-            except Exception as e:
-                log.error("close_all %s: %s", t["symbol"], e)
+        with critical():        # cả lượt là một vùng: tắt bot thì chờ đóng hết, không chỉ lệnh đang đóng
+            for t in self.store.open_trades():
+                try:
+                    self.engine.close(t, self.okx.price(t["symbol"]), reason)
+                    n += 1
+                except Exception as e:
+                    log.error("close_all %s: %s", t["symbol"], e)
         return n
 
     def snapshot(self):

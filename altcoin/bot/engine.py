@@ -16,10 +16,11 @@ from . import strategy
 
 log = logging.getLogger("engine")
 
-# Vùng găng (v3.2.1): lệnh trên sàn và bước ghi DB của nó là MỘT bước, SIGTERM không được cắt ngang.
-# Luồng chính: SIGTERM/SIGINT rơi vào giữa được giữ lại, ra khỏi vùng mới phát lại (bot.main biến SIGTERM
-# thành KeyboardInterrupt). Luồng khác (/close qua chat, web) giữ _ORDER, và lúc thoát tiến trình chờ nó
-# xong, tối đa EXIT_WAIT giây (host gửi SIGKILL 15 s sau SIGTERM).
+# Vùng găng (v3.2.1): lệnh trên sàn và các bước theo sau nó (ghi DB, dời SL trên sàn, báo tin) là MỘT bước,
+# SIGTERM không được cắt ngang. Luồng chính: SIGTERM/SIGINT rơi vào giữa được giữ lại, ra khỏi vùng mới phát
+# lại (bot.main biến SIGTERM thành KeyboardInterrupt); vùng lồng nhau phát lại một lần, sau vùng ngoài cùng.
+# Luồng khác (/close qua chat, web) giữ _ORDER, và lúc thoát tiến trình chờ nó xong, tối đa EXIT_WAIT giây
+# (host gửi SIGKILL 15 s sau SIGTERM).
 _ORDER = threading.RLock()
 EXIT_WAIT = 12
 
@@ -308,7 +309,7 @@ class LiveEngine(BaseEngine):
             entry = fill or sig.price
             t = self._trade_row(sig, ai, entry, notional, contracts, order_id=oid, mult=mult)
             t["id"] = self.store.open_trade(t)
-        self._announce_open(t)
+            self._announce_open(t)      # trong vùng: SIGTERM không làm mất tin MỞ LỆNH
         return t
 
     def _replace_algo(self, t, sl, tp):
@@ -392,33 +393,34 @@ class LiveEngine(BaseEngine):
                 continue
             price = float(live[t["symbol"]].get("markPrice") or self.okx.price(t["symbol"]))
             ev, upd, st = self._events(t, price, price, price)
-            closed, need_algo = False, False
-            for kind, p in ev:
-                if kind == "TP1":
-                    try:
-                        pnl = self.partial(t, p)
-                        t["sl"] = st.sl
-                        upd["sl"] = st.sl
+            with critical():    # TP1: chốt trên sàn → dời SL trên sàn → ghi DB → báo tin, SIGTERM chờ hết
+                closed, need_algo = False, False
+                for kind, p in ev:
+                    if kind == "TP1":
+                        try:
+                            pnl = self.partial(t, p)
+                            t["sl"] = st.sl
+                            upd["sl"] = st.sl
+                            need_algo = True
+                            self._announce_partial(t, p, pnl)
+                        except Exception as e:
+                            log.error("chốt phần đầu %s thất bại: %s", t["symbol"], e)
+                    elif kind == "SL_MOVE":
+                        upd["sl"] = p
                         need_algo = True
-                        self._announce_partial(t, p, pnl)
+                    elif kind in ("STALL", "TIMEOUT"):
+                        self.close(t, price, self._reason(kind, t))
+                        closed = True
+                        break
+                    # SL/TP thật do sàn khớp – xử lý ở nhánh "không còn vị thế" lần sau
+                if closed:
+                    continue
+                if need_algo:
+                    try:
+                        self._replace_algo(t, upd.get("sl", t["sl"]), t["tp"])
+                        log.info("%s: cập nhật SL trên sàn -> %.6g", t["symbol"], upd.get("sl", t["sl"]))
                     except Exception as e:
-                        log.error("chốt phần đầu %s thất bại: %s", t["symbol"], e)
-                elif kind == "SL_MOVE":
-                    upd["sl"] = p
-                    need_algo = True
-                elif kind in ("STALL", "TIMEOUT"):
-                    self.close(t, price, self._reason(kind, t))
-                    closed = True
-                    break
-                # SL/TP thật do sàn khớp – xử lý ở nhánh "không còn vị thế" lần sau
-            if closed:
-                continue
-            if need_algo:
-                try:
-                    self._replace_algo(t, upd.get("sl", t["sl"]), t["tp"])
-                    log.info("%s: cập nhật SL trên sàn -> %.6g", t["symbol"], upd.get("sl", t["sl"]))
-                except Exception as e:
-                    log.warning("đặt lại SL %s thất bại: %s", t["symbol"], e)
-                    upd.pop("sl", None)
-            if upd:
-                self.store.update_trade(t["id"], **upd)
+                        log.warning("đặt lại SL %s thất bại: %s", t["symbol"], e)
+                        upd.pop("sl", None)
+                if upd:
+                    self.store.update_trade(t["id"], **upd)

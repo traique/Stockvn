@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.15.0** và **Altcoin 3.2.1** (bản dựng `b182102`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.15.0** và **Altcoin 3.2.1** (bản dựng `07bb13b`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -212,7 +212,7 @@ python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
 python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.15.0-alt3.2.1.zip
 ```
 
-Builder in hai dòng `Stock v1.15.0: bản dựng … = bản phát hành` và `Altcoin 3.2.1: bản dựng b182102 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.15.0: bản dựng … = bản phát hành` và `Altcoin 3.2.1: bản dựng 07bb13b = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -242,10 +242,12 @@ Làm trước mọi việc khác, khi cả hai server cũ còn chạy.
 - [ ] Altcoin đang **paper** hay **live**? Có lệnh đang mở không (`/status` trên bot OKX cũ)? Live thì ghi lại vị thế trên OKX.
 - [ ] Ghi lại để so sau khi chuyển: vốn, số lệnh, tỉ lệ thắng (`/status`), ngưỡng tự học (`/learn`), phiên bản.
 - [ ] Còn service Render nào của altcoin không (service `okx-ai-bot`)? Có thì sẽ tắt ở bước chuyển.
+- [ ] Altcoin cũ có kênh Zoom **riêng** không (`ZOOM_WEBHOOK_URL`/`ZOOM_WEBHOOK_TOKEN`, hay `ZOOM_TO_JID` riêng, trên panel hoặc trong `bot.env`)? Tin tới kênh / người nào? Sau khi chuyển, kênh đó không nhận tin Altcoin nữa (mục 13).
 
 **Kiểm tra server Cổ phiếu:**
 
 - [ ] `TELEGRAM_ALLOWED_IDS` có id của anh/chị; `/zoomstatus` cho thấy Zoom đã ghép đôi (app `vnbot` nhận lệnh, cần `ZOOM_SECRET_TOKEN`).
+- [ ] Đo thời gian `/health` để so ở mục 9 (lấy p95 của 20 lần): `for i in $(seq 20); do curl -o /dev/null -s -w '%{time_total}\n' https://HOST/health; done | sort -n | sed -n 19p`.
 - [ ] Ổ đĩa còn trống ≥ 300 MB (ccxt và thư viện đi kèm khoảng 100–120 MB, cộng dữ liệu Altcoin).
 - [ ] DB của Cổ phiếu chưa có bảng của Altcoin (`trades`, `locks`, `learn_log`). Supervisor tự kiểm và không chạy nếu có. Liệt kê bảng một Postgres (chỉ đọc, chạy trên máy tính):
 
@@ -271,8 +273,8 @@ Mục đích: thử trên đúng server Botkeep những điểm không thử đ�
 
    Không đặt `ALT_MODE` (paper) và **không** đặt `ALT_DATABASE_URL` (SQLite tạm). Thông báo của canary tới chat của anh/chị với tiêu đề `🪙 Altcoin ›`; muốn im thì tắt **Altcoin · thông báo** trên `/ai#kenh`.
 3. Kiểm tra trong 15–30 phút:
-   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.2.1 (b182102)`. Không có lỗi múi giờ hay "thiếu thư viện".
-   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `b182102`, `dropped_secrets` rỗng.
+   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.2.1 (07bb13b)`. Không có lỗi múi giờ hay "thiếu thư viện".
+   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `07bb13b`, `dropped_secrets` rỗng.
    - [ ] `/health` chỉ có `"altcoin": {"state": "running"}`.
    - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.2.1 "đúng bản phát hành".
    - [ ] Telegram `/alt status`; Zoom `alt status` (1:1) và `/vnbot alt status` (trong kênh) đều được trả lời.
@@ -299,14 +301,16 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 5. Đặt **`ALTCOIN_ENABLED=1`** rồi khởi động lại server Cổ phiếu.
    - Nếu `hub.json` báo `waiting` với "instance khác đang chạy: crypto@<host cũ>": heartbeat của server cũ còn mới (dưới 90 giây). Altcoin tự chạy sau khoảng 100 giây. Nếu vẫn chờ mãi: server cũ (hoặc Render) chưa thật sự dừng.
 6. **Kiểm tra chấp nhận:**
-   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.2.1`, `build` `b182102`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
+   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.2.1`, `build` `07bb13b`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
    - [ ] `/health` chỉ có `altcoin.state`.
-   - [ ] `/altcoin/phienban`: 3.2.1, `b182102`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng, ngưỡng tự học giống số đã ghi ở mục 7.
+   - [ ] `/altcoin/phienban`: 3.2.1, `07bb13b`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng, ngưỡng tự học giống số đã ghi ở mục 7.
    - [ ] `/alt status` được trả lời trên Telegram và trên Zoom (`alt status`, `/vnbot alt status`); `/trangthai` của Cổ phiếu vẫn chạy.
    - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.2.0 → v3.2.1" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
    - [ ] `/alt status` dòng "Instances": chỉ `crypto` còn sống. Dòng cũ (`render`, hoặc `crypto` của server cũ) hiện "(mất liên lạc)": chỉ là hiển thị.
    - [ ] Trong 1 giờ log Botkeep không có `409` hay `terminated by other getUpdates`.
    - [ ] Từ máy ngoài, có hay không có `-u x:<mật khẩu>`: `curl -i -X POST https://HOST/altcoin/_hub/command` → 404; `curl -i https://HOST/altcoin/%5Fhub/command` → 400; `curl -i https://HOST/_hub/command` → 404.
+   - [ ] Cổng của Altcoin không mở ra ngoài: log có `Altcoin: khởi động pid …, cổng 127.0.0.1:<P>`; từ máy ngoài `curl -m 5 http://HOST:<P>/health` không kết nối được.
+   - [ ] Thời gian `/health` (cùng lệnh đo ở mục 7) không tăng so với trước.
    - [ ] `rss_mb` trong `hub.json`: RAM tăng dưới 200 MB so với trước.
 7. **Sau 1–2 tuần ổn định** (hết thời gian có thể quay lui):
    - [ ] Xoá server altcoin cũ trên Botkeep; xoá service Render (nếu có) và ngắt kết nối repo.
@@ -318,7 +322,7 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 
 ## 10. Chạy live
 
-Altcoin 3.2.1 có **vùng găng**: khi server khởi động lại (mỗi lần upload), tín hiệu dừng rơi vào giữa lúc đặt lệnh trên OKX và lúc ghi DB sẽ được giữ lại tới khi ghi xong. Lệnh `/alt close` đang chạy được chờ tối đa 12 giây. Supervisor cho Altcoin 15 giây trước khi buộc dừng.
+Altcoin 3.2.1 có **vùng găng**: khi server khởi động lại (mỗi lần upload), tín hiệu dừng rơi vào giữa lúc đặt lệnh trên OKX và lúc ghi DB sẽ được giữ lại tới khi ghi xong (cùng tin báo, và việc dời SL trên OKX sau chốt TP1). Lệnh `/alt close` đang chạy được chờ đóng hết các lệnh, tối đa 12 giây. Supervisor cho Altcoin 15 giây trước khi buộc dừng.
 
 **Điều kiện (thiếu một cái là Altcoin không chạy, không bao giờ lùi về paper):**
 
@@ -394,7 +398,8 @@ Mã thoát của Altcoin: **78** = cấu hình bị từ chối (dừng, chờ s
 - Không có chat Telegram riêng cho Altcoin: thông báo đi theo chat của Cổ phiếu, phân biệt bằng tiêu đề `🪙 Altcoin ›`.
 - Không còn công tắc "trả lời lệnh Telegram" riêng của Altcoin; muốn chặn hẳn lệnh Altcoin thì `ALTCOIN_ENABLED=0`. Công tắc kênh cũ trong DB altcoin không còn tác dụng, và trang `/altcoin/caidat` thay hai thẻ kênh bằng thẻ "Kênh do Stock quản lý".
 - Công tắc Telegram/Zoom áp chung cho cả hai mục; công tắc Altcoin chỉ bật/tắt cả mục.
+- Kênh Zoom riêng của Altcoin (Incoming Webhook `ZOOM_WEBHOOK_URL`, hay `ZOOM_TO_JID` riêng) bỏ: tin Altcoin đi theo Zoom của Cổ phiếu (người đã ghép đôi, `ZOOM_TO_JID`, Incoming Webhook của Cổ phiếu).
 - Không còn failover: Altcoin dừng vài giây mỗi lần upload hay khởi động lại server.
 - Nhật ký `events` của Altcoin chỉ giữ 200 ký tự đầu mỗi thông báo; tin bị cầu nối bỏ có toàn văn ở `/dulieu` của Cổ phiếu.
-- Chế độ trong Stockvn không chạy `altcoin/run.py`: không tự cài thư viện (Botkeep đã cài theo `requirements.txt`), không dọn pip cache.
+- Chế độ trong Stockvn không chạy `altcoin/run.py`: không tự cài thư viện (Botkeep đã cài theo `requirements.txt`), không dọn pip cache và `__pycache__`, không log dung lượng đĩa.
 - Hộp "Cập nhật bot" trên `/altcoin/phienban` viết cho bot chạy độc lập. Trong Stockvn: cập nhật bằng gói zip chung (mục 6), lệnh là `/alt phienban`.

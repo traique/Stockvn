@@ -4,7 +4,7 @@ Tài liệu này là kế hoạch, viết trước khi sửa code (đã triển 
 
 ## Trạng thái triển khai (2026-10-29)
 
-Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `5bd7c8e`) và **Altcoin 3.2.1** (build `b182102`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
+Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `5bd7c8e`) và **Altcoin 3.2.1** (build `07bb13b`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
 
 **Quyết định cuối của anh/chị** (đè lên kế hoạch):
 
@@ -44,7 +44,7 @@ Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1
 - `webguard.check_basic` tự đọc header Basic: `WEB_PASSWORD` có ký tự ngoài ASCII nay dùng được; header Basic hỏng tính là sai mật khẩu.
 - `zoom.handle` giữ chữ ký cũ; `ZoomChannel.sender(target)` trả JID người gửi cho bước `xacnhan`.
 - Giới hạn nhịp là cửa sổ trượt 15 tin/60 s và 5 tin/20 s, cách nhau ≥ 1 s (token bucket cho lọt 20 tin trong phút đầu). Tin dài được chia trước, mỗi phần có tiêu đề `🪙 Altcoin › (i/n)`.
-- Vùng găng: ngoài việc giữ SIGTERM/SIGINT ở luồng chính, một khoá chung cho lệnh sàn của mọi luồng, và lúc thoát tiến trình chờ tối đa 12 s cho lệnh đang chạy ở luồng khác (`/alt close`). Chỉ `LiveEngine` (paper không có lệnh trên sàn). Altcoin lên 3.2.1 nên câu "build `380dfca`" ở dưới là lịch sử.
+- Vùng găng: ngoài việc giữ SIGTERM/SIGINT ở luồng chính, một khoá chung cho lệnh sàn của mọi luồng, và lúc thoát tiến trình chờ tối đa 12 s cho lệnh đang chạy ở luồng khác (`/alt close`: cả lượt đóng là một vùng). Vùng gồm cả các bước theo sau lệnh sàn: báo tin mở lệnh, và sau chốt TP1 thì dời SL trên sàn, ghi DB, báo tin. Chỉ `LiveEngine` (paper không có lệnh trên sàn). Altcoin lên 3.2.1 nên câu "build `380dfca`" ở dưới là lịch sử.
 
 **Vấn đề còn mở (đã cân nhắc, chấp nhận):**
 
