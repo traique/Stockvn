@@ -1,5 +1,11 @@
 # OKX AI Altcoin Futures Bot
 
+> **Trong Stockvn:** bot này nằm ở thư mục `altcoin/` của repo `traique/stockvn` và chạy trên cùng server Botkeep với bot cổ phiếu (một gói zip, `python main_botkeep.py`); web ở `/altcoin/`, cùng mật khẩu `WEB_PASSWORD` của stock.
+> Lệnh gõ qua bot Telegram và app Zoom của stock: `/alt <lệnh>` (hoặc `/altcoin <lệnh>`); thông báo về cùng các chat của stock, có tiêu đề "🪙 Altcoin ›". Không dùng token Telegram hay app Zoom riêng.
+> Không còn Render: chỉ một server Botkeep, không chạy song song hay failover (xem mục 3b).
+> Kế hoạch gộp và cấu hình: [`docs/KE_HOACH_GOP_ALTCOIN.md`](../docs/KE_HOACH_GOP_ALTCOIN.md) ở gốc repo.
+> `bot/` và `run.py` giữ nguyên từng byte (mã bản dựng). Phần dưới là hướng dẫn gốc cho chế độ chạy độc lập (`python run.py`).
+
 Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh cả Long lẫn Short. Bộ lọc kỹ thuật khắt khe tự tìm tín hiệu; AI (qua **9Router** hoặc **OpenRouter**, model free) chỉ được gọi **2 lần cho mỗi lệnh**: 1 lần xác nhận trước khi vào, 1 lần tổng kết sau khi đóng. Có chế độ **chạy ảo (paper)**, Telegram, dashboard web. Chạy được trên **Botkeep.cloud** với runtime Python (không cần Docker).
 
 > ⚠️ Future đòn bẩy với vốn nhỏ rủi ro rất cao, có thể mất toàn bộ vốn. Đây là công cụ, không phải lời khuyên đầu tư. Chỉ bật `live` sau khi đã xem kết quả 2 tuần chạy ảo.
@@ -63,30 +69,21 @@ Botkeep chạy app theo runtime, nhận code qua **ZIP upload** hoặc **GitHub*
 
 **Chạy 9Router trên Botkeep**: 9Router là app Node.js, chạy thành **một server riêng** trên Botkeep (profile Node.js, start command `npx 9router` hoặc `9router`), rồi trong Secrets của bot đặt `NINEROUTER_BASE_URL=http://<địa-chỉ-server-9router>:20128/v1`. Nếu hai server trên Botkeep không gọi được nhau qua mạng nội bộ (tuỳ gói), anh có thể chạy 9Router trên máy tính cá nhân/VPS khác và trỏ URL public vào, hoặc đơn giản là chỉ dùng OpenRouter (`AI_PROVIDER_ORDER=openrouter`). Bot dùng ~200 MB RAM, 9Router thêm ~150–300 MB – vừa gói 2 GB.
 
-## 3b. Chạy song song trên Render free + Botkeep (dự phòng lẫn nhau)
+## 3b. Postgres dùng chung trên Supabase (tuỳ chọn)
 
-Hai máy chạy cùng lúc nhưng **chỉ một máy giao dịch** (leader), máy kia đứng chờ (standby). Chúng dùng chung một cơ sở dữ liệu Postgres nên thấy cùng số dư, lệnh, lịch sử, bài học AI. Leader gia hạn "khoá" mỗi 20 giây; nếu leader chết/ngủ quá `LEADER_TTL` (90 giây) thì standby tự tiếp quản và báo Telegram. Hai máy ping `/health` của nhau mỗi 4 phút để Render free không bị ngủ (Render tắt web service free sau 15 phút không có request).
+Bản cũ có mục chạy song song Render free + Botkeep: đã bỏ, chỉ còn một server Botkeep (`render.yaml` lấy lại bằng `git show 8332222:render.yaml`).
+Supabase vẫn dùng được để dữ liệu không nằm trên ổ đĩa server:
 
-**Bước 1 – Tạo Postgres dùng chung trên Supabase (free)**
-
-1. Vào supabase.com → New project → đặt tên, **Database password** (ghi lại; nên đặt chỉ gồm chữ + số để khỏi phải mã hoá URL), region gần Render nhất (Singapore nếu Render chọn Singapore).
-2. Trong project bấm nút **Connect** (góc trên) → tab **Connection string** → chọn **Session pooler** (KHÔNG chọn "Direct connection": kết nối trực tiếp chỉ có IPv6, Render free không ra được IPv6 nên sẽ báo lỗi mạng).
+1. Vào supabase.com → New project → đặt tên, **Database password** (ghi lại; nên đặt chỉ gồm chữ + số để khỏi phải mã hoá URL), region gần server nhất (Singapore).
+2. Trong project bấm nút **Connect** (góc trên) → tab **Connection string** → chọn **Session pooler** (KHÔNG chọn "Direct connection": kết nối trực tiếp chỉ có IPv6, máy không ra được IPv6 sẽ báo lỗi mạng).
 3. Chuỗi có dạng:
    `postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres`
    Thay `[YOUR-PASSWORD]` bằng mật khẩu. Nếu mật khẩu có ký tự đặc biệt phải mã hoá URL (`@`→`%40`, `#`→`%23`, `/`→`%2F`, `:`→`%3A`).
-4. Dán vào `DATABASE_URL` của **cả Render lẫn Botkeep**. Bot tự thêm `sslmode=require` và tự tắt prepared statement (bắt buộc với pooler của Supabase).
-5. Kiểm tra trước khi deploy: `python check_db.py` (đọc `.env`) → phải in `✅ Kết nối OK`.
+4. Dán vào `DATABASE_URL` (trong Stockvn: `ALT_DATABASE_URL`, không dùng chung DB với stock). Bot tự thêm `sslmode=require` và tự tắt prepared statement (bắt buộc với pooler của Supabase).
+5. Kiểm tra trước khi deploy: `python check_db.py` (đọc `.env`/`bot.env` cạnh nó, ưu tiên `ALT_DATABASE_URL`) → phải in `✅ Kết nối OK`.
 6. Bot tự tạo bảng khi chạy lần đầu, không cần làm gì trong SQL Editor. Dữ liệu xem được ở Supabase → Table Editor (bảng `trades`, `signals`, `reviews`, `locks`, `heartbeats`).
 
-Lưu ý Supabase free: project bị **tạm dừng (pause) sau 7 ngày không có truy vấn** – bot chạy liên tục thì không bị; nếu anh tắt cả hai bot hơn 1 tuần thì vào dashboard Supabase bấm Restore rồi chạy lại. Giới hạn 500 MB dữ liệu là dư thừa (bot ghi vài MB/tháng). Nếu Render của anh ở region khác, chọn region Supabase tương ứng để giảm độ trễ (mỗi truy vấn vẫn chỉ vài chục ms, không ảnh hưởng giao dịch).
-
-**Bước 2 – Render**: New → Web Service → kết nối repo GitHub (hoặc dùng file `render.yaml` qua New → Blueprint). Runtime Python, Build command `pip install -r requirements.txt`, Start command `python run.py`, plan Free. Environment: `DATABASE_URL` (chuỗi Supabase ở trên), `INSTANCE_NAME=render`, `MODE=paper`, Telegram, OpenRouter key, `AI_PROVIDER_ORDER=openrouter` (Render không chạy được 9Router cùng service), `PEER_URL=<URL public của Botkeep>` nếu có. Render tự cấp `PORT` và `RENDER_EXTERNAL_URL`, bot tự dùng.
-
-**Bước 3 – Botkeep**: như mục 3, thêm Secrets `DATABASE_URL` (cùng chuỗi), `INSTANCE_NAME=botkeep`, `PEER_URL=https://<tên-service>.onrender.com`. Nếu có 9Router ở Botkeep thì để `AI_PROVIDER_ORDER=9router,openrouter` ở đây.
-
-**Bước 4 – Kiểm tra**: mở dashboard của cả hai, góc trên hiển thị `render · LEADER` / `botkeep · STANDBY` và danh sách instance. Hoặc gõ `/status` trên Telegram. Tắt thử máy leader, sau ~1.5 phút máy kia sẽ nhắn "👑 … tiếp quản".
-
-Lưu ý: Render free cho 750 giờ/tháng – đủ chạy 1 service 24/7; ổ đĩa Render bị xoá mỗi lần deploy nên **bắt buộc** dùng `DATABASE_URL` (Supabase) khi chạy trên Render. Không dùng Postgres free của Render (hết hạn sau 30 ngày). Telegram chỉ cho một máy nhận lệnh, bot đã xử lý: chỉ leader nhận và gửi tin.
+Lưu ý Supabase free: project bị **tạm dừng (pause) sau 7 ngày không có truy vấn** – bot chạy liên tục thì không bị; nếu anh tắt bot hơn 1 tuần thì vào dashboard Supabase bấm Restore rồi chạy lại. Giới hạn 500 MB dữ liệu là dư thừa (bot ghi vài MB/tháng).
 
 ### Chạy trên VPS/máy thường
 
@@ -201,8 +198,7 @@ Bot **không chặn sẵn** luật nào. Mỗi luật được theo dõi kết q
 ## 7. Cấu trúc
 
 ```
-run.py            – start command cho Botkeep/Render: tự cài thư viện, chạy & tự khởi động lại bot
-render.yaml       – blueprint tạo Web Service free trên Render
+run.py            – start command khi chạy độc lập (Botkeep/VPS): tự cài thư viện, chạy & tự khởi động lại bot
 bot/config.py     – đọc biến môi trường / .env
 bot/exchange.py   – OKX qua ccxt
 bot/indicators.py – EMA/RSI/ATR/MACD/BB/ADX/VWAP
