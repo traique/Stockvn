@@ -24,21 +24,31 @@ Dữ liệu thị trường (DNSE, VCI, CafeF, Google News) không cần key.
 
 ## 2. Tạo gói upload
 
-Trên máy có mã nguồn (Python 3.11+):
+Trong thư mục mã nguồn, trên máy có **Python 3.12 trở lên** (Botkeep chạy 3.13):
 
 ```bash
-git clone https://github.com/traique/trading_vn.git
-cd trading_vn
-python scripts/build_botkeep_bundle.py
+python scripts/build_botkeep_bundle.py            # tạo gói
+python scripts/build_botkeep_bundle.py --check    # chỉ kiểm tra, không ghi gì
 ```
 
-Lệnh tạo `dist/botkeep/` và `dist/tradingagents-vn-botkeep.zip` (~100 file, ~230 KB). Script báo lỗi nếu vượt giới hạn upload của Botkeep (250 file, 4 MB). Gói chỉ gồm `tradingagents/`, `vnbot/`, `main_botkeep.py`, `requirements.txt`, `.env.example`, README này và LICENSE; test, ảnh, CLI được bỏ ra.
+Lệnh tạo `dist/botkeep/`, `dist/stockvn-botkeep-<phiên bản>.zip` và `dist/botkeep.json` (số file, dung lượng, chỗ còn trống, mã bản dựng). Gói hiện có 137 file trong 18 thư mục, 2,13 MB khi giải nén, zip 0,78 MB.
+
+Gói chỉ gồm `main_botkeep.py`, `requirements.txt`, `.env.example`, README này, LICENSE, các file `.py` của `tradingagents/` và `vnbot/`, cùng 3 file ảnh (`vnbot/static/favicon.png`, `vnbot/static/logo.png`, `tradingagents/assets/tauric-logo.svg`). Không bao giờ có `.env`, `data/`, file `.db`, `__pycache__/`, `tests/`, `docs/`.
+
+Script dừng (thoát 1) và không ghi gì khi:
+
+- vượt giới hạn upload của Botkeep: 250 file (tính cả thư mục), 4.000.000 B khi giải nén và 4.000.000 B file zip. Gần 85% giới hạn thì cảnh báo;
+- gói thiếu file, có file bị cấm, hoặc có file `.py` lỗi cú pháp;
+- mã bản dựng khác bản phát hành, tức sửa code mà quên `python -m vnbot.version --stamp` (mục 11);
+- file được đóng gói có thay đổi chưa commit. Thêm `--allow-dirty` để bỏ qua riêng kiểm tra này.
+
+Zip không ghi mục thư mục, để giữ số mục dưới 250. Nếu Botkeep giải nén thiếu thư mục lồng (`vnbot/static`, `tradingagents/agents/analysts`), tạo lại gói với `--dir-entries`.
 
 ## 3. Tạo server trên Botkeep
 
-1. Tạo workload **Python 3.11 trở lên**. Nếu gói cho phép chia tài nguyên, cấp khoảng 1,5 GB RAM.
-2. Upload file zip rồi giải nén vào **thư mục gốc** của server (hoặc upload nội dung `dist/botkeep/`).
-3. File khởi động: `main_botkeep.py`. File requirements: `requirements.txt`.
+1. Tạo workload **Python 3.12 trở lên** (Botkeep hiện chạy 3.13). Nếu gói cho phép chia tài nguyên, cấp khoảng 1,5 GB RAM.
+2. Upload file zip rồi giải nén vào **thư mục gốc** của server (hoặc upload nội dung `dist/botkeep/`). Kiểm tra có đủ thư mục lồng như `vnbot/static` và `tradingagents/agents/analysts`.
+3. File khởi động: `main_botkeep.py`. File requirements: `requirements.txt` (Botkeep cài lại mỗi lần upload).
 4. Copy `.env.example` thành `.env` (cùng thư mục với `main_botkeep.py`) và điền tối thiểu:
 
 ```env
@@ -559,7 +569,7 @@ Số phiên bản theo dạng `vMAJOR.MINOR.PATCH` (bản đầu tiên `v1.0.0`,
 
 ## 12. Bộ kiểm thử (chạy trước khi cập nhật bot)
 
-Thư mục `tests/` có hơn 370 kiểm tra **chạy offline**. Chúng không cần mạng, không gửi Telegram/Zoom và không đọc `.env` hay dữ liệu thật của bot. Mỗi lần sửa code hoặc nhận bản mới, chạy trên máy tính (Python 3.11+) trước khi upload:
+Thư mục `tests/` có hơn 1.000 kiểm tra **chạy offline**. Chúng không cần mạng, không gửi Telegram/Zoom và không đọc `.env` hay dữ liệu thật của bot. Mỗi lần sửa code hoặc nhận bản mới, chạy trên máy tính (Python 3.12+) trước khi upload:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -569,7 +579,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `22/22 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `23/23 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì 3 bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -582,6 +592,7 @@ Kết quả `22/22 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `review_2026_10_23` | Các lỗi sửa ngày 23/10/2026 (xem `BAO_CAO_RA_SOAT_2026-10-23.md`): Output Guard, khối ngoại khớp lệnh, cache giá ngày nghỉ, chấm điểm bộ nhớ, hạn mức AI, Zoom |
 | `store` | Kho dữ liệu (SQLite, migration, chọn dòng cho thống kê), cổng chặn MUA và quyết định khi nhấc cổng thị trường, kế hoạch bóng (T+2, khoảng trống giá, không khớp), kết quả 5/10/20 phiên, thống kê và t, che bí mật trong log, trang `/tinhieu` `/dulieu`, tải CSV/JSON, lệnh `/vikhongmua` |
 | `breakout` | Công tắc MUA breakout: breakout thành THEO DÕI (đang giữ: GIỮ không kèm kế hoạch), pullback không đổi, kết quả bóng nhóm riêng, hiệu chỉnh đêm không đổi công tắc, nút trên trang `/bot` (mật khẩu, chặn POST chéo trang) |
+| `bundle` | Gói Botkeep: chỉ file trong danh sách cho phép, không `.env`/`.db`/`data/`/`__pycache__`/`tests/` (thử với file mồi), giới hạn 250 file và 4 MB, zip tái lập được, mã bản dựng đúng bản phát hành, thay đổi chưa commit bị chặn |
 | `web`, `security_web`, `security_zoom`, `security_telegram` | Mật khẩu web, chặn POST chéo trang, giới hạn kích thước request, chữ ký Zoom, ghép đôi Zoom, chỉ người được phép mới ra lệnh Telegram, token không lộ trong log |
 
 Một số kiểm tra so với **số đã ghi lại** (ví dụ kết quả chiến lược Phòng thủ trên dữ liệu giả lập). Sửa chiến lược **có chủ đích** thì kiểm tra đó báo đổi: xem lại số mới rồi cập nhật trong file bộ kiểm thử. Bot không bao giờ chạy bộ kiểm thử; script tạo gói Botkeep bỏ thư mục `tests/` ra (có upload kèm cũng không sao).
