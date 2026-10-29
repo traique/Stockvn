@@ -4,22 +4,25 @@ offline: the real TelegramBot with a fake Bot API, the real Zoom webhook path, a
 
 - /alt, /alt help, /ALT STATUS, /alt@Bot, /altcoin, Zoom "alt status"; an unknown word and the
   altcoin's bare commands (/close, /status...) never reach the child; with no bridge (the stock
-  alone) or the altcoin off, HELP, /docs and every stock command are unchanged;
+  alone) or the altcoin off, HELP, /docs and every stock command are unchanged (off: every /alt,
+  zoomtest and close included, says so and sends nothing);
 - the stock's own permissions (a stranger runs nothing, a group gets its answer, Zoom commands
   switched off run nothing); close/apply/resume need "/alt <lệnh> xacnhan" from the same
   sender in the same chat within 120 s, once (Zoom: the real JID, not the shared "zoom" id);
 - the answers when the child is off, starting, waiting, unreachable, not the leader, busy,
   slow or failing; a write is never sent twice, a timed-out close then a second one is "busy";
-- notifications: prefix, every report chat once and Zoom, takeover dropped, start notice once
-  per 30 minutes, /resume -> /alt resume, dedupe, 15 a minute with a summary (🛑 always), a
-  blocked channel never blocks the pipe reader, failures counted, the "altcoin" switch, the
-  50 kept before the stock is up, secrets masked, /alt zoomtest per channel.
+- notifications: prefix (on every part of a long one, answers too), every report chat once and
+  Zoom, takeover dropped, start notice once per 30 minutes, /resume -> /alt resume, dedupe (a
+  dropped one may come again), 15 a minute with a summary a minute after the first dropped
+  (🛑 always), a blocked channel never blocks the pipe reader, failures counted, the "altcoin"
+  switch, the 50 kept before the stock is up, secrets masked, /alt zoomtest per channel.
 """
 import contextlib
 import io
 import json
 import logging
 import os
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -185,6 +188,11 @@ t.ok("altcoin off: a bare /close gets the stock's help, no hint", last(111) == p
 bot._handle(m(111, 111, "/alt status"))
 t.ok("altcoin off: /alt status says so", last(111) == "🪙 Altcoin đang tắt (ALTCOIN_ENABLED khác 1)." and len(SEEN) == n,
      last(111))
+for text in ("/alt zoomtest", "/alt close", "/alt close xacnhan", "/alt", "/alt pause"):
+    bot._handle(m(111, 111, text))
+    t.ok(f"altcoin off: {text} says so, nothing to the report chats, nothing asked",
+         last(111) == "🪙 Altcoin đang tắt (ALTCOIN_ENABLED khác 1)." and not texts(-100500) and not texts(-100600)
+         and len(SEEN) == n, last(111))
 bot.alt = quiet(SUP)
 line = "/alt <lệnh> - bot Altcoin (OKX): gõ /alt để xem lệnh\n"
 t.ok("altcoin on: HELP gains the /alt line only", line in bot._help() and bot._help().replace(line, "") == plain_help)
@@ -377,7 +385,10 @@ CHILD["fn"] = lambda body: (200, {"ok": True, "reply": {
     "status": "x" * 9000, "lessons": f"khoá {SECRET} lộ"}[body["cmd"]]})
 n = len(CALLS)
 bot._handle(m(111, 111, "/alt status"))
-t.ok("an answer of 9,000 characters: 3 Telegram messages", len(CALLS) == n + 3, len(CALLS) - n)
+t.ok("an answer of 9,000 characters: 3 Telegram messages, each with the header and its number",
+     len(CALLS) == n + 3 and [x[:len(ab.PREFIX) + 6] for x in texts(111)[-3:]] == [
+         f"{ab.PREFIX}({i}/3) " for i in (1, 2, 3)] and texts(111)[-3].endswith(") status\n" + "x" * (ab.PART - 7)),
+     [x[:30] for x in texts(111)[-3:]])
 bot._handle(m(111, 111, "/alt learn"))
 t.ok("'gõ /apply' in an answer becomes 'gõ /alt apply'", "gõ /alt apply để áp dụng" in last(111) and "gõ /apply" not in last(111))
 bot._handle(m(111, 111, "/alt lessons"))
@@ -388,6 +399,11 @@ bot.zoom = type("Z", (), {"reply": lambda self, target, text: replies.append((ta
 bot._handle({"chat": {"id": "zoom:7"}, "from": {"id": tb.ZOOM_USER, "jid": "a@x", "chat": "a@x"}, "text": "/alt learn"})
 t.ok("an answer to a Zoom command goes to zoom.reply", replies and replies[-1][0] == "zoom:7"
      and replies[-1][1].startswith("🪙 Altcoin › learn"))
+n = len(replies)
+bot._handle({"chat": {"id": "zoom:7"}, "from": {"id": tb.ZOOM_USER, "jid": "a@x", "chat": "a@x"}, "text": "/alt status"})
+t.ok("...a long one: 3 Zoom replies, each with the header, none cut again by Zoom (3,800)",
+     len(replies) == n + 3 and all(x[1].startswith(ab.PREFIX) and len(x[1]) <= 3800 for x in replies[-3:]),
+     [x[1][:30] for x in replies])
 bot.zoom = None
 
 # ── 7. notifications ──
@@ -458,6 +474,7 @@ read_end, write_end = os.pipe()
 os.write(write_end, frame)
 os.close(write_end)
 CALLS.clear()
+fz.sent.clear()
 with contextlib.redirect_stdout(io.StringIO()):
     sup._read_hub(read_end)                 # the real reader: the line, then put() of this bridge
 queued = []
@@ -469,8 +486,12 @@ clock.t += 2
 parts = sent_texts()
 t.ok("12,000 characters of Vietnamese and emoji (one frame of %d KiB): read whole, sent as Telegram parts of at most "
      "3,900 characters" % (len(frame) // 1024), len(frame) < 60 * 1024 and queued == [long_text]
-     and len(parts) == 4 and all(len(x) <= 3900 for x in parts) and "".join(parts) == ab.PREFIX + long_text,
+     and len(parts) == 4 and all(len(x) <= 3900 for x in parts)
+     and " ".join(re.sub(r"^🪙 Altcoin › \(\d/4\) ", "", x) for x in parts).split() == long_text.split(),
      [len(x) for x in parts])
+t.ok("...every part, in each report chat and Zoom, starts with '🪙 Altcoin › (i/4)' (none cut again by a channel)",
+     [x[:len(ab.PREFIX) + 6] for x in parts] == [f"{ab.PREFIX}({i}/4) " for i in (1, 2, 3, 4)]
+     and texts(-100600) == parts and fz.sent == parts and all(len(x) <= 3800 for x in parts), [x[:20] for x in fz.sent])
 
 # 30 in a minute: at most 15, the 🛑 one always, a summary, 1 s apart
 clock.t += 600
@@ -485,19 +506,29 @@ logging.getLogger("vnbot.altcoin_bridge").addHandler(handler)
 logging.getLogger("vnbot.altcoin_bridge").setLevel(logging.INFO)
 dropped0 = sup.state()["bridge"]["dropped"]
 start = clock.t
-for i in range(30):
+first = None                                 # when the first one was dropped
+for i in range(30):                          # as the altcoin-notify thread does: handle, then _summary
+    at = clock.t
     bridge.handle("🛑 DỪNG GIAO DỊCH lần 20" if i == 20 else f"📊 tín hiệu số {i:02d}")
+    if first is None and sup.state()["bridge"]["dropped"] > dropped0:
+        first = at
+    bridge._summary()
     clock.t = max(clock.t, start + 2 * (i + 1))
 burst = sent_texts()
 print(f"     ({len(burst)} of 30 sent)")
-t.ok("30 notifications in a minute: at most 15 sent", len(burst) <= 15, len(burst))
+t.ok("30 notifications in a minute: at most 15 sent, no summary yet", len(burst) <= 15 and first is not None
+     and not any("Bỏ qua" in x for x in burst), burst[-3:])
 t.ok("...the 🛑 one among them still sent", "🪙 Altcoin › 🛑 DỪNG GIAO DỊCH lần 20" in burst)
 t.ok("...the rest counted as dropped and logged whole", sup.state()["bridge"]["dropped"] - dropped0 == 30 - len(burst)
      and buf.getvalue().count("bỏ thông báo vì quá dày: 📊 tín hiệu số") == 30 - len(burst), buf.getvalue()[-300:])
-clock.t += 61
+clock.t = first + ab.SUMMARY_EVERY - 1
 bridge._summary()
-t.ok("...and one summary: 'Bỏ qua N thông báo vì quá dày'",
-     sent_texts()[-1] == f"🪙 Altcoin › Bỏ qua {30 - len(burst)} thông báo vì quá dày – xem /dulieu", sent_texts()[-1])
+t.ok("...no summary before a minute after the first dropped", sent_texts() == burst)
+clock.t = first + ab.SUMMARY_EVERY
+bridge._summary()
+bridge._summary()
+t.ok("...then one summary of them all: 'Bỏ qua N thông báo vì quá dày'", sent_texts()[len(burst):] == [
+     f"🪙 Altcoin › Bỏ qua {30 - len(burst)} thông báo vì quá dày – xem /dulieu"], sent_texts()[len(burst):])
 CALLS.clear()
 stamps.clear()
 clock.t += 600
@@ -505,6 +536,11 @@ for i in range(8):                       # all at the same moment
     bridge.handle(f"⚡ cùng lúc {i}")
 t.ok("a burst at one moment: 5 sent, each at least 1 s after the one before",
      len(sent_texts()) == 5 and all(b - a >= 1.0 for a, b in zip(stamps, stamps[1:])), stamps)
+deduped0 = sup.state()["bridge"]["deduped"]
+clock.t += ab.BURST_SECONDS + 5
+bridge.handle("⚡ cùng lúc 7")
+t.ok("a dropped one sent again 25 s later: sent (not taken for a repeat)", sent_texts()[-1] == "🪙 Altcoin › ⚡ cùng lúc 7"
+     and sup.state()["bridge"]["deduped"] == deduped0, sent_texts()[-1:])
 bot.alt_broadcast = real_broadcast
 logging.getLogger("vnbot.altcoin_bridge").removeHandler(handler)
 

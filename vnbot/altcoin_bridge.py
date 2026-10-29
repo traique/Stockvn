@@ -11,16 +11,19 @@ Commands, "/alt <lệnh>" (alias "/altcoin"), from a sender the stock already al
 - close (60 s) and apply (30 s) run on an "alt-cmd" thread, one at a time; a write command is
   never sent again after an error or a timeout (the child holds a lock until it is done, so a
   second close is refused there, not run twice);
-- the child off, starting, waiting, not the leader, busy, slow or failing: a plain answer.
+- the child off, starting, waiting, not the leader, busy, slow or failing: a plain answer
+  (ALTCOIN_ENABLED not 1: every /alt, zoomtest and close included, gets "Altcoin đang tắt").
 
 Notifications: the supervisor's pipe reader hands each one to ``put`` (never blocks: a queue of
 200, a full queue drops and counts). The "altcoin-notify" thread masks secrets, drops the
 leader takeover notice (one instance only) and keeps one start notice per 30 minutes, turns a
 bare /resume, /apply... into "/alt ...", sends the same text once per 120 s, at most 15 per
 minute and 5 per 20 s, 1 s apart (🛑/⚠️ ones pass the limit; what is dropped is logged whole,
-with a summary each minute), then sends "🪙 Altcoin › <text>" where the stock's own
-notifications go (TelegramBot.alt_broadcast: its switches, plus the "altcoin" switch). Before
-the stock is up, the last 50 wait. Counters: the supervisor's ``bridge`` (/altcoin/hub.json).
+with a summary a minute after the first one), then sends "🪙 Altcoin › <text>" where the
+stock's own notifications go (TelegramBot.alt_broadcast: its switches, plus the "altcoin"
+switch). A long notification or answer goes as parts that each carry the header, "(2/3)",
+short enough that no channel cuts them again. Before the stock is up, the last 50 wait.
+Counters: the supervisor's ``bridge`` (/altcoin/hub.json).
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ import threading
 import time
 
 from vnbot.eventlog import redact
+from vnbot.zoom import split
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,7 @@ QUEUE_SIZE, EARLY_KEPT = 200, 50
 DEDUPE_SECONDS, START_EVERY = 120, 1800
 PER_MINUTE, BURST, BURST_SECONDS, SPACING = 15, 5, 20, 1.0
 SUMMARY_EVERY = 60
+PART = 3500              # characters of one part, under every channel's own cut (Telegram 3,900, Zoom 3,800)
 
 HELP = ("🪙 Altcoin (bot OKX) – gõ /alt <lệnh> (Zoom: alt <lệnh>):\n"
         "/alt status – vốn, lệnh mở, quét gần nhất\n"
@@ -83,6 +88,15 @@ def rewrite(text: str) -> str:
     return _HINT.sub(r"/alt \1", text)
 
 
+def parts(text: str) -> list[str]:
+    """A message that starts with PREFIX, as messages that each start with it ("(2/3)" after
+    it when there are several); any other message as it is."""
+    if not text.startswith(PREFIX) or len(text) <= PART:
+        return [text]
+    pieces = split(text[len(PREFIX):], PART)
+    return [f"{PREFIX}({i}/{len(pieces)}) {piece.lstrip()}" for i, piece in enumerate(pieces, 1)]
+
+
 class Bridge:
     def __init__(self, supervisor):
         self.sup = supervisor
@@ -110,6 +124,9 @@ class Bridge:
         """'/alt <args>' from an allowed sender. ``key``: (channel, real sender, chat) of the
         two-step commands; ``source``: "Telegram" or "Zoom" (the altcoin says "qua Zoom");
         ``reply(text)`` answers in that chat."""
+        if not self.enabled:
+            reply(self._not_running(self.sup.state()))
+            return
         words = args.lower().split()
         cmd = words[0] if words else ""
         if cmd in ("zoompair", "zoomxoa", "zoomstatus"):
@@ -124,7 +141,8 @@ class Bridge:
                 reply(asked)
                 return
         if cmd not in SLOW:
-            reply(self.call(cmd, source, key))
+            for part in parts(self.call(cmd, source, key)):
+                reply(part)
             return
         if not self._busy.acquire(blocking=False):
             reply(BUSY)
@@ -133,7 +151,8 @@ class Bridge:
 
         def work() -> None:
             try:
-                reply(self.call(cmd, source, key))
+                for part in parts(self.call(cmd, source, key)):
+                    reply(part)
             except Exception:  # noqa: BLE001 - logged; the lock is released below
                 logger.exception("Altcoin: lệnh /alt %s lỗi", cmd)
             finally:
@@ -276,20 +295,22 @@ class Bridge:
         if text in self._seen:
             self.sup.count("deduped")
             return
-        self._seen[text] = now
         while self._sent and now - self._sent[0] >= 60:
             self._sent.popleft()
         if not text.startswith(("🛑", "⚠️")) and (
                 len(self._sent) >= PER_MINUTE or sum(now - t < BURST_SECONDS for t in self._sent) >= BURST):
+            if not self._skipped:
+                self._summary_at = now           # the summary: a minute after the first one dropped
             self._skipped += 1
             self.sup.count("dropped")
             logger.warning("Altcoin: bỏ thông báo vì quá dày: %s", text)
             return
+        self._seen[text] = now                   # only once sent: a dropped one may come again
         self._send(text)
 
     def _summary(self) -> None:
         if self._skipped and self._now() - self._summary_at >= SUMMARY_EVERY:
-            n, self._skipped, self._summary_at = self._skipped, 0, self._now()
+            n, self._skipped = self._skipped, 0
             if self._sink.alt_on():
                 self._send(f"Bỏ qua {n} thông báo vì quá dày – xem /dulieu")
 
@@ -304,5 +325,7 @@ class Bridge:
             self.sup.count("send_failed")
             logger.warning("Altcoin: một kênh không nhận thông báo: %s", text)
 
-        if self._sink.alt_broadcast(PREFIX + text, on_fail=failed) is False:
-            self.sup.count("muted")
+        for part in parts(PREFIX + text):
+            if self._sink.alt_broadcast(part, on_fail=failed) is False:
+                self.sup.count("muted")
+                return

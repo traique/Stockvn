@@ -603,7 +603,7 @@ class TelegramBot:
             key, source = ("zoom", sender.get("jid") or "", sender.get("chat") or ""), "Zoom"
         else:
             key, source = ("telegram", sender.get("id"), chat_id), "Telegram"
-        if (args.split() or [""])[0].lower() == "zoomtest":
+        if self.alt.enabled and (args.split() or [""])[0].lower() == "zoomtest":   # off: the bridge says so
             self.send(chat_id, self.alt_test())
         else:
             self.alt.command(args, key, source, lambda text: self.send(chat_id, text))

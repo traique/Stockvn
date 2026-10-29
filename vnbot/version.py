@@ -26,7 +26,7 @@ from pathlib import Path
 
 VERSION = "v1.15.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "213e9cf"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "5bd7c8e"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -45,7 +45,7 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Cài đặt Altcoin: kênh Telegram/Zoom do Cổ phiếu quản lý; /altcoin/zoom chuyển sang /zoom của Cổ phiếu",
         "Lệnh Altcoin trên bot Telegram và app Zoom của Cổ phiếu: /alt <lệnh> (hoặc /altcoin), Zoom gõ alt <lệnh>",
         "/alt close, apply, resume phải gõ thêm xacnhan trong 120 giây; /close, /status... gõ trần chỉ nhận gợi ý",
-        "Thông báo Altcoin tới cùng chat và Zoom của Cổ phiếu, mở đầu “🪙 Altcoin ›”; công tắc Altcoin trên /ai",
+        "Tin Altcoin tới cùng chat và Zoom của Cổ phiếu, mọi phần mở đầu “🪙 Altcoin ›”; công tắc Altcoin trên /ai",
         "Thông báo Altcoin chống trùng, tối đa 15 tin/phút (tin 🛑/⚠️ luôn gửi); /alt zoomtest gửi thử từng kênh",
         "Cần Python 3.12 trở lên",
     )),
