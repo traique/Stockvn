@@ -26,7 +26,7 @@ from pathlib import Path
 
 VERSION = "v1.15.0"
 RELEASED = "2026-10-29"
-RELEASE_BUILD = "462dc9d"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "bc6c262"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -35,7 +35,9 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Bot Altcoin (OKX) chạy cùng server, là tiến trình con có giám sát; mặc định tắt, bật bằng ALTCOIN_ENABLED=1",
         "Altcoin dùng DB riêng (data/altcoin), không bao giờ dùng DB, token Telegram hay khoá Zoom của Cổ phiếu",
         "Chạy thật (live) chỉ khi đủ ALT_MODE, ALT_I_UNDERSTAND_THE_RISK, ALT_LIVE_ACK và khoá ALT_OKX_*",
+        "ALT_MODE=live mà thiếu điều kiện: Altcoin không chạy (không lùi về paper trên DB live)",
         "Tự chặn DB rỗng, DB của Cổ phiếu và instance Altcoin thứ hai; Altcoin lỗi thì tự chạy lại",
+        "Chặn chạy paper khi DB còn lệnh live đang mở (và ngược lại); ALTCOIN_FRESH_START chỉ cho paper",
         "/health thêm trạng thái Altcoin; log Altcoin có tiền tố [altcoin], đã che bí mật",
         "Cần Python 3.12 trở lên",
     )),

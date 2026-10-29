@@ -236,9 +236,11 @@ Child gửi trạng thái riêng qua khung `{"t":"state",…}` trên pipe (schem
    |---|---|
    | `DATABASE_URL` đã chuẩn hoá trùng `--deny-db` | 78 |
    | DB Postgres có bảng `market` hoặc `fills` trong `public` (cùng DB stock qua endpoint khác) | 78 |
-   | DB rỗng: SQLite chưa có file, hoặc kv thiếu cả `start_equity` lẫn `paper_balance`, và không có `--allow-empty-db` | 78 "DB rỗng – chép DB cũ hoặc đặt ALTCOIN_FRESH_START=1" |
+   | DB rỗng: SQLite chưa có file, hoặc kv thiếu cả `start_equity` lẫn `paper_balance`, và không có `--allow-empty-db` (cờ này chỉ có tác dụng với paper) | 78 "DB rỗng – chép DB cũ hoặc đặt ALTCOIN_FRESH_START=1" |
+   | DB rỗng mà `<DATA_DIR>/hosted.funded` đã có (thread `hub-notify` ghi file này khi bot chạy lần đầu trên DB có dữ liệu): DB bị đổi lặng lẽ, ví dụ `ALT_DATABASE_URL` bị che hoặc mất `bot.db` | 78 "DB rỗng, nhưng thư mục dữ liệu này đã chạy trên DB có dữ liệu…", kể cả khi `ALTCOIN_FRESH_START=1` còn để quên |
+   | `trades` có lệnh `status='open'` của chế độ khác `--mode`: paper sẽ đóng ảo lệnh live (vị thế thật trên OKX bị bỏ mặc), live sẽ quản lý lệnh paper như lệnh thật | 78 "DB có lệnh live đang mở – chạy paper sẽ đóng ảo chúng…" (hoặc ngược lại) |
    | **Một instance trên cùng host:** `fcntl.flock(LOCK_EX \| LOCK_NB)` trên `<DATA_DIR>/hosted.lock`, giữ suốt đời child (kernel tự nhả khi child chết, kể cả SIGKILL) | Bị giữ → 75 "child khác trên cùng host còn chạy". Chặn được hai child chồng nhau lúc restart dù cùng tên và cùng host. |
-   | **Một instance duy nhất:** `heartbeats` có instance khác còn sống, tức `ts` trong `LEADER_TTL` và tên khác, hoặc cùng tên nhưng `host=` khác `os.uname().nodename` | 75 "instance khác đang chạy: `<tên>@<host>` – dừng server altcoin cũ / Render". Áp cho cả paper lẫn live. Cùng tên cùng host thì đã qua `flock`, nên được chạy. |
+   | **Một instance duy nhất:** `heartbeats` có instance khác còn sống, tức `ts` trong `LEADER_TTL` và tên khác, hoặc cùng tên nhưng `host=` khác `os.uname().nodename` | 75 "instance khác đang chạy: `<tên>@<host>` – dừng server altcoin cũ / Render". Áp cho cả paper lẫn live. Cùng tên cùng host thì đã qua `flock`, nên được chạy. Khi bot đã chạy, `hub-notify` đọc lại `heartbeats` mỗi 15 s: cùng tên mà `host=` khác (server cũ bật lại sau, cùng tên nên cùng gia hạn khoá `trader`, hai bên cùng giao dịch) thì ERROR, khung `state` cuối `waiting`, child tự SIGTERM và thoát 75. |
 
    Trước khi thoát 78/75, child gửi một khung `state` cuối có `reason`.
 
@@ -538,7 +540,7 @@ Child chỉ đọc `altcoin/.env` và `altcoin/bot.env`. Có thể chép `bot.en
 |---|---|---|
 | `INSTANCE_NAME`, `PUBLIC_URL`, `DATA_DIR`, `PORT`/`DASHBOARD_*PORT/HOST` | Niêm phong (argv) | `bot.env` khác thì WARNING |
 | `MODE`, `I_UNDERSTAND_THE_RISK` | Supervisor (argv) | `bot.env` khác thì ERROR |
-| `OKX_*` | live: panel `ALT_OKX_*`; paper: bị xoá | Key chỉ có trong `bot.env` thì vẫn chạy paper (ERROR) |
+| `OKX_*` | live: panel `ALT_OKX_*`; paper: bị xoá | Key chỉ có trong `bot.env`: `ALT_MODE=live` thì không chạy (ERROR); paper thì key bị xoá |
 | `TELEGRAM_*`, `ZOOM_*`, `PEER_URL`, `SELF_URL`, `DASHBOARD_USER/PASS` | **Luôn rỗng** | `bot.env` có thì WARNING + `ignored_keys` |
 | `DATABASE_URL` | Panel `ALT_DATABASE_URL`, nếu không có thì `bot.env` | Mọi kiểm tra ở §1 bước 5 chạy trên giá trị hiệu lực |
 | Tham số còn lại | `bot.env` (file-wins như altcoin gốc) | |
@@ -551,10 +553,10 @@ Child chỉ đọc `altcoin/.env` và `altcoin/bot.env`. Có thể chép `bot.en
    - `ALT_LIVE_ACK` bằng `ALT_INSTANCE_NAME`;
    - đủ ba `ALT_OKX_API_KEY/SECRET/PASSPHRASE`.
 
-   Sai bất kỳ điều kiện nào thì chạy paper, kèm ERROR và dòng đỏ trên `/altcoin/`. Điều kiện về peer của bản 1 đã bỏ, vì không còn peer.
+   `ALT_MODE` khác trống/`paper` mà sai bất kỳ điều kiện nào thì Altcoin **không chạy** (`disabled`, kèm ERROR và lý do). Không lùi về paper: DB đó nhiều khả năng là DB live, paper sẽ ghi `paper_balance`, dừng giao dịch vì "sụt vốn" và đóng ảo lệnh live. Điều kiện về peer của bản 1 đã bỏ, vì không còn peer.
 2. **`hosted.py` ghi đè `cfg.MODE`**, chạy lại hai kiểm tra của `main()` và thoát 78 nếu sai.
 3. **Paper:** xoá `cfg.OKX_*` và `I_UNDERSTAND_THE_RISK`, nên không gọi được endpoint riêng tư nào.
-4. **Một instance duy nhất:** `hosted.py` thoát 75 nếu `heartbeats` có instance khác còn sống trong `LEADER_TTL`. Không còn peer, nên không còn chuyện một instance paper "đóng" lệnh thật trong DB. Chặn này bắt nốt server altcoin cũ hoặc Render chưa tắt.
+4. **Một instance duy nhất:** `hosted.py` thoát 75 nếu `heartbeats` có instance khác còn sống trong `LEADER_TTL`, lúc khởi động và (cùng tên, host khác) suốt lúc chạy. Chặn này bắt nốt server altcoin cũ hoặc Render chưa tắt. Một instance paper vẫn có thể "đóng" lệnh thật trong DB của chính nó, nên `hosted.py` còn thoát 78 khi DB có lệnh đang mở của chế độ khác.
 5. **Web và chat không đổi được chế độ:**
    - `config.FIELDS` không có `ALT_*` hay `MODE` (có test kiểm);
    - `MODE` trần trên panel bị bỏ và chỉ cảnh báo;
@@ -852,7 +854,7 @@ Luôn **tạm dừng Render trước, rồi dừng server altcoin cũ**. Dừng 
   5. đặt `ALT_INSTANCE_NAME=crypto`, `ALTCOIN_ENABLED=1`, rồi khởi động lại.
 
   Nếu File Manager giới hạn 4 MB thì chạy `VACUUM` trước, hoặc đẩy lên Postgres. Nếu file chép xong trong vòng 90 s sau khi dừng server cũ, heartbeat cũ (khác host) còn "sống", nên child chờ một lượt 75 rồi tự chạy.
-- **Chặn DB rỗng ngay trong code** (§1 bước 5). Muốn bắt đầu mới hoàn toàn thì đặt `ALTCOIN_FRESH_START=1` cho lần chạy đầu.
+- **Chặn DB rỗng ngay trong code** (§1 bước 5). Muốn bắt đầu mới hoàn toàn thì đặt `ALTCOIN_FRESH_START=1` cho lần chạy đầu (chỉ paper), rồi bỏ đi. Để quên cũng không mở DB rỗng nữa sau lần chạy đầu: `<ALT_DATA_DIR>/hosted.funded` chặn.
 - **Giai đoạn 0, chỉ đọc, chạy cục bộ:** liệt kê bảng của từng URL. `check_db.py` không làm được việc này, vì nó tạo rồi xoá bảng ping.
 
   ```bash

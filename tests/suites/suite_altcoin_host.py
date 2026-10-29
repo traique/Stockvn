@@ -69,12 +69,15 @@ def tree(name: str, bot_env: str = "", stock_env: str = "") -> Path:
     return alt
 
 
-def alt_db(path: Path, *, funded=True, beats=(), tables=()) -> Path:
-    """An altcoin SQLite database: kv (start_equity), heartbeats, any other tables."""
+def alt_db(path: Path, *, funded=True, beats=(), tables=(), trades=()) -> Path:
+    """An altcoin SQLite database: kv (start_equity), heartbeats, trades ((mode, status), ...), any other tables."""
     path.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path / "bot.db")
     con.execute("CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT)")
     con.execute("CREATE TABLE heartbeats(instance TEXT PRIMARY KEY, ts REAL, role TEXT, info TEXT)")
+    if trades:
+        con.execute("CREATE TABLE trades(id INTEGER PRIMARY KEY, mode TEXT, symbol TEXT, status TEXT)")
+        con.executemany("INSERT INTO trades(mode, symbol, status) VALUES(?, 'BTC/USDT:USDT', ?)", trades)
     if funded:
         con.execute("INSERT INTO kv VALUES('start_equity', '10')")
     for name, age, host in beats:
@@ -89,10 +92,11 @@ def alt_db(path: Path, *, funded=True, beats=(), tables=()) -> Path:
 
 # The child under test, in its own process: _common first (offline), the child's environment back,
 # then hosted.main(argv) with launch() replaced: "guards" stops before bot.main, "stub" runs
-# bot.main.main() with a stub Bot, "real" builds the real Bot() (its run loop not started).
+# bot.main.main() with a stub Bot, "rival" too, its heartbeats showing this instance name on
+# another host, "real" builds the real Bot() (its run loop not started).
 DRIVER = TMP / "driver.py"
 DRIVER.write_text(r'''
-import json, os, socket, subprocess, sys, time
+import json, os, socket, subprocess, sys, time, types
 suites, alt, kind = sys.argv[1:4]
 saved = dict(os.environ)
 sys.path.insert(0, suites)
@@ -109,7 +113,6 @@ def _lookup(host, *a, **k):
 socket.getaddrinfo = _lookup
 fake_pg = json.loads(saved.get("FAKE_PG") or "null")
 if fake_pg is not None:
-    import types
     class Conn:
         def __enter__(self): return self
         def __exit__(self, *a): return False
@@ -119,6 +122,7 @@ if fake_pg is not None:
                 def fetchall(self_):
                     if "information_schema" in sql: return [(x,) for x in fake_pg["tables"]]
                     if "FROM kv" in sql: return [("start_equity",)] if fake_pg.get("funded") else []
+                    if "FROM trades" in sql: return [(m,) for m in fake_pg.get("open_modes", [])]
                     return [tuple(b) for b in fake_pg.get("beats", [])]
             return R()
     def connect(url, **kw):
@@ -157,6 +161,27 @@ def launch():
                 report(cfg)
             def run(self):
                 out["ran"] = True
+        bm.Bot = Bot
+        bm.main()
+    elif kind == "rival":
+        import bot.main as bm
+        hosted.install_seams(bm)
+        hosted.RIVAL_EVERY = 0.1
+        class Store:
+            def instances(self_):
+                out["looked"] = out.get("looked", 0) + 1
+                return [{"instance": cfg.INSTANCE_NAME, "ts": time.time(), "role": "leader",
+                         "info": "v3.2.0 b380dfca paper=True host=old-server"}]
+        class Bot:
+            def __init__(self):
+                self.store, self.is_leader, self.start_equity = Store(), True, 10.0
+                self.tg = bm.Telegram(self)
+                self.notify = types.SimpleNamespace(channels=[self.tg])
+            def run(self):
+                try:
+                    time.sleep(30)
+                except KeyboardInterrupt:          # bot.main's SIGTERM handler, as its run loop
+                    out["stopped_by_sigterm"] = True
         bm.Bot = Bot
         bm.main()
     else:
@@ -267,6 +292,16 @@ t.ok("...not over the altcoin's own (panel ALT_, or altcoin/bot.env; a <...> pla
      env2["OPENROUTER_API_KEY"] == "sk-or-alt" and "NINEROUTER_API_KEY" not in env2
      and env2.get("NINEROUTER_BASE_URL") == stock["ROUTER9_BASE_URL"], info2["shared"])
 t.ok("child env: an empty ALT_ value is left out", "EMPTY" not in env)
+bad = TMP / "badenv"
+bad.mkdir()
+(bad / ".env").write_text("LEVERAGE=4\n", encoding="utf-8")
+(bad / "bot.env").write_bytes(b"LEVERAGE=5\n# ghi ch\xfa\nOKX_API_KEY=x\n")
+try:
+    got = ah.file_values(bad)
+except Exception as exc:  # noqa: BLE001
+    got = repr(exc)
+t.ok("file_values: a bot.env that is not UTF-8 is skipped, as the child skips it (never a supervisor error forever)",
+     got == {"LEVERAGE": "4"}, got)
 
 from vnbot import config as stock_config  # noqa: E402
 
@@ -290,10 +325,15 @@ for name, (environ, why) in cases.items():
     mode, error = ah.live_gate(environ, "crypto")
     t.ok(f"live gate: {name} → paper" + (" with the reason" if why else ""), mode == "paper"
          and (error is None if why is None else why in (error or "")), error)
-sup = ah.Supervisor(TMP / "gate-data", environ={**live, "ALTCOIN_ENABLED": "1", "ALT_INSTANCE_NAME": "crypto",
-                                               "ALT_LIVE_ACK": "x"})
-t.ok("supervisor: a refused live is paper, its reason in state() (live_error)", sup.mode == "paper"
-     and "ALT_LIVE_ACK=crypto" in sup.state()["live_error"])
+for name, extra, why in (("ALT_LIVE_ACK of another name", {"ALT_LIVE_ACK": "x"}, "ALT_LIVE_ACK=crypto"),
+                         ("ALT_MODE not paper/live", {"ALT_MODE": "real"}, "ALT_MODE=real")):
+    sup = ah.Supervisor(TMP / "gate-data", environ={**live, "ALTCOIN_ENABLED": "1", "ALT_INSTANCE_NAME": "crypto", **extra},
+                        hosted=TMP / "nonexistent" / "hosted.py")
+    sup._run(None)
+    st = sup.state()
+    t.ok(f"supervisor: a refused live ({name}) starts nothing, not even paper: disabled with the reason",
+         st["state"] == "disabled" and sup._spawns == 0 and why in st["reason"] and "Altcoin không chạy" in st["reason"]
+         and st["reason"] == st["live_error"], st)
 
 # ── 3. the database fingerprint: the same database whatever the password or the query ──
 same = ["postgresql://u:pw1@DB.example.com:5432/postgres?sslmode=require", "postgres://u:other@db.example.com/postgres"]
@@ -403,13 +443,38 @@ for name, panel_case, bot_env in (
         ("noack", {k: v for k, v in live.items() if k != "ALT_LIVE_ACK"}, ""),
         ("keysinfile", {k: v for k, v in live.items() if not k.startswith("ALT_OKX")},
          "OKX_API_KEY=k\nOKX_API_SECRET=s\nOKX_PASSPHRASE=p\n")):
+    refused = ah.live_gate(panel_case, "crypto")[1] is not None     # ALT_MODE=live: the supervisor starts nothing
     code, out, res, _ = stub_run(name, panel_case, bot_env)
-    t.ok(f"live matrix: {name} → PaperEngine, no OKX key", code == 0 and res and res["engine"] == "PaperEngine"
-         and res["cfg"]["MODE"] == "paper" and not res["cfg"]["OKX_API_KEY"] and res["env"]["I_UNDERSTAND_THE_RISK"] is None,
-         out[-800:])
+    t.ok(f"live matrix: {name} → " + ("not started (supervisor); --mode paper anyway: " if refused else "")
+         + "PaperEngine, no OKX key", refused == (name != "botenv") and code == 0 and res
+         and res["engine"] == "PaperEngine" and res["cfg"]["MODE"] == "paper" and not res["cfg"]["OKX_API_KEY"]
+         and res["env"]["I_UNDERSTAND_THE_RISK"] is None, out[-800:])
+# open trades of the other mode: paper would close live trades on paper (the OKX positions left unmanaged),
+# live would manage paper trades as real ones
+for name, panel_case, trades, want in (
+        ("paper-on-live", {}, [("live", "open"), ("paper", "closed")], hosted.OPEN_OTHER["paper"]),
+        ("live-on-paper", live, [("paper", "open"), ("live", "open")], hosted.OPEN_OTHER["live"]),
+        ("live-on-live", live, [("live", "open"), ("paper", "closed")], None)):
+    data = alt_db(TMP / f"live-{name}-data", trades=trades)
+    code, out, res, frames = stub_run(name, panel_case, data=data)
+    if want:
+        t.ok(f"live matrix: {name} (open trades of the other mode) → 78 before Bot(), the reason in the last frame",
+             code == 78 and res is None and frames and frames[-1]["state"] == "disabled"
+             and frames[-1]["reason"] == want, (code, frames[-1:], out[-600:]))
+    else:
+        t.ok(f"live matrix: {name} (open trades of this mode) → runs, LiveEngine", code == 0 and res
+             and res["engine"] == "LiveEngine", out[-600:])
 code, out, res, frames = stub_run("beat", live, beats=[("crypto", 5, "old-server")])
 t.ok("live matrix: another instance alive in heartbeats → 75, even with every live condition", code == 75 and res is None
      and frames and frames[-1]["state"] == "waiting" and "crypto@old-server" in frames[-1]["reason"], out[-800:])
+alt = tree("rival")
+code, out, res, frames = child(alt, "rival", {}, "--instance", "crypto", "--data-dir", str(alt_db(TMP / "rival-data")))
+states = [f for f in frames if f["t"] == "state"]
+t.ok("while running: 'crypto' alive on another host (the old server started again: same leader lock) → ERROR, a "
+     "last frame 'waiting' with crypto@old-server, SIGTERM to itself (bot.main's loop stops), exit 75",
+     code == 75 and res and res.get("stopped_by_sigterm") and states and states[-1]["state"] == "waiting"
+     and "crypto@old-server" in (states[-1]["reason"] or "") and "cũng chạy trên host khác" in out,
+     (code, states[-2:], out[-800:]))
 alt = tree("live-nokey")
 code, out, res, frames = child(alt, "stub", {}, "--mode", "live", "--instance", "crypto",
                                "--data-dir", str(alt_db(TMP / "live-nokey-data")))
@@ -430,6 +495,19 @@ code, out, res, frames = guard_run("emptykv", alt_db(TMP / "g-emptykv-data", fun
 t.ok("empty database (kv without start_equity/paper_balance) → 78", code == 78)
 code, out, res, frames = guard_run("fresh", TMP / "g-fresh-data", "--allow-empty-db")
 t.ok("ALTCOIN_FRESH_START (--allow-empty-db) → starts", code == 0 and res is not None, out[-600:])
+code, out, res, frames = guard_run("fresh-live", TMP / "g-fresh-live-data", "--allow-empty-db", "--mode", "live",
+                                   env={"OKX_API_KEY": "k", "OKX_API_SECRET": "s", "OKX_PASSPHRASE": "p"})
+t.ok("ALTCOIN_FRESH_START in live → 78: an empty database is for paper only", code == 78 and res is None and frames
+     and frames[-1]["reason"].endswith("(chỉ cho paper)"), out[-600:])
+marked = TMP / "g-marked-data"
+marked.mkdir()
+(marked / hosted.FUNDED).touch()
+code, out, res, frames = guard_run("marked", marked, "--allow-empty-db")
+t.ok("ALTCOIN_FRESH_START left on, then an empty database where one with data ran (hosted.funded) → 78 'DB bị đổi'",
+     code == 78 and res is None and "DB bị đổi" in frames[-1]["reason"], out[-600:])
+code, out, res, frames = guard_run("fresh-funded", alt_db(TMP / "g-fresh-funded-data"), "--allow-empty-db")
+t.ok("ALTCOIN_FRESH_START on a database with data → starts, WARNING 'không còn tác dụng'", code == 0 and res is not None
+     and "không còn tác dụng" in out, out[-600:])
 code, out, res, frames = guard_run("stocktables", alt_db(TMP / "g-stock-data", tables=("market", "fills")))
 t.ok("the stock's tables (market, fills) in the altcoin's SQLite → 78", code == 78
      and "fills, market" in frames[-1]["reason"], frames[-1:])
@@ -449,6 +527,11 @@ code, out, res, frames = guard_run("pgbeat", TMP / "g-pgbeat-data", env={"DATABA
                                                                         "FAKE_PG": pg_ok})
 t.ok("Postgres: Render's heartbeat still alive → 75 'render@srv-render'", code == 75
      and "render@srv-render" in frames[-1]["reason"], frames[-1:])
+pg_live = json.dumps({"tables": ["kv", "trades", "heartbeats"], "funded": True, "open_modes": ["live"]})
+code, out, res, frames = guard_run("pglive", TMP / "g-pglive-data", env={"DATABASE_URL": "postgresql://a:b@h/db",
+                                                                        "FAKE_PG": pg_live})
+t.ok("Postgres: an open live trade, paper asked → 78", code == 78 and frames[-1]["reason"] == hosted.OPEN_OTHER["paper"],
+     frames[-1:])
 for name, beats, want in (("othername", [("render", 10, "srv")], 75), ("otherhost", [("crypto", 10, "old-host")], 75),
                           ("samehost", [("crypto", 10, HOST)], 0), ("stale", [("render", 200, "srv")], 0)):
     code, out, res, frames = guard_run(name, alt_db(TMP / f"g-{name}-data", beats=beats))
@@ -488,6 +571,8 @@ t.ok("pipe: state frames say running, leader, seam_ok true", any(f["state"] == "
                                                                   and f["seam_ok"] is True for f in states), states[-3:])
 t.ok("seam checked in effect: bot.tg replaced by another class → seam_ok false (ERROR logged)",
      states and states[-1]["seam_ok"] is False and "Seam kênh hỏng" in out, states[-1:])
+t.ok("once running: <DATA_DIR>/hosted.funded written (an empty database there is refused from now on)",
+     (TMP / "real-data" / hosted.FUNDED).is_file())
 
 # ── 9. the hub in this process: limits, newest state first, a closed pipe ──
 class FakeBot:
@@ -555,6 +640,70 @@ hosted.HubChannel(FakeBot()).send("no pipe")
 hosted.HUB.write({"t": "notify", "n": 1, "ts": 0, "text": "no pipe"})
 t.ok("no HUB_FD: HubChannel takes the text, nothing written (Notifier logs it)", hosted.HUB.queue.qsize() == 1)
 
+
+class FlakyBot:
+    """Its first look raises: an error in one turn of the hub."""
+    looks = 0
+
+    @property
+    def is_leader(self):
+        FlakyBot.looks += 1
+        if FlakyBot.looks == 1:
+            raise RuntimeError("boom")
+        return False
+
+
+read_end, write_end = os.pipe()
+hub4 = hosted.HUB = hosted.Hub(write_end, {})
+channel = hosted.HubChannel(FlakyBot())
+runner = threading.Thread(target=hub4.run, daemon=True)
+runner.start()
+channel.send("🧠 TỔNG KẾT " + json.loads('"\\ud83d x"'))      # an AI reply cut in the middle of an emoji
+channel.send("🛑 DỪNG GIAO DỊCH")
+texts, buf = [], b""
+deadline = time.monotonic() + 10
+with open(read_end, "rb", buffering=0) as pipe:
+    while len(texts) < 2 and time.monotonic() < deadline:
+        if select.select([pipe], [], [], 0.2)[0]:
+            buf += pipe.read(65536)
+        *done, buf = buf.split(b"\n")
+        texts += [f["text"] for f in map(json.loads, done) if f["t"] == "notify"]
+    t.ok("a lone surrogate in a notification, an error in a turn: the hub thread lives on, the error counted, "
+         "the next notification arrives", runner.is_alive() and hub4.errors == 1
+         and texts == ["🧠 TỔNG KẾT ? x", "🛑 DỪNG GIAO DỊCH"], (texts, hub4.errors))
+
+
+class BeatStore:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def instances(self):
+        if self.rows is None:
+            raise RuntimeError("DB down")
+        return self.rows
+
+
+def beat(name, host, age=5.0):
+    return {"instance": name, "ts": time.time() - age, "role": "leader", "info": f"v3.2.0 b380dfca paper=True host={host}"}
+
+
+hosted.RIVAL_EVERY = 0
+for name, rows, built, want in (
+        ("this name on another host", [beat("crypto", "old-server")], True, "crypto@old-server"),
+        ("this name on this host", [beat("crypto", HOST)], True, None),
+        ("another name alive (the leader lock keeps one trader)", [beat("render", "srv"), beat("crypto", HOST)], True, None),
+        ("this name on another host, older than LEADER_TTL", [beat("crypto", "old-server", 200)], True, None),
+        ("database error", None, True, None),
+        ("bot not built yet", [beat("crypto", "old-server")], False, None)):
+    hub5 = hosted.Hub(None, {"instance": "crypto"}, ttl=90)
+    hub5.bot = type("B", (), {"store": BeatStore(rows), "start_equity": 10.0 if built else None})()
+    t.ok(f"rival(): {name} → {want}", hub5.rival() == want)
+hosted.RIVAL_EVERY = 60
+hub5 = hosted.Hub(None, {"instance": "crypto"})
+hub5.bot = type("B", (), {"store": BeatStore([beat("crypto", "old-server")]), "start_equity": 10.0})()
+t.ok("rival(): heartbeats read at most every RIVAL_EVERY s", hub5.rival() == "crypto@old-server" and hub5.rival() is None)
+hosted.RIVAL_EVERY = 15.0
+
 # the parent's reader: a line > 64 KiB dropped, bad JSON / unknown frames dropped, then still in sync
 sup = ah.Supervisor(TMP / "reader", environ={"ALTCOIN_ENABLED": "1"})
 read_end, write_end = os.pipe()
@@ -585,6 +734,12 @@ masked = eventlog.redact("a panel-zoom-secret-42 b alt-db-pw-77 c panel-okx-secr
                          "e file-db-pw-45 f 9router")
 t.ok("redact: ALT_ secrets (the ignored ALT_ZOOM_* too), the password of ALT_DATABASE_URL alone, added values",
      masked == "a *** b *** c *** d *** e *** f 9router", masked)
+eventlog.add_secret_values(["hub-token-start-1a", "cmd-token-start-1b"], slot="altcoin-hub")
+eventlog.add_secret_values(["hub-token-start-2a", "cmd-token-start-2b"], slot="altcoin-hub")
+eventlog.add_secret_values(["file-okx-token-47"])
+masked = eventlog.redact("hub-token-start-1a cmd-token-start-2b file-okx-token-44 file-okx-token-47 panel-okx-secret-43")
+t.ok("add_secret_values: a slot keeps its latest values only (the running child's tokens), the rest still masked",
+     masked == "hub-token-start-1a *** *** *** ***", masked)
 
 # ── 11. the supervisor with a fake child ──
 FAKE = TMP / "fake" / "hosted.py"
@@ -643,11 +798,23 @@ ah.STOP_WAIT, ah.BACKOFF_START, ah.BACKOFF_MAX, ah.WAITING_EXTRA = 1.5, 0.3, 1.2
 SUPS = []
 
 
-def supervisor(name, fake="ok", **extra):
+class Recording(ah.Supervisor):
+    """Every wait recorded as (seconds, state, reason); none longer than 0.05 s."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.waits = []
+
+    def _wait(self, seconds):
+        self.waits.append((seconds, self._snap["state"], self._snap["reason"]))
+        super()._wait(min(seconds, 0.05))
+
+
+def supervisor(name, fake="ok", cls=ah.Supervisor, **extra):
     log = TMP / f"{name}.log"
     environ = {**stock, "ALTCOIN_ENABLED": "1", "ALT_FAKE": fake, "ALT_FAKE_LOG": str(log), "ALT_LEADER_TTL": "1",
                "ALT_MODE": "", "ALT_DATA_DIR": "", "ALT_INSTANCE_NAME": "", "PUBLIC_URL": "https://h", **extra}
-    sup = ah.Supervisor(TMP / f"{name}-data", "https://h", environ=environ, hosted=FAKE)
+    sup = cls(TMP / f"{name}-data", "https://h", environ=environ, hosted=FAKE)
     SUPS.append(sup)
     return sup, log
 
@@ -696,6 +863,7 @@ t.ok("[altcoin] lines: the panel's ignored ALT_ZOOM_* value, bot.env's old secre
 dump = json.dumps(sup.state()) + json.dumps(sup.health())
 t.ok("state() and /health hold no token", tokens[0] not in dump and tokens[1] not in dump)
 t.ok("health(): the state alone", sup.health() == {"altcoin": {"state": "running"}})
+n_secrets = len(eventlog._secret_values())
 pid = st["pid"]
 with contextlib.redirect_stdout(io.StringIO()):
     os.kill(pid, signal.SIGKILL)
@@ -703,6 +871,10 @@ with contextlib.redirect_stdout(io.StringIO()):
 st = sup.state()
 t.ok("kill -9 of the child: last_exit -9, started again (restarts 1)", again and st["last_exit"] == -9
      and st["restarts"] == 1 and len(starts(log)) == 2, st)
+values = eventlog._secret_values()
+t.ok("a new start masks its new tokens and drops the old ones: the list does not grow by start",
+     sup._tokens[0] in values and sup._tokens[1] in values and tokens[0] not in values and len(values) == n_secrets,
+     (len(values), n_secrets))
 new_pid = st["pid"]
 with contextlib.redirect_stdout(io.StringIO()):
     sup.stop()
@@ -719,24 +891,18 @@ st = sup.state()
 t.ok("exit 78: disabled with the child's reason, never started again", st["state"] == "disabled"
      and st["reason"] == "DB rỗng – thử" and st["last_exit"] == 78 and len(starts(log)) == 1, st)
 
+ah.WAITING_EXTRA = 3
 with contextlib.redirect_stdout(io.StringIO()):
-    sup, log = supervisor("e75", "seq:exit75,ok")
+    sup, log = supervisor("e75", "seq:exit75,exit1,ok", cls=Recording, ALT_LEADER_TTL="2")
     sup.start()
-    waited = wait_for(lambda: sup.state()["state"] == "waiting", 10)
-    reason = sup.state()["reason"]
     ran = wait_for(lambda: sup.state()["state"] == "running", 15)
     sup.stop()
-t.ok("exit 75: 'waiting' with <name>@<host> from the last frame, then tried again (LEADER_TTL + 10 s)", waited and ran
-     and "crypto@old" in (reason or "") and len(starts(log)) == 2, reason)
-
-waits = []
-
-
-class Recording(ah.Supervisor):
-    def _wait(self, seconds):
-        waits.append(seconds)
-        super()._wait(min(seconds, 0.05))
-
+ah.WAITING_EXTRA = 0
+slept = [w for w in sup.waits if w[0] >= ah.BACKOFF_START]
+t.ok("exit 75: 'waiting' with <name>@<host> from the last frame, tried again after LEADER_TTL + WAITING_EXTRA (2 + 3 s)",
+     ran and slept[:1] == [(5, "waiting", "instance khác đang chạy: crypto@old")] and len(starts(log)) == 3, slept)
+t.ok("...and exit 75 leaves the backoff alone: the crash after it waits BACKOFF_START (0.3), not double",
+     slept[1:2] == [(0.3, "backoff", "thoát mã 1")], slept)
 
 with contextlib.redirect_stdout(io.StringIO()):
     log = TMP / "e1.log"
@@ -747,7 +913,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     wait_for(lambda: len(starts(log)) >= 5, 15)
     st = sup.state()
     sup.stop()
-backoffs = [w for w in waits if w >= ah.BACKOFF_START][:4]
+backoffs = [w for w, _, _ in sup.waits if w >= ah.BACKOFF_START][:4]
 t.ok("other exit codes: backoff 20 s doubling up to the cap (here 0.3, 0.6, 1.2, 1.2)", backoffs == [0.3, 0.6, 1.2, 1.2]
      and st["last_exit"] == 1, (backoffs, st["state"], st["reason"]))
 
@@ -853,7 +1019,7 @@ sup = ah.Supervisor(TMP / "same", environ={**stock, "ALTCOIN_ENABLED": "1", "ALT
 t.ok("ALT_DATA_DIR = the stock's DATA_DIR → disabled", "trùng DATA_DIR" in (sup._precheck() or ""))
 real_find = ah.importlib.util.find_spec
 ah.importlib.util.find_spec = lambda name, *a: None if name == "ccxt" else real_find(name, *a)
-sup = ah.Supervisor(TMP / "nolib", environ={**stock, "ALTCOIN_ENABLED": "1"}, hosted=FAKE)
+sup = ah.Supervisor(TMP / "nolib", environ={**stock, "ALTCOIN_ENABLED": "1", "ALT_MODE": ""}, hosted=FAKE)
 sup.start()
 wait_for(lambda: sup.state()["state"] == "disabled", 5)
 ah.importlib.util.find_spec = real_find

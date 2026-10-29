@@ -41,7 +41,7 @@ _PATTERNS = (
     re.compile(r"(sk-[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]{8,}"),
 )
 _secrets: list[str] | None = None
-_extra: set[str] = set()
+_extra: dict[str, set[str]] = {}       # slot -> values: "" only grows, any other slot is replaced whole
 
 
 def _with_password(value: str) -> set[str]:
@@ -59,17 +59,20 @@ def _with_password(value: str) -> set[str]:
 
 
 def _secret_values() -> list[str]:
-    values = set(_extra)
+    values = set().union(*_extra.values())
     for key in SECRET_KEYS:
         values |= _with_password((os.environ.get(key) or "").strip())
     return sorted((v for v in values if len(v) >= 6), key=len, reverse=True)
 
 
-def add_secret_values(values) -> None:
+def add_secret_values(values, slot: str = "") -> None:
     """Mask these values too from now on (the altcoin's bot.env, its child's tokens); not
-    9Router's well-known default key "9router", a word of many log lines."""
+    9Router's well-known default key "9router", a word of many log lines. A named ``slot``
+    holds only its latest values (the running child's tokens, not those of every start)."""
+    found: set[str] = set()
     for value in values:
-        _extra.update(_with_password((value or "").strip()) - {"9router"})
+        found |= _with_password((value or "").strip()) - {"9router"}
+    _extra[slot] = found if slot else _extra.get("", set()) | found
     refresh_secrets()
 
 

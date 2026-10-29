@@ -13,7 +13,9 @@ Off unless ALTCOIN_ENABLED=1: then nothing starts and nothing changes but one lo
   masked values are dropped (``dropped_secrets``). With no key of its own, the altcoin
   shares the stock's OpenRouter and 9Router keys.
 - Live only when ALT_MODE=live, ALT_I_UNDERSTAND_THE_RISK=yes, ALT_LIVE_ACK equal to the
-  instance name and the three ALT_OKX_* keys are all set; else paper, with an error.
+  instance name and the three ALT_OKX_* keys are all set. ALT_MODE neither empty nor paper
+  and a condition missing: off (disabled), with the reason - never paper on what is likely
+  the live database (it would close the live trades on paper and halt the bot).
 - A fresh localhost port each start; running once its /health answers (within 120 s,
   else stopped and started again on another port); watched every 30 s (4 misses:
   restarted). Exit 78: refused, stays off; 75: another instance is alive, tried again after
@@ -86,33 +88,36 @@ def _set_value(value) -> str:
 
 
 def file_values(folder: Path = ROOT / "altcoin") -> dict[str, str]:
-    """altcoin/.env, then altcoin/bot.env (it wins), as the child reads them."""
+    """altcoin/.env, then altcoin/bot.env (it wins), as the child reads them: a file it
+    cannot read (not UTF-8...) is skipped, as the child skips it."""
     from dotenv import dotenv_values
 
     values: dict[str, str] = {}
     for name in (".env", "bot.env"):
         try:
             values.update({k: v.strip() for k, v in dotenv_values(folder / name).items() if k and (v or "").strip()})
-        except OSError:
-            pass
+        except (OSError, ValueError) as exc:        # UnicodeDecodeError is a ValueError
+            logger.warning("Altcoin: không đọc được altcoin/%s (%s) – bỏ qua file này", name, exc)
     return values
 
 
 def live_gate(environ, instance: str) -> tuple[str, str | None]:
-    """('live', None) only when every condition holds in the stock's own environment;
-    else ('paper', what is missing) - None when paper was asked."""
+    """('paper', None) when paper is asked (or nothing); ('live', None) only when every
+    condition holds in the stock's own environment; else ('paper', what is missing): the
+    supervisor then starts nothing."""
     asked = (environ.get("ALT_MODE") or "paper").strip().lower()
     if asked == "paper":
         return "paper", None
     if asked != "live":
-        return "paper", f"ALT_MODE={asked} không hợp lệ (paper hoặc live): Altcoin chạy paper"
+        return "paper", f"ALT_MODE={asked} không hợp lệ (paper hoặc live): Altcoin không chạy"
     missing = [] if (environ.get("ALT_I_UNDERSTAND_THE_RISK") or "").strip().lower() == "yes" \
         else ["ALT_I_UNDERSTAND_THE_RISK=yes"]
     if (environ.get("ALT_LIVE_ACK") or "").strip() != instance:
         missing.append(f"ALT_LIVE_ACK={instance}")
     missing += [k for k in OKX_KEYS if not _set_value(environ.get(k))]
     if missing:
-        return "paper", f"ALT_MODE=live nhưng thiếu {', '.join(missing)}: Altcoin chạy paper"
+        return "paper", (f"ALT_MODE=live nhưng thiếu {', '.join(missing)}: Altcoin không chạy "
+                         "(không chạy paper trên DB live)")
     return "live", None
 
 
@@ -280,13 +285,11 @@ class Supervisor:
     def _run(self, stock_ready) -> None:
         if stock_ready is not None:
             stock_ready.wait(WAIT_STOCK)
-        why = self._precheck()
+        why = self.live_error or self._precheck()
         if why:
             self._set(state="disabled", reason=why)
-            logger.warning("Altcoin: tắt – %s", why)
+            (logger.error if self.live_error else logger.warning)("Altcoin: tắt – %s", why)
             return
-        if self.live_error:
-            logger.error(self.live_error)
         if (self.environ.get("MODE") or "").strip():
             logger.warning("MODE trên panel không có tác dụng với Altcoin: chế độ là ALT_MODE")
         logger.info("Altcoin: bật – chế độ %s, instance %s, dữ liệu %s", self.mode, self.instance, self.data_dir)
@@ -353,7 +356,8 @@ class Supervisor:
         files = file_values(self.hosted.parent)
         env, info = child_env(self.environ, files)
         tokens = (secrets.token_urlsafe(32), secrets.token_urlsafe(32))
-        eventlog.add_secret_values([*tokens, *(v for k, v in files.items() if SECRET_NAME.search(k))])
+        eventlog.add_secret_values(tokens, slot="altcoin-hub")      # this child's only: not one pair per start
+        eventlog.add_secret_values(v for k, v in files.items() if SECRET_NAME.search(k))
         cmd = [sys.executable, "-u", str(self.hosted), "--port", str(port), "--parent-pid", str(os.getpid()),
                "--public-url", self.public_url, "--data-dir", str(self.data_dir), "--mode", self.mode,
                "--instance", self.instance, "--deny-db", db_fingerprint(self.environ.get("DATABASE_URL"))]

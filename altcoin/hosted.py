@@ -21,12 +21,18 @@ process) starts and watches. Outside the altcoin fingerprint (``bot/**`` + ``run
 4. The mode is the supervisor's alone: paper drops the OKX keys; live takes them from the
    panel and passes the two checks of ``bot.main.main()`` here (exit 78), never there.
 5. Read only, before the bot opens its store: the stock's database (same URL, or its tables
-   market/fills) and an empty database without --allow-empty-db exit 78; another child on
-   this host (flock on <DATA_DIR>/hosted.lock) or another instance alive in ``heartbeats``
-   exit 75 (the supervisor retries later).
+   market/fills), an empty database (--allow-empty-db: paper only, and never in a data
+   folder that has run on a database with data: <DATA_DIR>/hosted.funded) and open trades
+   of the other mode (paper would close live trades on paper, live would manage paper
+   trades as real ones) exit 78; another child on this host (flock on
+   <DATA_DIR>/hosted.lock) or another instance alive in ``heartbeats`` exit 75 (the
+   supervisor retries later).
 6. ``bot.main.Telegram`` is HubChannel: every notification goes to the stock process,
    which sends it with its own Telegram/Zoom and switches. One thread ("hub-notify") writes
    JSON lines on HUB_FD: {"t": "state", ...} (newest first) and {"t": "notify", ...}.
+   While the bot runs, it also reads ``heartbeats``: this instance name alive on another
+   host (the old server started again: same name, same leader lock, both would trade)
+   stops this child with exit 75.
 
 Exit codes: 78 = configuration refused (not restarted), 75 = wait (retried).
 """
@@ -67,6 +73,11 @@ PANEL_WINS = ("DATABASE_URL", "OPENROUTER_API_KEY", "NINEROUTER_API_KEY", "CUSTO
 OKX_KEYS = ("OKX_API_KEY", "OKX_API_SECRET", "OKX_PASSPHRASE")
 FRAME_LIMIT = 60 * 1024        # bytes of one JSON line on the pipe, newline included
 STATE_EVERY = 5.0              # seconds between two looks at the bot's state
+RIVAL_EVERY = 15.0             # seconds between two reads of heartbeats while the bot runs
+FUNDED = "hosted.funded"       # in DATA_DIR: written once the bot has run on a database with data
+OPEN_OTHER = {"paper": "DB có lệnh live đang mở – chạy paper sẽ đóng ảo chúng, lệnh thật trên OKX bị bỏ mặc: "
+                       "bật lại live hoặc đóng lệnh trước",
+              "live": "DB có lệnh paper đang mở – chạy live sẽ quản lý chúng như lệnh thật: đóng chúng ở paper trước"}
 TOKENS: dict[str, str] = {}    # HUB_TOKEN / HUB_CMD_TOKEN, for the web proxy and the /alt commands
 HUB: Hub | None = None
 _LOCK = None                   # <DATA_DIR>/hosted.lock, held (flock) for the life of the process
@@ -243,7 +254,9 @@ def read_db(url: str, path: Path) -> dict | None:
         funded = "kv" in tables and bool(query(f"SELECT k FROM kv WHERE k IN ({mark}, {mark})",
                                                ("start_equity", "paper_balance")))
         beats = query("SELECT instance, ts, info FROM heartbeats") if "heartbeats" in tables else []
-        return {"tables": tables, "funded": funded, "heartbeats": [tuple(r) for r in beats]}
+        opens = query("SELECT DISTINCT mode FROM trades WHERE status = 'open'") if "trades" in tables else []
+        return {"tables": tables, "funded": funded, "heartbeats": [tuple(r) for r in beats],
+                "open_modes": {r[0] for r in opens}}
 
     if url:
         import psycopg
@@ -279,8 +292,17 @@ def guard(cfg, args) -> tuple[int, str] | None:
     stock = sorted((facts or {}).get("tables", set()) & {"market", "fills"})
     if stock:
         return EXIT_CONFIG, f"DB của Altcoin có bảng {', '.join(stock)} của Cổ phiếu: đây là DB của Cổ phiếu"
-    if not (facts and facts["funded"]) and not args.allow_empty_db:
-        return EXIT_CONFIG, "DB rỗng – chép DB cũ hoặc đặt ALTCOIN_FRESH_START=1"
+    funded = bool(facts and facts["funded"])
+    if not funded and (data / FUNDED).exists():
+        return EXIT_CONFIG, ("DB rỗng, nhưng thư mục dữ liệu này đã chạy trên DB có dữ liệu: DB bị đổi (ALT_DATABASE_URL "
+                             f"bị che, mất bot.db)? Sửa DB, hoặc xoá {FUNDED} nếu thật sự muốn bắt đầu mới")
+    if not funded and not (args.allow_empty_db and args.mode == "paper"):
+        return EXIT_CONFIG, "DB rỗng – chép DB cũ hoặc đặt ALTCOIN_FRESH_START=1" + (
+            " (chỉ cho paper)" if args.allow_empty_db else "")
+    if funded and args.allow_empty_db:
+        log.warning("ALTCOIN_FRESH_START=1 không còn tác dụng (DB đã có dữ liệu): bỏ biến này trên panel")
+    if facts and {m for m in facts["open_modes"] if m} - {args.mode}:
+        return EXIT_CONFIG, OPEN_OTHER[args.mode]
     data.mkdir(parents=True, exist_ok=True)
     _LOCK = open(data / "hosted.lock", "a")     # noqa: SIM115 - held until the process ends
     try:
@@ -300,20 +322,44 @@ class Hub:
     """The one writer of HUB_FD: JSON lines, the newest state frame always before the
     notifications still waiting. Without HUB_FD it writes nothing (Notifier logs each one)."""
 
-    def __init__(self, fd: int | None, base: dict):
+    def __init__(self, fd: int | None, base: dict, mark: Path | None = None, ttl: float = 90):
         self.fd, self.base = fd, base     # base: mode, version, build, instance, ignored_keys, dropped_secrets
+        self.mark, self.ttl = mark, ttl   # <DATA_DIR>/hosted.funded, written once running; cfg.LEADER_TTL
         self.queue: queue.Queue = queue.Queue(maxsize=200)
         self.bot = None                   # set by HubChannel (built by Bot.__init__)
         self.seam_ok = None               # False: bot.main.Telegram is gone
-        self.n = self.dropped = 0
+        self.stop_reason = None           # set when a rival is seen: this child stops, main() returns 75
+        self.n = self.dropped = self.errors = 0
         self.sent = None
         self._seam_logged = False
+        self._next_look = 0.0
 
     def notify(self, text) -> None:
+        # A lone surrogate (an AI reply cut in the middle of an emoji) cannot be encoded: "?" instead.
+        text = str(text).encode("utf-8", "replace").decode("utf-8")
         try:
-            self.queue.put_nowait((time.time(), str(text)))
+            self.queue.put_nowait((time.time(), text))
         except queue.Full:
             self.dropped += 1
+
+    def rival(self) -> str | None:
+        """'<name>@<host>' when this instance name is alive in heartbeats on another host;
+        read every RIVAL_EVERY s once the bot is built. A database error is no rival."""
+        bot = self.bot
+        if getattr(bot, "start_equity", None) is None or time.monotonic() < self._next_look:
+            return None
+        self._next_look = time.monotonic() + RIVAL_EVERY
+        name, host = self.base.get("instance"), os.uname().nodename
+        try:
+            rows = bot.store.instances()
+        except Exception:  # noqa: BLE001 - the bot's own loop reports the database
+            return None
+        for row in rows:
+            found = re.search(r"host=(\S+)", row.get("info") or "")
+            if (row.get("instance") == name and found and found.group(1) != host
+                    and time.time() - float(row.get("ts") or 0) < self.ttl):
+                return f"{name}@{found.group(1)}"
+        return None
 
     def state(self, state: str | None = None, reason: str | None = None) -> dict:
         bot = self.bot
@@ -325,7 +371,8 @@ class Hub:
             if not seam and not self._seam_logged:
                 log.error("Seam kênh hỏng: bot.tg không phải HubChannel – thông báo Altcoin không tới Cổ phiếu")
             self._seam_logged = not seam
-        return {"t": "state", "state": state or ("running" if built else "starting"), "reason": reason,
+        state = state or ("waiting" if self.stop_reason else "running" if built else "starting")
+        return {"t": "state", "state": state, "reason": reason or self.stop_reason,
                 "leader": bool(getattr(bot, "is_leader", False)), **self.base, "seam_ok": seam}
 
     def write(self, frame: dict) -> None:
@@ -349,13 +396,31 @@ class Hub:
     def run(self) -> None:
         item = None
         while True:
-            frame = self.state()
-            if frame != self.sent:
-                self.write(frame)
-                self.sent = frame
-            if item:
-                self.n += 1
-                self.write({"t": "notify", "n": self.n, "ts": item[0], "text": item[1]})
+            try:
+                rival = None if self.stop_reason else self.rival()
+                if rival:
+                    self.stop_reason = f"instance khác đang chạy: {rival} – dừng server altcoin cũ"
+                    log.error("Instance %s cũng chạy trên host khác (cùng khoá leader, cả hai cùng giao dịch): "
+                              "Altcoin ở đây dừng, chờ nó tắt", rival)
+                frame = self.state()
+                if frame != self.sent:
+                    self.write(frame)
+                    self.sent = frame
+                if item:
+                    self.n += 1
+                    self.write({"t": "notify", "n": self.n, "ts": item[0], "text": item[1]})
+                if rival:
+                    os.kill(os.getpid(), signal.SIGTERM)    # bot.main: KeyboardInterrupt, the leader lock released
+                if frame["state"] == "running" and self.mark is not None:
+                    try:
+                        self.mark.touch()
+                    except OSError:
+                        pass
+                    self.mark = None
+            except Exception:  # noqa: BLE001 - the one writer of HUB_FD: never ends
+                self.errors += 1
+                if self.errors == 1:
+                    log.exception("hub-notify: lỗi, bỏ qua khung này")
             try:
                 item = self.queue.get(timeout=STATE_EVERY)
             except queue.Empty:
@@ -427,7 +492,7 @@ def main(argv=None) -> int:
     from bot import version as ver
 
     HUB = Hub(fd, {"mode": cfg.MODE, "version": ver.VERSION, "build": ver.build(), "instance": args.instance,
-                   "ignored_keys": ignored, "dropped_secrets": dropped})
+                   "ignored_keys": ignored, "dropped_secrets": dropped}, Path(cfg.DATA_DIR) / FUNDED, cfg.LEADER_TTL)
     if tz is None:
         refused = f"múi giờ {cfg.TIMEZONE}: giờ của máy lệch và không có gói tzdata"
     if args.check:
@@ -449,7 +514,7 @@ def main(argv=None) -> int:
         return code
     threading.Thread(target=HUB.run, name="hub-notify", daemon=True).start()
     launch()
-    return 0
+    return EXIT_WAIT if HUB.stop_reason else 0
 
 
 if __name__ == "__main__":
