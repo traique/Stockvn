@@ -80,7 +80,7 @@ Supabase vẫn dùng được để dữ liệu không nằm trên ổ đĩa ser
    `postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres`
    Thay `[YOUR-PASSWORD]` bằng mật khẩu. Nếu mật khẩu có ký tự đặc biệt phải mã hoá URL (`@`→`%40`, `#`→`%23`, `/`→`%2F`, `:`→`%3A`).
 4. Dán vào `DATABASE_URL` (trong Stockvn: `ALT_DATABASE_URL`, không dùng chung DB với stock). Bot tự thêm `sslmode=require` và tự tắt prepared statement (bắt buộc với pooler của Supabase).
-5. Kiểm tra trước khi deploy: `python check_db.py` (đọc `.env`/`bot.env` cạnh nó, ưu tiên `ALT_DATABASE_URL`) → phải in `✅ Kết nối OK`.
+5. Kiểm tra trước khi deploy: `python check_db.py` (đọc `.env`/`bot.env` cạnh nó, ưu tiên `ALT_DATABASE_URL`; từ biến môi trường chỉ lấy `ALT_DATABASE_URL`) → phải in `✅ Kết nối OK`.
 6. Bot tự tạo bảng khi chạy lần đầu, không cần làm gì trong SQL Editor. Dữ liệu xem được ở Supabase → Table Editor (bảng `trades`, `signals`, `reviews`, `locks`, `heartbeats`).
 
 Lưu ý Supabase free: project bị **tạm dừng (pause) sau 7 ngày không có truy vấn** – bot chạy liên tục thì không bị; nếu anh tắt bot hơn 1 tuần thì vào dashboard Supabase bấm Restore rồi chạy lại. Giới hạn 500 MB dữ liệu là dư thừa (bot ghi vài MB/tháng).

@@ -2,7 +2,7 @@
 its own temporary copy of altcoin/bot + run.py, in its own process with a timeout: no .env or bot.env
 is read, no real database is touched, the network is blocked (_common in the child). And
 altcoin/check_db.py reads the .env/bot.env beside it (ALT_DATABASE_URL first), never the stock .env
-above it."""
+above it nor the process DATABASE_URL (the stock's), only ALT_DATABASE_URL from the environment."""
 import os
 import shutil
 import subprocess
@@ -21,8 +21,8 @@ RUN = ("import sys, runpy; sys.path[:0] = [sys.argv[1], sys.argv[2]]; import _co
        "dotenv.dotenv_values = lambda *a, **k: {}; runpy.run_path(sys.argv[3], run_name='__main__')")
 
 
-def run(args: list[str], cwd: Path) -> tuple[int, str]:
-    env = {**os.environ, "TMPDIR": str(_common.ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
+def run(args: list[str], cwd: Path, **extra: str) -> tuple[int, str]:
+    env = {**os.environ, "TMPDIR": str(_common.ROOT), "PYTHONDONTWRITEBYTECODE": "1", **extra}
     try:
         done = subprocess.run([sys.executable, *args], cwd=cwd, env=env, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=TIMEOUT)
@@ -49,14 +49,21 @@ shutil.copyfile(ALT / "check_db.py", tree / "altcoin" / "check_db.py")
 code, out = run([str(tree / "altcoin" / "check_db.py")], tree)
 t.ok("check_db.py: the stock .env above it is not read", code != 0 and "Chưa có ALT_DATABASE_URL" in out
      and "Kiểm tra" not in out, out[-800:])
+code, out = run([str(tree / "altcoin" / "check_db.py")], tree, DATABASE_URL="postgresql://stock:stock@127.0.0.1:9/env")
+t.ok("check_db.py: the process DATABASE_URL (the stock's) is not read", code != 0
+     and "Chưa có ALT_DATABASE_URL" in out and "Kiểm tra" not in out, out[-800:])
+code, out = run([str(tree / "altcoin" / "check_db.py")], tree, ALT_DATABASE_URL="postgresql://alt:alt@127.0.0.1:9/env")
+t.ok("check_db.py: the process ALT_DATABASE_URL is read", "Kiểm tra ALT_DATABASE_URL (từ biến môi trường)" in out,
+     out[-800:])
 (tree / "altcoin" / ".env").write_text("DATABASE_URL=postgresql://alt:alt@127.0.0.1:9/env\n", encoding="utf-8")
-(tree / "altcoin" / "bot.env").write_text("ALT_DATABASE_URL=postgresql://alt:alt@127.0.0.1:9/botenv\n"
-                                          "DATABASE_URL=<chưa điền>\n", encoding="utf-8")
+(tree / "altcoin" / "bot.env").write_text("ALT_DATABASE_URL=postgresql://alt:alt@127.0.0.1:9/botenv\n",
+                                          encoding="utf-8")
 code, out = run([str(tree / "altcoin" / "check_db.py")], tree)
 t.ok("check_db.py: ALT_DATABASE_URL of the bot.env beside it first (local address only)",
      "Kiểm tra ALT_DATABASE_URL (từ bot.env)" in out and "Kết nối OK" not in out, out[-800:])
-(tree / "altcoin" / "bot.env").unlink()
+(tree / "altcoin" / "bot.env").write_text("DATABASE_URL=<chưa điền>\n", encoding="utf-8")
 code, out = run([str(tree / "altcoin" / "check_db.py")], tree)
-t.ok("check_db.py: else DATABASE_URL of the .env beside it", "Kiểm tra DATABASE_URL (từ .env)" in out, out[-800:])
+t.ok("check_db.py: else DATABASE_URL of the .env beside it (a <...> placeholder in bot.env is skipped)",
+     "Kiểm tra DATABASE_URL (từ .env)" in out, out[-800:])
 
 t.done()
