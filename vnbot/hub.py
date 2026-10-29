@@ -5,10 +5,11 @@ main_botkeep only when ALTCOIN_ENABLED=1.
 
 Under /altcoin, in this order:
 
-1. The raw path, before it is decoded: a dot segment, "//", a backslash, a byte that is not
-   ASCII, a stray "%", or an escape of "/", "\\" or of a character that never needs one (%2E,
-   %5F...) is a 400. httpx would resolve "/altcoin/health/../api/export/all.json" to another
-   page than the one checked below; "/altcoin/%5Fhub/command" would slip past a check of "_hub".
+1. The raw path, before it is decoded: a dot segment, "//", a backslash, a "#", a byte that is
+   not ASCII, a stray "%", or an escape of "/", "\\" or of a character that never needs one
+   (%2E, %5F...) is a 400. httpx would resolve "/altcoin/health/../api/export/all.json" to
+   another page than the one checked below, and drop "#x" of "/altcoin/webhook/zoom#x" as a
+   fragment (h11 keeps it in the path); "/altcoin/%5Fhub/command" would slip past a check of "_hub".
 2. Exact matches on the decoded path, before the password: GET /altcoin -> 308 /altcoin/;
    /altcoin/_hub(/...) (the child's command endpoint of the /alt bridge) and the altcoin's
    own Zoom and channel routes -> 404, never to the child; GET of its Zoom and public pages
@@ -72,7 +73,7 @@ pre{{font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:.8}}</sty
 def raw_path_ok(raw: bytes) -> bool:
     """Step 1 of the docstring, on the path as it came (without its query)."""
     text = raw.decode("latin-1")
-    if not text.isascii() or "\\" in text or "//" in text or any(s in (".", "..") for s in text.split("/")):
+    if not text.isascii() or "\\" in text or "#" in text or "//" in text or any(s in (".", "..") for s in text.split("/")):
         return False
     escapes = _ESCAPE.findall(text)
     return text.count("%") == len(escapes) and not any(chr(int(x, 16)) in NEVER_ESCAPED for x in escapes)

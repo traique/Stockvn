@@ -1,7 +1,7 @@
 """The Hub (vnbot/hub.py) in front of the stock's real app and a fake altcoin child, each on a
 real localhost port (offline):
 
-- the raw path checked before anything (400 for "..", "//", "\\", %2E/%2F/%5C/%5F...), then
+- the raw path checked before anything (400 for "..", "//", "\\", "#", %2E/%2F/%5C/%5F...), then
   exact matches on the decoded path: 308 /altcoin -> /altcoin/, 404 for /altcoin/_hub(/...) and
   the altcoin's old Zoom and channel routes (with the password too), 308 of its public pages to
   the stock's; the child never sees any of them;
@@ -198,6 +198,13 @@ t.ok("400 for every odd raw path (dot segments, //, \\, %2E/%2F/%5C, %5F, %75, a
      set(codes.values()) == {400}, codes)
 t.ok("POST /altcoin/webhook/zoom/../../api/learn/reset -> 400",
      code("POST", "/altcoin/webhook/zoom/../../api/learn/reset", headers=SAME) == 400)
+# h11 keeps a "#" in the path, so the 404 list and the 308s would miss it, and httpx drops it
+# and what follows as a fragment: the child would get the bare route
+hashed = [("POST", "/altcoin/webhook/zoom#x"), ("POST", "/altcoin/caidat/zoomtest#"), ("POST", "/altcoin/zoom/pair#"),
+          ("POST", "/altcoin/zoom/bot#a"), ("GET", "/altcoin/zoom/install#"), ("GET", "/altcoin/_hub#/command"),
+          ("GET", "/altcoin/zoom#"), ("GET", "/altcoin/echo#x")]
+codes = {f"{m} {p}": code(m, p, headers=SAME) for m, p in hashed}
+t.ok("400 for a '#' in the path, with the password and the same Origin", set(codes.values()) == {400}, codes)
 t.ok("...and the child got none of them", len(SEEN) == seen, SEEN[seen:])
 
 # ── 2. exact matches on the decoded path, before the password ──
