@@ -4,7 +4,7 @@ Tài liệu này là kế hoạch, viết trước khi sửa code (đã triển 
 
 ## Trạng thái triển khai (2026-10-29)
 
-Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `5bd7c8e`) và **Altcoin 3.2.1** (build `07bb13b`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
+Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1.15.0** (build `5bd7c8e`) và **Altcoin 3.2.1** (build `07bb13b`). `python tests/run_all.py` → 28/28 bộ đạt; `scripts/build_botkeep_bundle.py --check` đạt với cả hai mã bản dựng. Kiểm thử đầu cuối trên gói `stockvn-botkeep-v1.15.0-alt3.2.1.zip` đã giải nén (165 file, zip 0,94 MB, Python 3.13, không mạng, không token): bật Altcoin thì child chạy sau ~2 giây, `/altcoin/` qua Hub có thanh chuyển mục, `/alt status` qua bộ điều phối Telegram, `kill -9` child thì 20 giây sau chạy lại trong khi stock vẫn trả 200, SIGTERM thì thoát sạch, không còn tiến trình con, lần chạy sau giữ quyền giao dịch ngay; tắt Altcoin thì như v1.14 (`/altcoin` 404, `/alt` trả "Altcoin đang tắt"). Hướng dẫn vận hành: [`ALTCOIN_TRONG_STOCKVN.md`](ALTCOIN_TRONG_STOCKVN.md). Phần còn lại của tài liệu này là kế hoạch bản 2; chỗ nào khác mục này thì **mục này đúng**.
 
 **Quyết định cuối của anh/chị** (đè lên kế hoạch):
 
@@ -26,7 +26,7 @@ Code đã xong trên nhánh `ccr-909de6e7-uic2x4` (từ `77e384c`): **Stockvn v1
 | 3. Supervisor | `d44dec7`, `198cdb5` | `vnbot/altcoin_host.py`, `altcoin/hosted.py`, `main_botkeep.py`, `suite_altcoin_host` |
 | 4. Hai mục trên web | `69151dc`, `e10b290` | `vnbot/hub.py`, `vnbot/webguard.py`, thanh chuyển mục, `suite_altcoin_proxy`, `suite_altcoin_web` |
 | 5. Cầu nối kênh | `d042488`, `4bb41e8` | `vnbot/altcoin_bridge.py`, `/alt`, thông báo, công tắc `altcoin`, `/_hub/command`, `suite_altcoin_bridge` |
-| 7. Gia cố (phần bắt buộc) + tài liệu | `47a68cf` và commit tài liệu | Vùng găng `LiveEngine.open/partial/close` (Altcoin 3.2.1); `docs/ALTCOIN_TRONG_STOCKVN.md`, README, `.env.example` |
+| 7. Gia cố (phần bắt buộc) + tài liệu | `47a68cf`, `6e942d3`, `29e8653` | Vùng găng `LiveEngine.open/partial/close` (Altcoin 3.2.1); `docs/ALTCOIN_TRONG_STOCKVN.md`, README, `.env.example` |
 
 **Còn lại cho anh/chị:**
 
