@@ -16,13 +16,18 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.2.0"
-RELEASED = "2026-10-28"
-RELEASE_BUILD = "380dfca"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.2.1"
+RELEASED = "2026-10-29"
+RELEASE_BUILD = "b182102"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.2.1", "2026-10-29", (
+        "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",
+        "Live: SIGTERM (server khởi động lại) rơi giữa lúc đặt lệnh trên sàn và lúc ghi DB không còn bỏ dở bước ghi",
+        "Lệnh đóng đang chạy ở luồng khác (/alt close) được chờ xong (tối đa 12 giây) rồi bot mới tắt",
+    )),
     ("3.2.0", "2026-10-28", (
         "Rút từ 211 tín hiệu bóng 23–27/10: cổng mới không đánh ngược nhịp 1h của coin (short khi vừa tăng ≥0.5%/1h: -0.72R, thắng 18%)",
         "Volume cao trào ≥1.5× và ADX 1h ≥35 bị TRỪ điểm thay vì cộng; chặn sẵn phiên 13h–19h VN và nến cao trào; cổng BTC 0.3%",

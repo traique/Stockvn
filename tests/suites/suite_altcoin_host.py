@@ -38,6 +38,7 @@ SUITES = Path(__file__).resolve().parent
 TMP = _common.ROOT
 PY = sys.executable
 HOST = os.uname().nodename
+ALT_BUILD = re.search(r'^RELEASE_BUILD = "(\w+)"', (ALT / "bot" / "version.py").read_text(encoding="utf-8"), re.M)[1]
 BASE_ENV = {k: os.environ[k] for k in ("PATH", "HOME", "LANG") if k in os.environ}
 BASE_ENV.update(TZ="UTC", PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
 
@@ -419,7 +420,7 @@ t.ok("in the child: HUB_FD, HUB_TOKEN, HUB_CMD_TOKEN out of os.environ, the pipe
      res["hub_env_left"] == [] and res.get("inheritable") is False)
 t.ok("...and a grandchild process (close_fds=False) does not get the pipe", res.get("grandchild_sees_fd") is False)
 t.ok("state frame: the schema of §7.4", frames and set(frames[0]) == {"t", "state", "reason", "leader", "mode", "version",
-     "build", "instance", "seam_ok", "ignored_keys", "dropped_secrets"} and frames[0]["build"] == "380dfca"
+     "build", "instance", "seam_ok", "ignored_keys", "dropped_secrets"} and frames[0]["build"] == ALT_BUILD
      and frames[0]["ignored_keys"] == ["TELEGRAM_TOKEN"], frames[:1])
 
 # ── 6. the live matrix, run to a stub Bot() ──

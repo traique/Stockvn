@@ -1,6 +1,6 @@
 """Altcoin inside Stockvn: the child process that ``vnbot/altcoin_host.py`` (the stock
 process) starts and watches. Outside the altcoin fingerprint (``bot/**`` + ``run.py``):
-``bot/`` stays byte for byte build 380dfca, everything the merge needs is done here.
+nothing in ``bot/`` is patched for the merge, everything it needs is done here.
 
     python -u altcoin/hosted.py --port N --parent-pid P --public-url URL --data-dir DIR \\
         --mode paper|live --instance NAME [--deny-db FP] [--allow-empty-db] [--check]

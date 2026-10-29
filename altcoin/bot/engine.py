@@ -3,14 +3,45 @@
 Cách thoát lệnh (EXIT_MODE): fixed | hybrid ("ăn sóng": chốt 1 phần rồi bám sóng) | trail | auto.
 Logic thoát nằm ở exits.py và được dùng y hệt trong mô phỏng bóng của bộ tự học.
 """
+import atexit
 import logging
+import signal
+import threading
 import time
+from contextlib import contextmanager
 from .config import cfg
 from .risk import position_notional, margin_for, risk_mult, risk_budget, risk_of
 from . import exits
 from . import strategy
 
 log = logging.getLogger("engine")
+
+# Vùng găng (v3.2.1): lệnh trên sàn và bước ghi DB của nó là MỘT bước, SIGTERM không được cắt ngang.
+# Luồng chính: SIGTERM/SIGINT rơi vào giữa được giữ lại, ra khỏi vùng mới phát lại (bot.main biến SIGTERM
+# thành KeyboardInterrupt). Luồng khác (/close qua chat, web) giữ _ORDER, và lúc thoát tiến trình chờ nó
+# xong, tối đa EXIT_WAIT giây (host gửi SIGKILL 15 s sau SIGTERM).
+_ORDER = threading.RLock()
+EXIT_WAIT = 12
+
+
+@contextmanager
+def critical():
+    with _ORDER:
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
+        held = []
+        old = {s: signal.signal(s, lambda n, _f: held.append(n)) for s in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            yield
+        finally:
+            for s, h in old.items():
+                signal.signal(s, signal.SIG_DFL if h is None else h)
+            if held:
+                signal.raise_signal(held[0])
+
+
+atexit.register(lambda: _ORDER.acquire(timeout=EXIT_WAIT))
 
 
 def current_exit_mode():
@@ -272,10 +303,11 @@ class LiveEngine(BaseEngine):
             log.info("%s: ký quỹ không đủ", sig.symbol)
             return None
         _, tp, _ = plan_exit(sig, sig.price)
-        oid, fill = self.okx.open_position(sig.symbol, sig.side, contracts, sig.sl, tp)
-        entry = fill or sig.price
-        t = self._trade_row(sig, ai, entry, notional, contracts, order_id=oid, mult=mult)
-        t["id"] = self.store.open_trade(t)
+        with critical():        # lệnh đã khớp trên sàn thì DB phải có nó
+            oid, fill = self.okx.open_position(sig.symbol, sig.side, contracts, sig.sl, tp)
+            entry = fill or sig.price
+            t = self._trade_row(sig, ai, entry, notional, contracts, order_id=oid, mult=mult)
+            t["id"] = self.store.open_trade(t)
         self._announce_open(t)
         return t
 
@@ -306,30 +338,32 @@ class LiveEngine(BaseEngine):
         if part_ct <= 0 or part_ct >= t["contracts"]:
             return 0.0
         side = "sell" if t["side"] == "long" else "buy"
-        o = ex.create_order(t["symbol"], "market", side, part_ct, params={"tdMode": "isolated", "reduceOnly": True})
-        try:
-            fill = float(ex.fetch_order(o["id"], t["symbol"]).get("average") or price)
-        except Exception:
-            fill = price
-        frac = part_ct / t["contracts"]
-        part = t["notional"] * frac
-        pnl, _ = self._pnl(t["side"], t["entry"], fill, part)
-        t["contracts"] -= part_ct
-        t["notional"] -= part
-        t["margin"] = margin_for(t["notional"])
-        t["realized"] = float(t.get("realized") or 0) + pnl
-        t["tp1_done"] = 1
-        t["tp1_ts"] = time.time()
-        self.store.update_trade(t["id"], notional=t["notional"], contracts=t["contracts"], margin=t["margin"],
-                                realized=t["realized"], tp1_done=1, tp1_ts=t["tp1_ts"])
+        with critical():        # chốt một phần trên sàn → DB ghi tp1_done, nếu không lần sau chốt lại lần nữa
+            o = ex.create_order(t["symbol"], "market", side, part_ct, params={"tdMode": "isolated", "reduceOnly": True})
+            try:
+                fill = float(ex.fetch_order(o["id"], t["symbol"]).get("average") or price)
+            except Exception:
+                fill = price
+            frac = part_ct / t["contracts"]
+            part = t["notional"] * frac
+            pnl, _ = self._pnl(t["side"], t["entry"], fill, part)
+            t["contracts"] -= part_ct
+            t["notional"] -= part
+            t["margin"] = margin_for(t["notional"])
+            t["realized"] = float(t.get("realized") or 0) + pnl
+            t["tp1_done"] = 1
+            t["tp1_ts"] = time.time()
+            self.store.update_trade(t["id"], notional=t["notional"], contracts=t["contracts"], margin=t["margin"],
+                                    realized=t["realized"], tp1_done=1, tp1_ts=t["tp1_ts"])
         return pnl
 
     def close(self, t, price, reason):
-        try:
-            self.okx.close_position(t["symbol"], t["side"], t["contracts"])
-        except Exception as e:
-            log.error("close_position %s: %s", t["symbol"], e)
-        self._finalize(t, price, reason)
+        with critical():
+            try:
+                self.okx.close_position(t["symbol"], t["side"], t["contracts"])
+            except Exception as e:
+                log.error("close_position %s: %s", t["symbol"], e)
+            self._finalize(t, price, reason)
 
     def monitor(self):
         """Đồng bộ với vị thế thật trên OKX; quản lý TP1/trailing bằng giá mark."""
