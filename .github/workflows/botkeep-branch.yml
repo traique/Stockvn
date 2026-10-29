@@ -1,0 +1,42 @@
+# Mỗi lần main đổi: tạo gói Botkeep (kiểm 250 mục / 4 MB, cú pháp, mã bản dựng) rồi đẩy đúng
+# nội dung gói lên nhánh "botkeep". Botkeep deploy từ GitHub thì trỏ vào nhánh này, không phải main.
+# File zip cũng được lưu ở mục Artifacts của lượt chạy, để tải về upload tay khi cần.
+name: Gói Botkeep
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: botkeep-branch
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Tạo gói
+        run: python scripts/build_botkeep_bundle.py --out "$RUNNER_TEMP/out"
+
+      - name: Lưu file zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: goi-botkeep
+          path: ${{ runner.temp }}/out/*.zip
+          retention-days: 30
+
+      - name: Cập nhật nhánh botkeep
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bash scripts/publish_botkeep_branch.sh "$RUNNER_TEMP/out/botkeep" origin botkeep
