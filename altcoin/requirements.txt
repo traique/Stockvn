@@ -1,4 +1,4 @@
-ccxt>=4.4
+ccxt==4.5.90
 requests>=2.31
 fastapi>=0.110
 uvicorn>=0.29

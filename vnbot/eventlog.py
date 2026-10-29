@@ -7,8 +7,9 @@ page /dulieu, as the OKX bot does (altcoin_bot ``bot/eventlog.py``).
 - Secrets are masked in EVERY log line, the console's included, before any handler
   sees it: the OKX bot found its Telegram token in a "full backup" file because a
   network error printed the request URL. Masked: the values of the secret variables
-  (tokens, keys, the web password, DATABASE_URL), a Telegram bot token, the password of
-  a postgres URL, a Bearer token, an ``sk-`` key.
+  (tokens, keys, the web password, DATABASE_URL, the altcoin's ALT_* ones), the values
+  added by ``add_secret_values`` (the altcoin's files, its child's tokens), a Telegram bot
+  token, the password of a postgres URL, a Bearer token, an ``sk-`` key.
 """
 
 from __future__ import annotations
@@ -26,7 +27,12 @@ SKIP = ("uvicorn", "vnbot.store", "vnbot.eventlog", "urllib3", "httpx", "httpcor
 SECRET_KEYS = ("TELEGRAM_TOKEN", "ROUTER9_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY",
                "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "AZURE_OPENAI_API_KEY",
                "ZOOM_CLIENT_SECRET", "ZOOM_SECRET_TOKEN", "ZOOM_VERIFICATION_TOKEN", "ZOOM_WEBHOOK_TOKEN",
-               "WEB_PASSWORD", "DATABASE_URL")
+               "WEB_PASSWORD", "DATABASE_URL",
+               # the altcoin's (vnbot.altcoin_host), the ignored ones too: they may stay on the panel
+               "ALT_DATABASE_URL", "ALT_OKX_API_KEY", "ALT_OKX_API_SECRET", "ALT_OKX_PASSPHRASE",
+               "ALT_OPENROUTER_API_KEY", "ALT_NINEROUTER_API_KEY", "ALT_CUSTOM_API_KEY", "ALT_TELEGRAM_TOKEN",
+               "ALT_ZOOM_CLIENT_SECRET", "ALT_ZOOM_SECRET_TOKEN", "ALT_ZOOM_BOT_SECRET_TOKEN", "ALT_ZOOM_WEBHOOK_TOKEN",
+               "ALT_ZOOM_VERIFICATION_TOKEN", "ALT_DASHBOARD_PASS")
 _PATTERNS = (
     re.compile(r"(api\.telegram\.org/(?:file/)?bot)[^/\s\"']+", re.I),
     re.compile(r"(?<![A-Za-z0-9])()\d{5,}:[A-Za-z0-9_-]{30,}"),            # a Telegram bot token anywhere
@@ -35,19 +41,36 @@ _PATTERNS = (
     re.compile(r"(sk-[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]{8,}"),
 )
 _secrets: list[str] | None = None
+_extra: set[str] = set()
 
 
-def _secret_values() -> list[str]:
+def _with_password(value: str) -> set[str]:
+    """The value, and the password of a database URL alone: a driver error may print it without the URL."""
     from urllib.parse import unquote, urlsplit
 
-    values = {(os.environ.get(k) or "").strip() for k in SECRET_KEYS}
-    try:      # the database password alone too: a driver error may print it without the URL
-        password = urlsplit((os.environ.get("DATABASE_URL") or "").strip()).password
+    values = {value}
+    try:
+        password = urlsplit(value).password if "://" in value else None
     except ValueError:
         password = None
     if password:
         values |= {password, unquote(password)}
+    return values
+
+
+def _secret_values() -> list[str]:
+    values = set(_extra)
+    for key in SECRET_KEYS:
+        values |= _with_password((os.environ.get(key) or "").strip())
     return sorted((v for v in values if len(v) >= 6), key=len, reverse=True)
+
+
+def add_secret_values(values) -> None:
+    """Mask these values too from now on (the altcoin's bot.env, its child's tokens); not
+    9Router's well-known default key "9router", a word of many log lines."""
+    for value in values:
+        _extra.update(_with_password((value or "").strip()) - {"9router"})
+    refresh_secrets()
 
 
 def refresh_secrets() -> None:

@@ -1,22 +1,31 @@
-"""Entry point for Botkeep (or any always-on host): web page + Telegram bot.
+"""Entry point for Botkeep (or any always-on host): web page + Telegram bot, and the
+altcoin bot beside them.
 
     python main_botkeep.py
 
-Reads its settings from the environment or a .env file beside it (see
-deploy/botkeep/.env.example). Serves the web page on SERVER_PORT (Botkeep sets
+Needs Python 3.12 or newer. Reads its settings from the environment or a .env file
+beside it (see .env.example). Serves the web page on SERVER_PORT (Botkeep sets
 it), PORT or APP_PORT, opened in the first second so the host never sees a
 silent port while the libraries load (vnbot.boot), polls Telegram when TELEGRAM_TOKEN is set, analyses the
 watchlist each weekday at DAILY_REPORT_TIME and runs the trading bot after the
-close at TRADE_TIME (never before 15:05, when the day's bar is final).
+close at TRADE_TIME (never before 15:05, when the day's bar is final). With
+ALTCOIN_ENABLED=1 it also runs the altcoin bot (altcoin/) as a child process, started
+once the stock is up and stopped with it (vnbot.altcoin_host).
 """
 
 import logging
 import os
+import platform
+import signal
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from vnbot import settings as settings_module
+if sys.version_info < (3, 12):      # the code below uses Python 3.12 syntax: say it plainly, not a SyntaxError
+    sys.exit(f"TradingAgents VN cần Python 3.12 trở lên (máy đang chạy Python {platform.python_version()}): "
+             "chọn Python 3.12+ cho server rồi khởi động lại.")
+
+from vnbot import settings as settings_module  # noqa: E402
 
 SETTINGS = settings_module.load()   # before tradingagents: fixes its data paths
 
@@ -50,20 +59,48 @@ def main() -> None:
     eventlog.install_redaction()    # tokens, keys and passwords masked in every log line
 
     web = LateApp()
+    from vnbot import altcoin_host, boot
+
+    altcoin = altcoin_host.Supervisor(SETTINGS.data_dir, SETTINGS.public_url)
+    if altcoin.enabled:
+        boot.health_extra = altcoin.health
+        _stop_on_signal(altcoin.stop)
     logging.info("Web: listening on 0.0.0.0:%d (SERVER_PORT=%s, PORT=%s, APP_PORT=%s). If the host says the app is "
                  "not responding, its assigned port must match: set SERVER_PORT to it.", SETTINGS.port,
                  os.environ.get("SERVER_PORT", "-"), os.environ.get("PORT", "-"), os.environ.get("APP_PORT", "-"))
-    threading.Thread(target=_boot, args=(web,), name="boot", daemon=True).start()
-    uvicorn.run(web, host="0.0.0.0", port=SETTINGS.port, log_level="warning", access_log=False)
+    stock_ready = threading.Event()
+    threading.Thread(target=_boot, args=(web, stock_ready), name="boot", daemon=True).start()
+    altcoin.start(stock_ready)      # its own thread: waits for the stock, then starts the child
+    try:
+        # asyncio, not uvloop: ccxt (the altcoin's) installs uvloop; the stock keeps the loop it was tested on
+        uvicorn.run(web, host="0.0.0.0", port=SETTINGS.port, log_level="warning", access_log=False, loop="asyncio")
+    finally:
+        altcoin.stop()
 
 
-def _boot(web: LateApp) -> None:
+def _stop_on_signal(stop) -> None:
+    """SIGTERM/SIGINT stop the altcoin child, then end the process by that signal as before.
+    Installed before uvicorn.run(): uvicorn puts it back and raises the signal again after its
+    graceful shutdown; before that (or without uvicorn) it runs at once."""
+    def handler(signum, frame):
+        stop()
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, handler)
+
+
+def _boot(web: LateApp, ready: threading.Event | None = None) -> None:
     """Everything but the port: runs while the port already answers."""
     try:
         web.ready(_start())
     except Exception as exc:  # noqa: BLE001 - shown on every page and /health, and logged
         logging.exception("Start failed")
         web.failed(f"{type(exc).__name__}: {exc}"[:300])
+    finally:
+        if ready is not None:
+            ready.set()
 
 
 def _start():

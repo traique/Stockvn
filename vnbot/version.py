@@ -24,13 +24,21 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.14.0"
-RELEASED = "2026-10-28"
-RELEASE_BUILD = "7eaa3df"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.15.0"
+RELEASED = "2026-10-29"
+RELEASE_BUILD = "462dc9d"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.15.0", "2026-10-29", (
+        "Bot Altcoin (OKX) chạy cùng server, là tiến trình con có giám sát; mặc định tắt, bật bằng ALTCOIN_ENABLED=1",
+        "Altcoin dùng DB riêng (data/altcoin), không bao giờ dùng DB, token Telegram hay khoá Zoom của Cổ phiếu",
+        "Chạy thật (live) chỉ khi đủ ALT_MODE, ALT_I_UNDERSTAND_THE_RISK, ALT_LIVE_ACK và khoá ALT_OKX_*",
+        "Tự chặn DB rỗng, DB của Cổ phiếu và instance Altcoin thứ hai; Altcoin lỗi thì tự chạy lại",
+        "/health thêm trạng thái Altcoin; log Altcoin có tiền tố [altcoin], đã che bí mật",
+        "Cần Python 3.12 trở lên",
+    )),
     ("v1.14.0", "2026-10-28", (
         "Công tắc MUA breakout của Quant Engine (trang Bot giao dịch): tắt để thử trên sổ ảo, mặc định bật như cũ",
         "Tắt: mã breakout chỉ được THEO DÕI; kết quả bóng của chúng thành nhóm riêng ở /tinhieu và /vikhongmua",

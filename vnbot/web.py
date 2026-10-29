@@ -535,9 +535,9 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     async def health() -> JSONResponse:
         # Async: it must answer even when every threadpool worker is busy (a burst of sync
         # requests), or Botkeep sees "not responding" and restarts the bot.
-        from vnbot import version as ver
+        from vnbot import boot, version as ver
 
-        return JSONResponse({"ok": True, "time": time.time(), "version": ver.VERSION})
+        return JSONResponse({"ok": True, "time": time.time(), "version": ver.VERSION, **boot.health_fields()})
 
     @app.get("/phienban", dependencies=[Depends(guard)])
     def version_page() -> HTMLResponse:
