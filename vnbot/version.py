@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.17.0"
 RELEASED = "2026-10-30"
-RELEASE_BUILD = "1cc503b"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "6a3378c"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -36,6 +36,8 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Định giá bot tự tính cho mọi mã, không cần nhập: /dinhgia MÃ (gõ tắt /dg), Zoom gõ dinhgia FPT",
         "Cùng mô hình P/B hợp lý của thẻ ngân hàng; Ke 12% ngân hàng, 13% mã khác (VALUATION_KE_DEFAULT)",
         "Mỗi thẻ có độ tin cậy: cao (ngân hàng, bảo hiểm, chứng khoán), thấp (BĐS, công nghệ, ROE rất cao...)",
+        "Thẻ tin cậy thấp ghi ngay cạnh vùng và xếp sau các mã khác trong bảng /dinhgia",
+        "Mã không phải ngân hàng: Bull ít nhất bằng Base với Ke trừ 2 điểm, để vùng Hợp lý không biến mất",
         "Không lập thẻ khi vốn chủ âm, chưa đủ 3 năm ROE hoặc đang lỗ, và nói rõ lý do",
         "Có gì đổi so với lần xem trước: mốc đổi từ 0,3%, đổi vùng, BCTC mới, đổi giả định (lưu data/bot.db)",
         "Sau 16:00 mỗi phiên bot tự tính thẻ của watchlist, mã đang giữ (Tài sản) và mã có thẻ anh nhập",

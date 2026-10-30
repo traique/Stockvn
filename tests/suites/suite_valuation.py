@@ -317,8 +317,13 @@ t.ok("... VCI posts 30/10: it is kept, and not asked again that day however long
      got["Date"].iloc[-1] == pd.Timestamp("2026-10-30") and got["Close"].iloc[-1] == 31_200 and len(CALLS) == 4, CALLS)
 (CACHE / "valuation" / "FPT-prices.json").unlink()
 FAIL["flows"] = VendorUnavailableError("down")
-t.ok("no cache and VCI down: 'chưa đủ dữ liệu'", vv.price_history("FPT").empty
-     and vv.multiple_line("FPT", "pe", None) == "- P/E hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu")
+try:
+    vv.price_history("FPT")
+    outage = False
+except VendorUnavailableError:
+    outage = True
+t.ok("no cache and VCI down: raised (an outage, not a stock without prices); the report's line 'chưa đủ dữ liệu'",
+     outage and vf._own_history_line("FPT", "pe", None) == "- P/E hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu")
 FAIL["flows"] = None
 money_flows.reset_breaker()
 PRICES["NEW"] = PRICES["FPT"].iloc[0:0]

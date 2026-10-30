@@ -8,9 +8,9 @@ moved 0,3% or more, the zone, a new statement, the assumptions - "không đổi"
 
 After the close (``service.DailyScheduler``, a thread of its own) ``run_job`` computes and keeps the
 cards of the tracked stocks - the watchlist, the Tài sản holdings, the stocks with a card the owner
-entered - two at a time, behind VCI's breaker, a stock already done with the session's price skipped.
-With a bank among them it also reads every listed bank's KPIs once a day (``bank_peers``), for the
-page's "so với trung vị ngân hàng".
+entered - two at a time, behind VCI's breaker, a stock already done with the session's price (or
+refused on the session's data) skipped. With a bank among them it also reads every listed bank's KPIs
+once a day (``bank_peers``), for the page's "so với trung vị ngân hàng".
 
 Informational only: nothing of the Quant Engine reads it. The owner's card (/tsdinhgia) is shown
 beside the bot's, named as his, never as the bot's.
@@ -55,6 +55,22 @@ def today_vn() -> str:
     return vn_rules.now_vn().date().isoformat()
 
 
+def _now() -> float:
+    from tradingagents.market import vn_rules
+
+    return vn_rules.now_vn().timestamp()
+
+
+def _job_time(day: str) -> float:
+    """``JOB_TIME`` of ``day``, Vietnam time, as a timestamp: a row kept since was built on that
+    session's data (its close is out, and every statement published that day)."""
+    from datetime import datetime
+
+    from tradingagents.market import vn_rules
+
+    return datetime.fromisoformat(f"{day}T{JOB_TIME}").replace(tzinfo=vn_rules.VN_TZ).timestamp()
+
+
 def ddmm(day: str) -> str:
     return f"{day[8:10]}/{day[5:7]}" if day else ""
 
@@ -85,7 +101,7 @@ def row_of(result, day: str) -> dict:
     """The stored row of a card (or of why there is none) seen on ``day``."""
     vv = _vv()
     row = dict.fromkeys(COLUMNS)
-    row.update(day=day, symbol=result.symbol, ts=time.time(), profile=result.profile)
+    row.update(day=day, symbol=result.symbol, ts=_now(), profile=result.profile)
     if not isinstance(result, vv.ValuationCard):
         row["note"] = result.reason
         return row
@@ -212,20 +228,25 @@ def tracked(watchlist, account=None) -> list[str]:
 def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = None,
             workers: int = JOB_WORKERS) -> dict[str, list[str]]:
     """Build and keep today's card of each of ``symbols``, but those kept earlier today with the price
-    of ``session``. The stocks by outcome: done (the price of ``session``), behind (an older price: the
-    session's is not out yet), none (no card; the row says why), kept (done earlier today), failed (VCI
-    down - its breaker then fails the rest at once - or a fault). A bank among them brings the day's
-    medians of every listed bank (``bank_peers``)."""
+    of ``session``, or refused after its ``JOB_TIME`` (a refusal from a morning view is built again: a
+    statement may have come out since). The stocks by outcome: done (the price of ``session``), behind
+    (an older price: the session's is not out yet), none (no card; the row says why), kept (done earlier
+    today), failed (VCI down - its breaker then fails the rest at once - or a fault). A bank among them
+    brings the day's medians of every listed bank (``bank_peers``); "peers" is ["failed"] when they could
+    not be read (retried like a failed stock)."""
     vv = _vv()
     today = today or today_vn()
     cards = Cards(data_dir)
     started = time.monotonic()
-    out: dict[str, list[str]] = {k: [] for k in ("done", "behind", "none", "kept", "failed")}
+    out: dict[str, list[str]] = {k: [] for k in ("done", "behind", "none", "kept", "failed", "peers")}
+    refused_after = _job_time(session)
 
     def one(symbol: str) -> str:
         try:
             rows = cards.rows(symbol)
-            if rows and rows[0].get("day") == today and (rows[0].get("price_day") == session or rows[0].get("note")):
+            last = rows[0] if rows and rows[0].get("day") == today else {}
+            if last and (last.get("price_day") == session
+                         or last.get("note") and float(last.get("ts") or 0) >= refused_after):
                 return "kept"
             result = vv.assess(symbol, None)
             cards.record(result, today)
@@ -242,12 +263,14 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
     if any(vv.card_profile(s) == "banking" for s in symbols if s not in out["failed"]):
         try:
             bank_peers(today, compute=True)
-        except Exception as exc:  # noqa: BLE001 - the page says the medians are missing
+        except Exception as exc:  # noqa: BLE001 - the page says the medians are missing; retried
             logger.warning("Valuation cards: bank medians of %s not read: %s: %s", today, type(exc).__name__, exc)
+            out["peers"].append("failed")
     logger.info("Valuation cards %s: %d stocks in %.0f s - %d new, %d with an older price, %d without a card, "
-                "%d kept from earlier today, %d failed%s", session, len(symbols), time.monotonic() - started,
+                "%d kept from earlier today, %d failed%s%s", session, len(symbols), time.monotonic() - started,
                 len(out["done"]), len(out["behind"]), len(out["none"]), len(out["kept"]), len(out["failed"]),
-                f" ({', '.join(out['failed'][:10])})" if out["failed"] else "")
+                f" ({', '.join(out['failed'][:10])})" if out["failed"] else "",
+                "; bank medians not read" if out["peers"] else "")
     return out
 
 
@@ -256,12 +279,14 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
 BANK_ICB = "8300"
 PEER_QUARTERS = 4            # each bank's newest quarters kept: the stock's own may be one or two behind
 # (VCI ratio field, label, "pct" or "x"); VCI's TTM figures of the quarter, its stray minus signs dropped.
+# VCI's debtToEquity is total liabilities (bsa54) / equity (bsa78), not borrowings: HPG Q2/2026 0,971 =
+# 137.414 / 141.516 tỷ, borrowings 0,70 (checked live 30/10/2026); an insurer's is mostly reserves (BVH 10,8).
 BANK_KPIS = (("roe", "ROE (4 quý)", "pct"), ("netInterestMargin", "NIM (4 quý, theo VCI)", "pct"),
              ("cir", "Chi phí/thu nhập (CIR)", "pct"), ("npl", "Nợ xấu (NPL)", "pct"),
              ("loansLossReservesToNPLs", "Bao phủ nợ xấu", "pct"), ("provisionToOutstandingLoans", "Dự phòng/dư nợ", "pct"),
              ("casaRatio", "CASA", "pct"), ("ldrLoanDepositRatio", "Cho vay/huy động (LDR)", "pct"))
 OTHER_KPIS = (("roe", "ROE (4 quý)", "pct"), ("roa", "ROA (4 quý)", "pct"), ("grossMargin", "Biên lãi gộp", "pct"),
-              ("afterTaxProfitMargin", "Biên lãi ròng", "pct"), ("debtToEquity", "Nợ vay/VCSH", "x"),
+              ("afterTaxProfitMargin", "Biên lãi ròng", "pct"), ("debtToEquity", "Nợ phải trả/VCSH", "x"),
               ("currentRatio", "Thanh toán hiện hành", "x"))
 
 
@@ -309,10 +334,12 @@ def bank_peers(day: str, *, compute: bool = False) -> dict | None:
     """Every listed bank's (ICB 8300 in VCI's listing) KPIs of its ``PEER_QUARTERS`` newest quarters
     published by ``day`` and its 5-year median ROE: {"day", "banks": {code: {"q": {"2026-2": {field:
     value}}, "roe5": x}}}, kept on disk for the day. None when not read yet; ``compute`` reads it now
-    (the evening job: two VCI calls a bank, ~27 banks). VCI down raises, nothing is kept."""
+    (the evening job: two VCI calls a bank, ~27 banks). VCI down, or no bank read (a listing without
+    banks, no bank's ratios), raises and nothing is kept: the job tries again, the page shows older ones."""
     import numpy as np
 
     from tradingagents.dataflows import vn_fundamentals as vf
+    from tradingagents.dataflows.errors import NoMarketDataError
     from tradingagents.dataflows.vendors import vci
 
     path = _peers_path(day)
@@ -338,6 +365,8 @@ def bank_peers(day: str, *, compute: bool = False) -> dict | None:
                     for r in rows[:PEER_QUARTERS]}
         roes = [v for r, _ in annual or [] if (v := vf._num(r.get("roe"))) is not None][:5]
         banks[code] = {"q": quarters, "roe5": float(np.median(roes)) if roes else None}
+    if not banks:
+        raise NoMarketDataError(f"ICB {BANK_ICB}", None, f"no bank KPIs read ({len(codes)} banks in VCI's listing)")
     data = {"day": day, "banks": banks}
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(path, json.dumps(data))
@@ -351,7 +380,7 @@ def latest_bank_peers(day: str) -> dict | None:
     days = sorted((p.stem.rsplit("-", 3)[-3:] for p in folder.glob(f"peers-{BANK_ICB}-*.json")), reverse=True)
     for parts in days:
         found = "-".join(parts)
-        if found <= day and (data := bank_peers(found)) is not None:
+        if found <= day and (data := bank_peers(found)) and data["banks"]:
             return data
     return None
 
@@ -384,17 +413,19 @@ def _manual_line(symbol: str, account, bot_base: float | None) -> str:
         return ""
     from vnbot import taisan as ts
 
-    flags = ""
+    flags, stale = "", False
     try:
         status = account.valuation_status(symbol, card, today_vn())
         if status.get("stale"):
+            stale = True
             flags += f" · cần cập nhật (GDKHQ {ts.ddmmyyyy(status['stale']['ex'])})"
         if status.get("expired"):
             flags += f" · HẾT HẠN {ts.ddmmyyyy(card['expires'])}"
     except Exception as exc:  # noqa: BLE001 - the levels shown without the flags
         logger.info("Valuation card of %s entered by hand: status unread: %s", symbol, exc)
+    # past an ex-date his levels are on the old share basis, the bot's on the new one: no gap (as /taisan)
     gap = (f" → Base của anh {'cao' if card['base'] > bot_base else 'thấp'} hơn bot "
-           f"{abs(card['base'] / bot_base - 1) * 100:.1f}%".replace(".", ",") if bot_base else "")
+           f"{abs(card['base'] / bot_base - 1) * 100:.1f}%".replace(".", ",") if bot_base and not stale else "")
     return (f"✍️ Thẻ anh nhập (/tsdinhgia, không phải của bot, nhập {ts.ddmm(card['day'])}): {ts.card_levels(card)}"
             f"{flags}{gap}")
 
@@ -425,11 +456,13 @@ def card_text(result, row: dict, prev: dict | None, *, account=None, public_url:
     years = [y for y, _ in c.roes[-vv.ROE_YEARS:]]
     multiples = [_multiple_text(r, vv.METRIC_LABELS[r.metric]) for r in (c.pe_rank, c.pb_rank) if r]
     (low_ke, high_base), (high_ke, low_base) = c.sensitivity[0], c.sensitivity[-1]
+    weak = " (tin cậy THẤP)" if c.reliability == "thấp" else ""
+    bull = f" ({vv.bull_basis(c)})" if c.bull_ke is not None else ""
     lines = [
         head,
-        f"Giá {price(c.close)} (phiên {vv._day(c.day, as_of)}) → vùng {c.zone.upper()} · MOS {signed_pct(c.mos)} "
+        f"Giá {price(c.close)} (phiên {vv._day(c.day, as_of)}) → vùng {c.zone.upper()}{weak} · MOS {signed_pct(c.mos)} "
         f"so với Base {price(c.base)}",
-        f"Bear {price(c.bear)} · eab {price(c.eab)} · Base {price(c.base)} · Bull {price(c.bull)} {model}",
+        f"Bear {price(c.bear)} · eab {price(c.eab)} · Base {price(c.base)} · Bull {price(c.bull)}{bull} {model}",
         ZONE_RULE,
     ]
     if multiples:
@@ -438,7 +471,7 @@ def card_text(result, row: dict, prev: dict | None, *, account=None, public_url:
         f"Base = sổ sách {price(c.book)} đ/cp {vv._label('FACT', c.day, as_of)} × {rfmt.fmt_number(c.base / c.book)} lần: "
         f"ROE bền vững {vv._pct(c.roe_base)} (trung vị {years[0]}-{years[-1]}) "
         f"{vv._label('THỐNG KÊ', c.annual_published, as_of)} · Ke {vv._rate(a.ke)} đặt tay · λ {rfmt.fmt_number(a.lam, 1)} · "
-        f"g {vv._rate(a.g)}",
+        f"g {vv._rate(a.g)} · eab = Base × (1 − {vv._rate(a.margin)})",
         f"Độ nhạy theo Ke: {vv._rate(low_ke)} → {price(high_base)} · {vv._rate(a.ke)} → {price(c.base)} · "
         f"{vv._rate(high_ke)} → {price(low_base)}",
         f"Độ tin cậy: {c.reliability.upper()} - {c.reliability_why}",
@@ -449,6 +482,16 @@ def card_text(result, row: dict, prev: dict | None, *, account=None, public_url:
     if manual:
         lines.append(manual)
     return "\n".join(lines) + link + "\n" + DISCLAIMER
+
+
+LIST_ORDER = "rẻ nhất so với Base trước, tin cậy thấp xếp sau"
+
+
+def list_order(rows) -> list[dict]:
+    """The rows with a card, the cheapest against Base first; a low-reliability card after the others
+    (a large MOS from a model weak for that stock must not top the list)."""
+    return sorted((r for r in rows if r.get("base") is not None),
+                  key=lambda r: (r.get("reliability") == "thấp", -float(r["mos"])))
 
 
 def _row_line(r: dict, newest: str) -> str:
@@ -462,7 +505,7 @@ def list_text(symbols: list[str], data_dir, *, account=None) -> str:
     card with why, those not computed yet."""
     latest = Cards(data_dir).latest()
     rows = {s: latest[s] for s in symbols if s in latest}
-    cards = sorted((r for r in rows.values() if r.get("base") is not None), key=lambda r: -float(r["mos"]))
+    cards = list_order(rows.values())
     newest = max((r["price_day"] for r in cards), default="")
     manual = set()
     if account is not None:
@@ -471,7 +514,7 @@ def list_text(symbols: list[str], data_dir, *, account=None) -> str:
         except Exception:  # noqa: BLE001 - listed without the marks
             manual = set()
     head = (f"📐 ĐỊNH GIÁ BOT TỰ TÍNH · {len(symbols)} mã theo dõi (watchlist, Tài sản, thẻ anh nhập)"
-            + (f" · giá đóng cửa phiên {ddmm(newest)}" if newest else "") + " · rẻ nhất so với Base trước")
+            + (f" · giá đóng cửa phiên {ddmm(newest)}" if newest else "") + f" · {LIST_ORDER}")
     lines = [head] + [_row_line(r, newest) + (" · ✍️ có thẻ anh nhập" if r["symbol"] in manual else "") for r in cards]
     lines += [f"• {r['symbol']}: không lập thẻ - {r.get('note')}" for s, r in rows.items() if r.get("base") is None]
     missing = [s for s in symbols if s not in rows]
@@ -502,7 +545,7 @@ def command(args: str, data_dir, *, watchlist=(), account=None, public_url: str 
     if len(words) > 1:
         raise ValueError(USAGE)
     code, _ = check_request(words[0])
-    if progress is not None and _vv().cached_card(code, None) is None:
+    if progress is not None and not _vv().kept(code, None):
         progress(f"⏳ Đang tính định giá {code} (lần đầu một mã khoảng 10-20 giây)...")
     try:
         result, row, prev = view(code, data_dir)

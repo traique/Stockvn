@@ -246,7 +246,8 @@ class DailyScheduler:
 
     def _valuation_run(self, day: str) -> None:
         """Today's cards of the watchlist, the Tài sản holdings and the owner's cards; done for the day
-        when none failed or lagged, or after VALUATION_MAX_TRIES runs (a closure the calendar did not know)."""
+        when none failed or lagged and the banks' medians (when asked) were read, or after
+        VALUATION_MAX_TRIES runs (a closure the calendar did not know)."""
         from vnbot import dinhgia
 
         if self._valuation_day != day:
@@ -255,7 +256,7 @@ class DailyScheduler:
         self._valuation_next = time.time() + self.VALUATION_RETRY_SECONDS     # a fault below: not again in 30 s
         symbols = dinhgia.tracked(self.watchlist.get(), getattr(self.bot, "taisan", None))
         out = dinhgia.run_job(symbols, self.settings.data_dir, session=day)
-        if (out["failed"] or out["behind"]) and self._valuation_tries < self.VALUATION_MAX_TRIES:
+        if (out["failed"] or out["behind"] or out.get("peers")) and self._valuation_tries < self.VALUATION_MAX_TRIES:
             return
         write_text_atomic(self._valuation_stamp, day)
 

@@ -9,6 +9,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -513,10 +514,17 @@ class BotCard:
 
 BOT = {"CTG": BotCard(27_643.0), "VCB": BotCard(52_000.0), "BID": BotCard(40_000.0)}
 built_in = []
+building, most, build_lock = [0], [0], threading.Lock()
 
 
 def bot_card(symbol, as_of):
     built_in.append(threading.current_thread().name)
+    with build_lock:
+        building[0] += 1
+        most[0] = max(most[0], building[0])
+    time.sleep(0.05)
+    with build_lock:
+        building[0] -= 1
     return BOT.get(symbol)
 
 
@@ -575,6 +583,10 @@ looked()
 page = web.get("/taisan", auth=AUTH).text
 t.ok("... they are built in the background, once, for the next view",
      sorted(built_in) == ["bot-card-BID", "bot-card-CTG", "bot-card-FPT", "bot-card-TCB", "bot-card-VCB"], built_in)
+from vnbot import taisan_web  # noqa: E402
+
+t.ok(f"... at most {taisan_web.BOT_LOOKS} at once (five cards: not five bursts of VCI calls)",
+     1 <= most[0] <= taisan_web.BOT_LOOKS == 2, most)
 section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
 row = {sym: section.split(f"<b>{sym}</b>", 1)[-1].split("</tr>", 1)[0] for sym in ("CTG", "VCB", "FPT", "TCB", "BID")}
 t.ok("CTG: zone, MOS, expiry, the bot's card beside it, the gap under 10% not flagged",
@@ -605,7 +617,6 @@ section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
 t.ok("full page: the section, a held stock marked", "<b>CTG</b> <span class=\"badge b-info\">đang giữ</span>" in section
      and '<option value="CTG">' in section)
 t.ok("the shadow table names both directions", "Kết quả cảnh báo bán và vùng định giá" in page and "Đúng hướng" in page)
-from vnbot import taisan_web  # noqa: E402
 
 vn_valuation.card = lambda symbol, as_of: (_ for _ in ()).throw(RuntimeError("VCI down"))
 taisan_web._bot_cards.clear()

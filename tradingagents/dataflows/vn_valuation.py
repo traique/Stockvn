@@ -103,10 +103,11 @@ def price_history(symbol: str) -> pd.DataFrame:
     the last cached session on (that session again, in case it was saved before
     its close was final); later calls that day ask again only while the file
     lacks the last session due (``_due_session``), at most once an hour
-    (``money_flows.RECHECK_SECONDS``). A failed fetch leaves the cached rows
-    (possibly none) and trips the breaker of the informational VCI calls
-    (``money_flows.VCI_INFO``, not the engine's): the calls of the next minutes
-    get the cached rows at once.
+    (``money_flows.RECHECK_SECONDS``). A failed fetch leaves the cached rows and
+    trips the breaker of the informational VCI calls (``money_flows.VCI_INFO``,
+    not the engine's): the calls of the next minutes get the cached rows at once.
+    With none cached it raises: an outage is not a stock without prices (the
+    card would say "no price" for a day, the evening job would not retry it).
     """
     code = safe_ticker_component(symbol.upper())
     path = os.path.join(_dir(), f"{code}-prices.json")
@@ -123,6 +124,8 @@ def price_history(symbol: str) -> pd.DataFrame:
             fresh = money_flows._guarded(money_flows.VCI_INFO,
                                          lambda: flows.fetch_stock_flows(code, start, today))[_PRICE_COLUMNS]
         except VendorError as exc:
+            if cached.empty:
+                raise
             logger.warning("Price history of %s for the valuation unavailable: %s", code, exc)
             return cached
         frames = [f for f in (cached, fresh) if not f.empty]
@@ -382,7 +385,7 @@ class ValuationCard:
     annual_published: date        # when the newest annual report was published
     roe_base: float
     roe_bear: float
-    roe_bull: float
+    roe_bull: float               # ROE p80 (Bull's ROE unless ``bull_ke`` is set)
     assumptions: valuation_config.Assumptions
     bear: float
     eab: float
@@ -399,6 +402,7 @@ class ValuationCard:
     profit_period: str = ""
     pb_rank: MultipleRank | None = None   # the session's P/B among every session since 2018
     pe_rank: MultipleRank | None = None   # the same for P/E ("default" profile: P/E is its own multiple)
+    bull_ke: float | None = None  # not a bank, ROE p80 too close to Base: Bull is Base at this Ke (Ke − 2 points)
 
 
 def _shares_before(history: pd.DataFrame, day: date) -> float:
@@ -519,7 +523,13 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
         return book * justified_pb(roe, ke, setup.lam, setup.g)
 
     base, close = value(roe_base), float(last["Close"])
-    bull = value(roe_bull)
+    bull, bull_ke = value(roe_bull), None
+    # Not a bank (the bank card stays v1.16.0's): a steady or rising ROE puts p80 next to the median
+    # (FPT 30/10/2026: Bull 0,17% above Base), so the Hợp lý band would vanish and the zone flip Rẻ ↔ Đắt
+    # on a tick. Bull is then at least the sensitivity line's Base at Ke − 2 points.
+    floor_ke = round(setup.ke - valuation_config.SENSITIVITY_STEP, 6)
+    if profile != "banking" and value(roe_base, floor_ke) > bull:
+        bull, bull_ke = value(roe_base, floor_ke), floor_ke
     zone = "Rẻ" if close <= base else "Đắt" if close >= bull else "Hợp lý"
     reliability, why = _reliability(profile, code, roe_base, history)
     pe_rank = rank_of(multiple_history(code, "pe", as_of_date), "pe") if profile == "default" else None
@@ -531,7 +541,7 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
         bear=value(roe_bear), eab=base * (1 - setup.margin), base=base, bull=bull, mos=(base - close) / base,
         zone=zone, sensitivity=tuple((ke, value(roe_base, ke)) for ke in valuation_config.sensitivity_ke(setup.ke)),
         next_ex=min(upcoming) if upcoming else None, profile=profile, reliability=reliability, reliability_why=why,
-        profit=profit, profit_period=profit_period, pb_rank=rank_of(history, "pb"), pe_rank=pe_rank,
+        profit=profit, profit_period=profit_period, pb_rank=rank_of(history, "pb"), pe_rank=pe_rank, bull_ke=bull_ke,
     )
 
 
@@ -551,6 +561,11 @@ def _final(key: tuple, built_on: str, c: ValuationCard | NoCard | None) -> bool:
     last session. Any other (today's, one built during the session, none) is rebuilt after an hour."""
     return (isinstance(c, ValuationCard) and built_on > key[1]
             and c.day == _last_session(date.fromisoformat(key[1])))
+
+
+def _fresh(key: tuple, hit) -> bool:
+    """A kept entry ``assess`` answers with: final, or built within the hour."""
+    return bool(hit) and (_final(key, hit[1], hit[2]) or time.time() - hit[0] < money_flows.RECHECK_SECONDS)
 
 
 def _build(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard | None:
@@ -575,7 +590,7 @@ def assess(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
     key = _key(symbol, as_of_date)
     with _cards_lock:
         hit = _cards.get(key)
-    if hit and (_final(key, hit[1], hit[2]) or time.time() - hit[0] < money_flows.RECHECK_SECONDS):
+    if _fresh(key, hit):
         built = hit[2]
     else:
         built = _build(symbol, as_of_date)
@@ -595,12 +610,23 @@ def card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     return built if isinstance(built, ValuationCard) else None
 
 
+def kept(symbol: str, as_of_date: str | None) -> bool:
+    """Whether ``assess`` would answer from what it keeps (a card or a NoCard), without VCI."""
+    key = _key(symbol, as_of_date)
+    with _cards_lock:
+        hit = _cards.get(key)
+    return _fresh(key, hit)
+
+
 def cached_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
-    """The card ``card`` keeps for the run date, without building one (the Output Guard: the
-    fundamentals tool may have built it after the engine's node failed to)."""
+    """The card of a BANK ``card`` keeps for the run date, without building one (the Output Guard: the
+    fundamentals tool may have built it after the engine's node failed to). Never another stock's,
+    though /dinhgia, its evening job and the Tài sản page keep those under the same key: the engine's report
+    carries no card for them, and there Bull/Bear are the two sides of the debate."""
     with _cards_lock:
         hit = _cards.get(_key(symbol, as_of_date))
-    return hit[2] if hit and isinstance(hit[2], ValuationCard) else None
+    found = hit[2] if hit else None
+    return found if isinstance(found, ValuationCard) and found.profile == "banking" else None
 
 
 def _day(day: date, as_of: date) -> str:
@@ -620,6 +646,13 @@ def _pct(value: float) -> str:
 def _rate(value: float) -> str:
     """An assumption in %, without trailing zeros: 12%, 7,94%, 0%."""
     return rfmt.fmt_number(value * 100).rstrip("0").rstrip(",") + "%"
+
+
+def bull_basis(c: ValuationCard) -> str:
+    """What Bull rests on: ROE p80, or (not a bank, p80 next to Base) the Base at Ke − 2 points."""
+    if c.bull_ke is None:
+        return f"theo ROE p80 {_pct(c.roe_bull)}"
+    return f"= Base với Ke {_rate(c.bull_ke)} (ROE p80 {_pct(c.roe_bull)} sát Base)"
 
 
 def _expiry(c: ValuationCard) -> str:
@@ -664,7 +697,7 @@ def render_card(c: ValuationCard) -> str:
         f"lần sổ sách; Ke {_rate(a.ke)} (giả định đặt tay), λ {rfmt.fmt_number(a.lam, 1)}, g {_rate(a.g)}: "
         "P/B = 1 + (ROE − Ke)/(1 + Ke − (1 − λ)(1 + g))",
         f"{model} Bear {rfmt.format_level(c.close, c.bear)} theo ROE p20 · Bull {rfmt.format_level(c.close, c.bull)} "
-        "theo ROE p80",
+        + ("theo ROE p80" if c.bull_ke is None else bull_basis(c)),
         f"{model} eab {rfmt.format_level(c.close, c.eab)} = Base × (1 − {rfmt.fmt_pct(a.margin * 100, 1)})",
         f"{model} Giá {rfmt.fmt_price(c.close)} (phiên {c.day:%d/%m/%Y}): MOS {rfmt.fmt_signed_pct(c.mos * 100)} "
         f"= (Base − giá)/Base → vùng {c.zone} (Rẻ: giá ≤ Base; Đắt: giá ≥ Bull)",

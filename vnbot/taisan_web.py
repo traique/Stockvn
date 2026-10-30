@@ -754,13 +754,16 @@ BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own card (vn
 
 _bot_cards: dict[str, tuple[float, object | None, str]] = {}   # symbol -> (looked at, the bot's card, why none)
 _bot_lock = threading.Lock()
+BOT_LOOKS = 2            # the bot's cards built at once for this page (VCI is slow; its breaker is shared)
+_bot_builds = threading.BoundedSemaphore(BOT_LOOKS)
 
 
 def _bot_card(symbol: str) -> tuple[object | None, str]:
     """(the bot's own card of the stock, why there is none) as the last look found it. Never looked at
     in the request: a card not kept yet is five VCI calls (more while VCI times out), so a look older
     than ``money_flows.BREAKER_SECONDS`` starts in the background for the next view
-    (``vn_valuation.card`` keeps a card an hour: a look in between costs nothing)."""
+    (``vn_valuation.card`` keeps a card an hour: a look in between costs nothing), ``BOT_LOOKS`` built
+    at once: the first view after the hour does not send one burst of VCI calls per card."""
     from tradingagents.dataflows import money_flows
 
     with _bot_lock:
@@ -777,7 +780,8 @@ def _look_bot_card(symbol: str) -> None:
     from tradingagents.dataflows import vn_valuation as vv
 
     try:
-        found = vv.card(symbol, None)
+        with _bot_builds:
+            found = vv.card(symbol, None)
         why = "" if found else "bot không lập thẻ (lý do: /dinhgia mã)"
     except Exception as exc:  # noqa: BLE001 - the owner's card is shown alone
         logger.warning("Tài sản web: the bot's valuation card of %s: %s", symbol, exc)

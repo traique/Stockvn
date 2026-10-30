@@ -81,23 +81,29 @@ def a_loss(fx):
 variant("NEGEQ", negative_equity)
 variant("LOSSY", a_loss)
 variant("YOUNG", lambda fx: fx.update(annual_ratios=fx["annual_ratios"][-2:]))
+variant("OUTG", lambda fx: None)        # HPG's data, its price history never fetched: VCI down for it
 PRICES = {s: fixture_prices(fx) for s, fx in FX.items()}
 LISTING = [{"symbol": s, "type": "STOCK", "board": "HSX", "organName": f"Công ty {s}", "icbCode2": icb}
-           for s, icb in (("NEGEQ", "1700"), ("LOSSY", "1700"), ("YOUNG", "1700"), ("XYZBDS", "8600"),
+           for s, icb in (("NEGEQ", "1700"), ("LOSSY", "1700"), ("YOUNG", "1700"), ("OUTG", "1700"), ("XYZBDS", "8600"),
                           ("PGB", "8300"), ("FPT", "9500"), ("HPG", "1700"), ("VHM", "8600"), ("CTG", "8300"))]
 LISTING[1]["organName"] = "Công ty Cổ phần Tập đoàn Hòa Phát"
-LISTING_DOWN = {"on": False}
+LISTING_DOWN = {"on": False, "nodata": False}
 CALLS = {"flows": 0}
+FLOWS_DOWN: set[str] = set()
 
 
 def fake_listing():
     if LISTING_DOWN["on"]:
         raise VendorUnavailableError("offline")
+    if LISTING_DOWN["nodata"]:
+        raise NoMarketDataError("*", "*", "VCI answered without a listing")
     return [dict(r) for r in LISTING]
 
 
 def fake_flows(symbol, start, end):
     CALLS["flows"] += 1
+    if symbol in FLOWS_DOWN:
+        raise VendorUnavailableError("VCI price-history: read timed out")
     f = PRICES[symbol]
     return f[(f["Date"] >= pd.Timestamp(start)) & (f["Date"] <= pd.Timestamp(end))].assign(ForeignBuy=0.0)
 
@@ -176,9 +182,14 @@ hpg = vv.assess("HPG", None)
 vhm = vv.assess("VHM", None)
 t.ok("FPT 30/10/2026 (live check 29/10 close 52.700): book 22.736, Base 29.212 = book × P/B(28,10%, Ke 13%), Đắt",
      isinstance(fpt, vv.ValuationCard) and fpt.day == date(2026, 10, 29) and round(fpt.book) == 22_736
-     and round(fpt.base) == 29_212 and round(fpt.bear) == 25_700 and round(fpt.bull) == 29_263 and fpt.zone == "Đắt"
+     and round(fpt.base) == 29_212 and round(fpt.bear) == 25_700 and round(fpt.bull) == 30_358 and fpt.zone == "Đắt"
      and abs(fpt.base - fpt.book * vv.justified_pb(fpt.roe_base, 0.13, 0.4)) < 1e-6 and fpt.period == "Q3/2026",
      fpt)
+t.ok("... a rising ROE: p80 28,21% would put Bull 0,17% above Base (29.263, the Hợp lý band ~50đ); not a bank, so "
+     "Bull is the sensitivity line's Base at Ke 11%, and the card says why",
+     round(fpt.book * vv.justified_pb(fpt.roe_bull, 0.13, 0.4)) == 29_263 and fpt.bull_ke == 0.11
+     and fpt.bull == fpt.sensitivity[0][1] and vv.bull_basis(fpt) == "= Base với Ke 11% (ROE p80 28,21% sát Base)",
+     (fpt.roe_bull, fpt.bull_ke, vv.bull_basis(fpt)))
 t.ok("... reliability THẤP with its reasons: technology, ROE far above Ke, the book growing ≥ 20%/year",
      fpt.reliability == "thấp" and "công ty công nghệ" in fpt.reliability_why and "ROE bền vững 28,10%" in fpt.reliability_why
      and "vốn chủ sở hữu tăng 21,96%/năm trong 3 năm" in fpt.reliability_why, fpt.reliability_why)
@@ -187,7 +198,7 @@ t.ok("... P/E is its own multiple: both ranks there, P/B too", fpt.pe_rank is no
 t.ok("HPG: a cyclical, ROE 11,07% under Ke: Base below the price, Hợp lý, reliability TRUNG BÌNH (no reason to drop)",
      round(hpg.book) == 17_624 and round(hpg.base) == 16_983 and round(hpg.bull) == 21_440 and hpg.zone == "Hợp lý"
      and hpg.reliability == "trung bình" and hpg.reliability_why == valuation_config.RELIABILITY["default"][1]
-     and hpg.bear < hpg.base < hpg.bull, hpg)
+     and hpg.bear < hpg.base < hpg.bull and hpg.bull_ke is None and vv.bull_basis(hpg) == "theo ROE p80 24,48%", hpg)
 t.ok("VHM: real estate, Ke 13%, reliability THẤP (land at cost, profit by handover); the 6.000đ dividend went ex "
      "29/06, inside Q2/2026: already out of its book, over the shares doubled on 06/08",
      vhm.profile == "realestate" and vhm.assumptions.ke == 0.13 and vhm.reliability == "thấp"
@@ -197,8 +208,9 @@ old_fpt = vv.assess("FPT", "2026-10-28")
 t.ok("point-in-time: on 28/10 FPT's Q3/2026 (published 29/10) is not there yet", old_fpt.period == "Q2/2026"
      and old_fpt.day == date(2026, 10, 28), old_fpt.period)
 ctg = vv.assess("CTG", "2026-10-28")
-t.ok("CTG keeps v1.16.0's card: Ke 12%, Base 27.643, reliability CAO", ctg.profile == "banking" and round(ctg.base) == 27_643
-     and ctg.reliability == "cao" and vv.render_card(ctg).splitlines()[0].endswith("- ngân hàng ---"))
+t.ok("CTG keeps v1.16.0's card: Ke 12%, Base 27.643, Bull 28.066 by ROE p80 (under Base at Ke 10%, 28.749: no floor "
+     "for a bank), reliability CAO", ctg.profile == "banking" and round(ctg.base) == 27_643 and round(ctg.bull) == 28_066
+     and ctg.bull_ke is None and ctg.reliability == "cao" and vv.render_card(ctg).splitlines()[0].endswith("- ngân hàng ---"))
 growth = vv._book_growth(pd.DataFrame({"Period": ["Q3/2023", "Q4/2025", "Q3/2026"], "Base": [100.0, 150.0, 200.0]}))
 t.ok("book growth: the same quarter three years before (100 → 200: 25,99%/year); none without it",
      abs(growth - (2 ** (1 / 3) - 1)) < 1e-12
@@ -214,6 +226,30 @@ t.ok("two annual ROEs: no card", isinstance(young, vv.NoCard) and "mới có 2 n
 t.ok("not at VCI: a NoCard, not a failure", isinstance(vv.assess("ZZZ", None), vv.NoCard))
 t.ok("the engine's report and /nhanh stay bank-only: no card text for HPG",
      vv.card_text("HPG", None) == "" and vv.quick_line("HPG", None) == "" and vv.card_text("CTG", "2026-10-28") != "")
+
+from tradingagents.agents import output_guard  # noqa: E402
+
+GUARD_HPG = {"company_of_interest": "HPG", "trade_date": "2026-10-30", "quant_report": "Giá 21.200. Hỗ trợ 19.500, kháng cự 23.000.",
+             "quant_decision": {"action": "NO_TRADE", "price": 21_200.0, "deterministic_summary": "HPG"}}
+GUARD_FPT = {"company_of_interest": "FPT", "trade_date": "2026-10-30", "quant_report": "Giá 52.700.",
+             "quant_decision": {"action": "HOLD", "price": 52_700.0, "deterministic_summary": "FPT"},
+             "market_report": "Kháng cự 56.000, hỗ trợ 50.000."}
+debates = [(GUARD_FPT, "- **Bull**: 56.000 nếu vượt đỉnh cũ.\n- **Bear**: 50.000 khi thủng MA50."),
+           (GUARD_FPT, "| Bull | 56.000 |\n| Bear | 50.000 |"),
+           (GUARD_HPG, "Phe Bull: 23.000 là kháng cự gần nhất, phe Bear lo ngại thủng 19.500.")]
+t.ok("the non-banks' cards are kept under the run date's key (/dinhgia, the evening job, the Tài sản page), yet the "
+     "Output Guard stays bank-only: no card for HPG or FPT, CTG's is there",
+     vv.kept("HPG", "2026-10-30") and vv.kept("FPT", "2026-10-30") and vv.cached_card("HPG", "2026-10-30") is None
+     and vv.cached_card("FPT", "2026-10-30") is None and vv.cached_card("CTG", "2026-10-28") is not None)
+t.ok("... the debaters' Bull/Bear pass; a price in no data after Bull keeps the old note, not 'off the card'; the "
+     "card's Bull (21.440, which no agent saw) is not taken as known; the fundamentals report's scenario not flagged",
+     all(output_guard.guard_text(x, st, label="Research Manager")[1] is None for st, x in debates)
+     and output_guard.guard_text("Phe Bull: 36.000.", GUARD_HPG, label="Research Manager")[1]
+     == "Research Manager: có mốc giá ngoài dữ liệu (36.000)"
+     and output_guard.guard_text("Phe Bull: 21.440.", GUARD_HPG, label="Research Manager")[1]
+     == "Research Manager: có mốc giá ngoài dữ liệu (21.440)"
+     and output_guard.guard_fundamentals({**GUARD_HPG, "fundamentals_report": "Kịch bản Bull 26.000 nếu giá thép hồi phục."})[1]
+     is None, [output_guard.guard_text(x, st, label="Research Manager")[1] for st, x in debates])
 
 # ───────────── 3. the rows and the changes ─────────────
 DATA = ROOT / "rows"
@@ -306,6 +342,7 @@ t.ok("... what Base rests on (book FACT, ROE THỐNG KÊ with its date), the sen
      lines[5].startswith("Base = sổ sách 17.624 đ/cp [FACT 29/10] × 0,96 lần: ROE bền vững 11,07% (trung vị 2021-2025) "
                          "[THỐNG KÊ 30/03] · Ke 13% đặt tay · λ 0,4 · g 0%")
      and lines[6] == "Độ nhạy theo Ke: 11% → 17.649 · 13% → 16.983 · 15% → 16.365"
+     and lines[5].endswith("g 0% · eab = Base × (1 − 13,7%)")
      and lines[7].startswith("Độ tin cậy: TRUNG BÌNH - ") and lines[8].startswith("BCTC Q3/2026 công bố 29/10 · Hạn dùng:"),
      lines[5:9])
 t.ok("... the changes, the owner's card named as his with the gap, the link, the disclaimer",
@@ -317,11 +354,32 @@ n = len(sent)
 tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dg HPG"})
 t.ok("/dg is /dinhgia; kept an hour: no '⏳' the second time", len(sent) == n + 1 and sent[-1][1].startswith("📐 ĐỊNH GIÁ HPG"))
 tg._handle({"chat": {"id": "zoom:7"}, "from": {"id": ZOOM_USER}, "text": "/dinhgia FPT"})
-t.ok("Zoom ('dinhgia FPT', the same dispatcher)", sent[-1][0] == "zoom:7" and sent[-1][1].startswith("📐 ĐỊNH GIÁ FPT")
-     and "Độ tin cậy: THẤP - công ty công nghệ" in sent[-1][1])
+zoom_lines = sent[-1][1].splitlines()
+t.ok("Zoom ('dinhgia FPT', the same dispatcher); a low-reliability card says so on the zone line, and why Bull is where it is",
+     sent[-1][0] == "zoom:7" and sent[-1][1].startswith("📐 ĐỊNH GIÁ FPT") and "Độ tin cậy: THẤP - công ty công nghệ" in sent[-1][1]
+     and zoom_lines[1] == "Giá 52.700 (phiên 29/10) → vùng ĐẮT (tin cậy THẤP) · MOS -80,4% so với Base 29.212"
+     and zoom_lines[2] == "Bear 25.700 · eab 25.210 · Base 29.212 · Bull 30.358 (= Base với Ke 11% (ROE p80 28,21% sát Base)) "
+                          "[THỐNG KÊ 29/10]", zoom_lines[:3])
+n = len(sent)
 tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia NEGEQ"})
 t.ok("no card: the reason, no levels", sent[-1][1].startswith("📐 ĐỊNH GIÁ NEGEQ · doanh nghiệp · bot tự tính\nBot không lập thẻ: "
                                                             "vốn chủ sở hữu công ty mẹ Q3/2026 âm") and "Base" not in sent[-1][1])
+tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia NEGEQ"})
+t.ok("'⏳' only while the card is built: the first NEGEQ, not the second (its kept no-card answers at once)",
+     [m for _, m in sent[n:]].count("⏳ Đang tính định giá NEGEQ (lần đầu một mã khoảng 10-20 giây)...") == 1
+     and len(sent) == n + 3, [m[:40] for _, m in sent[n:]])
+key = vv._key("HPG", None)
+vv._cards[key] = (vv._cards[key][0] - money_flows.RECHECK_SECONDS - 1, *vv._cards[key][1:])
+tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia HPG"})
+t.ok("... and again once the kept card is past the hour (assess builds it from VCI again)",
+     sent[-2][1].startswith("⏳ Đang tính định giá HPG") and sent[-1][1].startswith("📐 ĐỊNH GIÁ HPG"))
+account.valuation_status = lambda symbol, card, day=None: {"stale": {"ex": "2026-10-20", "what": "cổ tức"}, "expired": False,
+                                                           "checked": True}
+stale_line = dg._manual_line("HPG", account, hpg.base)
+del account.valuation_status
+t.ok("the owner's card past an ex-date: 'cần cập nhật', no gap to the bot's (his levels on the old share basis)",
+     "cần cập nhật (GDKHQ 20/10/2026)" in stale_line and "Base của anh" not in stale_line
+     and "Base của anh cao hơn bot 17,8%" in dg._manual_line("HPG", account, hpg.base), stale_line)
 tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia FPT HPG"})
 t.ok("two codes: the usage", sent[-1][1] == "⚠️ " + dg.USAGE)
 tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia VNINDEX"})
@@ -334,6 +392,13 @@ t.ok("/dinhgia alone: the tracked stocks (watchlist, then the holding/card HPG o
      listing.startswith("📐 ĐỊNH GIÁ BOT TỰ TÍNH · 4 mã theo dõi") and listing.index("• HPG Hợp lý") < listing.index("• FPT Đắt")
      and "✍️ có thẻ anh nhập" in listing.split("• HPG", 1)[1].split("\n", 1)[0]
      and "• NEGEQ: không lập thẻ - vốn chủ" in listing and "Chưa tính: VHM" in listing, listing)
+ordered = dg.list_order([{"symbol": "LOW", "base": 1.0, "mos": 0.5, "reliability": "thấp"},
+                         {"symbol": "MID", "base": 1.0, "mos": 0.1, "reliability": "trung bình"},
+                         {"symbol": "NIL", "base": None, "mos": None},
+                         {"symbol": "TOP", "base": 1.0, "mos": 0.3, "reliability": "cao"}])
+t.ok("the list: the cheapest against Base first, a low-reliability card after the others (its MOS from a weak model); "
+     "said in the heading", [r["symbol"] for r in ordered] == ["TOP", "MID", "LOW"]
+     and "rẻ nhất so với Base trước, tin cậy thấp xếp sau" in listing.splitlines()[0])
 real_assess = vv.assess
 vv.assess = lambda *a: (_ for _ in ()).throw(VendorUnavailableError("VCI-info failed recently"))
 tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia VCB"})
@@ -387,7 +452,11 @@ t.ok("... the number line (book, eab, Bear, Base, Bull, the price beyond them), 
 t.ok("... the owner's card apart and escaped, never as the bot's",
      "&lt;script&gt;" in prof and "<script>alert(1)</script>" not in prof
      and prof.index("Thẻ anh nhập (không phải của bot)") > prof.index("Chỉ số chính"))
-t.ok("... a non-bank: its own KPIs, no peer column", "Biên lãi gộp" in prof and "Trung vị ngân hàng cùng kỳ" not in prof)
+t.ok("... a non-bank: its own KPIs, no peer column; VCI's debtToEquity named for what it is (total liabilities)",
+     "Biên lãi gộp" in prof and "Trung vị ngân hàng cùng kỳ" not in prof and "Nợ phải trả/VCSH" in prof and "Nợ vay" not in prof)
+t.ok("... a tracked stock (watchlist): recomputed after 16:00; the low reliability next to the zone in '30 giây'",
+     "Bot tự tính lại sau 16:00 mỗi phiên" in prof and "Độ tin cậy THẤP</b> với mã này" in prof
+     and prof.index("Độ tin cậy THẤP") < prof.index("Biên an toàn (MOS)"))
 nq = web.get("/dinhgia/NEGEQ", auth=AUTH).text
 t.ok("no card: the reason on the page", "Bot không lập thẻ định giá cho NEGEQ: vốn chủ sở hữu công ty mẹ Q3/2026 âm" in nq)
 t.ok("a bad code: said, with the box", "Mã không hợp lệ" in web.get("/dinhgia/%3Cb%3E", auth=AUTH).text)
@@ -418,6 +487,23 @@ dinhgia_web.look("CTG", SETTINGS.data_dir, wait=30)
 bank = web.get("/dinhgia/CTG", auth=AUTH).text
 t.ok("CTG's page: the bank's KPIs against the medians, its 5-year ROE rank",
      "Trung vị ngân hàng cùng kỳ" in bank and "14,00%" in bank and "(3 NH)" in bank and "hạng 2/3" in bank, bank[-3000:])
+t.ok("... CTG followed by nothing (watchlist, Tài sản, cards): computed when viewed, not said to be recomputed at 16:00",
+     "bot tính khi có người xem, không tự tính sau phiên" in bank and "Bot tự tính lại sau" not in bank)
+os.environ["VALUATION_KE_BANK"] = "10"
+ke10 = dinhgia_web._book_card(vv.assess("CTG", "2026-10-28"))
+del os.environ["VALUATION_KE_BANK"]
+t.ok("the Ke note follows VALUATION_KE_BANK (10%): 'ngân hàng 10%', the row in use 10%",
+     "ngân hàng 10%, mã khác 13%" in ke10 and "10% (đang dùng)" in ke10 and "ngân hàng 12%" not in ke10)
+LISTING_DOWN["nodata"] = True
+try:
+    dg.bank_peers("2026-10-30", compute=True)
+    refused = False
+except NoMarketDataError:
+    refused = True
+LISTING_DOWN["nodata"] = False
+t.ok("VCI's listing without banks: nothing kept for the day (an empty file would hide 29/10's), raised for the job to retry",
+     refused and not (CACHE / "valuation" / "peers-8300-2026-10-30.json").exists()
+     and dg.latest_bank_peers("2026-10-30")["day"] == "2026-10-29")
 
 
 # the card built off the request: "đang tính" and a reload, and a cap on the pages' builds
@@ -460,8 +546,8 @@ def counted(symbol, as_of):
         active[0] -= 1
     if symbol == "BAD":
         raise VendorUnavailableError("VCI-info failed recently")
-    if symbol == "NONE":
-        return vv.NoCard("NONE", date(2026, 10, 30), "default", "đang lỗ")
+    if symbol in ("NONE", "MORN"):
+        return vv.NoCard(symbol, date(2026, 10, 30), "default", "đang lỗ")
     return replace(hpg, symbol=symbol, day=date(2026, 10, 28) if symbol == "OLD" else hpg.day)
 
 
@@ -472,7 +558,8 @@ dg.bank_peers = lambda day, compute=False: asked_peers.append((day, compute))
 symbols = ["A01", "A02", "A03", "A04", "OLD", "NONE", "BAD"]
 out = dg.run_job(symbols, JOB, session="2026-10-29", today="2026-10-30")
 t.ok("the job: each stock's outcome; at most two built at once",
-     out == {"done": ["A01", "A02", "A03", "A04"], "behind": ["OLD"], "none": ["NONE"], "kept": [], "failed": ["BAD"]}
+     out == {"done": ["A01", "A02", "A03", "A04"], "behind": ["OLD"], "none": ["NONE"], "kept": [], "failed": ["BAD"],
+             "peers": []}
      and peak[0] <= dg.JOB_WORKERS, (out, peak))
 t.ok("... no bank among them: the banks' KPIs not read", asked_peers == [])
 again = dg.run_job(symbols, JOB, session="2026-10-29", today="2026-10-30")
@@ -480,8 +567,33 @@ t.ok("run again the same day: done and refused ones kept, the older price and th
      again["kept"] == ["A01", "A02", "A03", "A04", "NONE"] and again["behind"] == ["OLD"] and again["failed"] == ["BAD"])
 dg.run_job(["CTG"], JOB, session="2026-10-29", today="2026-10-30")
 t.ok("a bank among them: the day's banks' KPIs asked for", asked_peers == [("2026-10-30", True)])
+dg.bank_peers = lambda day, compute=False: (_ for _ in ()).throw(VendorUnavailableError("VCI-info failed recently"))
+t.ok("... not read: said in the outcome (the scheduler tries again)",
+     dg.run_job(["CTG"], JOB, session="2026-10-29", today="2026-10-30")["peers"] == ["failed"])
+dg.Cards(JOB).record(vv.NoCard("MORN", date(2026, 10, 30), "default", "đang lỗ"), "2026-10-30")   # a view at 10:00
+NOW["t"] = datetime(2026, 10, 30, 16, 5, tzinfo=vn_rules.VN_TZ)
+morning = dg.run_job(["MORN"], JOB, session="2026-10-30", today="2026-10-30")
+evening = dg.run_job(["MORN"], JOB, session="2026-10-30", today="2026-10-30")
+t.ok("a refusal from a morning view is built again by the evening job (a statement may be out since), then kept",
+     morning["none"] == ["MORN"] and evening["kept"] == ["MORN"], (morning, evening))
+NOW["t"] = datetime(2026, 10, 30, 10, 0, tzinfo=vn_rules.VN_TZ)
 vv.assess = real_assess
 dg.bank_peers = real_peers
+
+# VCI's price history down for a stock never fetched: an outage, not "no card"
+money_flows._down_until.clear()
+FLOWS_DOWN.add("OUTG")
+first = dg.run_job(["OUTG"], JOB, session="2026-10-29", today="2026-10-30")
+t.ok("price history down for a stock not cached yet: failed (retried), nothing kept, no 'no card' cached, the breaker "
+     "tripped", first["failed"] == ["OUTG"] and dg.Cards(JOB).rows("OUTG") == [] and not vv.kept("OUTG", None)
+     and money_flows.VCI_INFO in money_flows._down_until, (first, dg.Cards(JOB).rows("OUTG")))
+tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia OUTG"})
+t.ok("... /dinhgia says VCI is down, not 'chưa có giá phiên'", sent[-1][1].startswith("⚠️ VCI đang lỗi hoặc chậm, chưa tính "
+                                                                                    "được định giá OUTG"), sent[-1])
+FLOWS_DOWN.clear()
+money_flows._down_until.clear()
+second = dg.run_job(["OUTG"], JOB, session="2026-10-29", today="2026-10-30")
+t.ok("... VCI back: the card", second["done"] == ["OUTG"] and dg.Cards(JOB).rows("OUTG")[0]["base"] is not None, second)
 
 t.ok("tracked: the watchlist, then the holdings and the owner's cards; once each, no index or bad code",
      dg.tracked(["fpt", "VNINDEX", "FPT", "ABCDEFGHIJK"], SimpleNamespace(book=lambda: SimpleNamespace(holdings={"VCB": 1, "FPT": 2}),
@@ -491,8 +603,9 @@ t.ok("tracked: the watchlist, then the holdings and the owner's cards; once each
 from vnbot.service import DailyScheduler  # noqa: E402
 
 runs = []
-results = [{"done": [], "behind": ["X"], "none": [], "kept": [], "failed": []},
-           {"done": ["X"], "behind": [], "none": [], "kept": [], "failed": []}]
+results = [{"done": [], "behind": ["X"], "none": [], "kept": [], "failed": [], "peers": []},
+           {"done": [], "behind": [], "none": [], "kept": ["X"], "failed": [], "peers": ["failed"]},
+           {"done": [], "behind": [], "none": [], "kept": ["X"], "failed": [], "peers": []}]
 real_run = dg.run_job
 dg.run_job = lambda syms, data_dir, session: runs.append((syms, session)) or results[len(runs) - 1]
 sched = DailyScheduler(SETTINGS, JobQueue(SETTINGS), watch, bot=SimpleNamespace(taisan=account))
@@ -506,7 +619,11 @@ t.ok("16:00 on a session day: the tracked stocks (watchlist + Tài sản); an ol
      and sched._valuation_due() is None and sched._valuation_next > time.time() + 3500)
 sched._valuation_next = 0.0
 sched._valuation_run(sched._valuation_due())
-t.ok("... all done: stamped, not due again today", len(runs) == 2 and sched._valuation_due() is None
+t.ok("... the banks' medians not read: tried again in an hour too", len(runs) == 2 and sched._valuation_due() is None
+     and not (SETTINGS.data_dir / "last_valuation_run.txt").exists())
+sched._valuation_next = 0.0
+sched._valuation_run(sched._valuation_due())
+t.ok("... all done: stamped, not due again today", len(runs) == 3 and sched._valuation_due() is None
      and (SETTINGS.data_dir / "last_valuation_run.txt").read_text(encoding="utf-8") == "2026-10-30")
 NOW["t"] = datetime(2026, 10, 31, 17, 0, tzinfo=vn_rules.VN_TZ)
 t.ok("a Saturday: not due", sched._valuation_due() is None)

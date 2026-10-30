@@ -289,7 +289,7 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
     else:
         lines.append(
             f"- Biên lãi gộp: {_pct(latest.get('grossMargin'))} | Biên lãi ròng: {_pct(latest.get('afterTaxProfitMargin'))} | "
-            f"Nợ vay/VCSH: {_ratio(latest.get('debtToEquity'))} | Thanh toán hiện hành: {_ratio(latest.get('currentRatio'))}"
+            f"Nợ phải trả/VCSH: {_ratio(latest.get('debtToEquity'))} | Thanh toán hiện hành: {_ratio(latest.get('currentRatio'))}"
         )
     if not historical:
         lines.append(

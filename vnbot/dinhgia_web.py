@@ -121,7 +121,7 @@ def list_body(symbols: list[str], data_dir, *, account=None, msg: str = "") -> s
         except Exception:  # noqa: BLE001 - listed without the marks
             manual = set()
     rows = {s: latest[s] for s in symbols if s in latest}
-    cards = sorted((r for r in rows.values() if r.get("base") is not None), key=lambda r: -float(r["mos"]))
+    cards = dg.list_order(rows.values())
     body = []
     for r in cards:
         sym = r["symbol"]
@@ -155,7 +155,7 @@ def list_body(symbols: list[str], data_dir, *, account=None, msg: str = "") -> s
             "sách neo giá trị tới đâu. Chỉ để tham khảo, không vào quyết định của bot.")
     return (ui.title("Định giá", _e(lead)) + ui.alert(msg, "err") + ui.card("", _search())
             + '<div class="mt">' + ui.card("Các mã theo dõi", table + seen,
-                                           sub=_e(dg.ZONE_RULE + " · xếp theo MOS, rẻ nhất so với Base trước")) + "</div>"
+                                           sub=_e(f"{dg.ZONE_RULE} · xếp theo MOS, {dg.LIST_ORDER}")) + "</div>"
             + f'<p class="muted small mt">{_e(dg.DISCLAIMER)}</p>')
 
 
@@ -202,18 +202,22 @@ def number_line(points: list[tuple[str, float, str]], close: float) -> str:
             + "".join(marks) + "</svg>")
 
 
-def _freshness(c, now_text: str) -> str:
+def _freshness(c, now_text: str, tracked: bool) -> str:
     vv = _vv()
     expiry = _e(vv._expiry(c))
     years = [y for y, _ in c.roes]
+    when = (f"Bot tự tính lại sau {dg.JOB_TIME} mỗi phiên (mã trong watchlist, Tài sản hoặc có thẻ anh nhập)" if tracked
+            else "Mã này không trong watchlist, Tài sản hay thẻ anh nhập: bot tính khi có người xem, không tự tính sau phiên")
     return ui.card("Độ mới của dữ liệu", (
         f'<p style="margin:0"><b>Dữ liệu dùng trên trang</b> — trang sinh {_e(now_text)} · giá phiên {c.day:%d/%m/%Y} · '
         f'BCTC {_e(c.period)} công bố {c.published:%d/%m/%Y} · ROE năm tới {years[-1]} (báo cáo năm công bố '
-        f'{c.annual_published:%d/%m/%Y})</p><p class="muted small" style="margin:8px 0 0">{expiry}. Bot tự tính lại sau '
-        f'{dg.JOB_TIME} mỗi phiên; sổ sách/cp đổi khi có BCTC quý mới, cổ tức tiền hoặc thay đổi số cổ phiếu.</p>'))
+        f'{c.annual_published:%d/%m/%Y})</p><p class="muted small" style="margin:8px 0 0">{expiry}. {_e(when)}; '
+        'sổ sách/cp đổi khi có BCTC quý mới, cổ tức tiền hoặc thay đổi số cổ phiếu.</p>'))
 
 
 def _thirty_seconds(c) -> str:
+    from tradingagents.dataflows import valuation_config as cfg
+
     vv = _vv()
     model = _label("THỐNG KÊ", c.day, c.as_of)
     tiles = [ui.tile("Biên an toàn (MOS)", f'<span class="{ui.tone(c.mos)}">{_e(dg.signed_pct(c.mos))}</span>',
@@ -236,7 +240,7 @@ def _thirty_seconds(c) -> str:
              f"{ui.money(c.eab)} là Base đã trừ biên an toàn {_num(c.assumptions.margin * 100, 1)}%"),
             ("Hợp lý", "giữa mức Rẻ và mức Đắt", "trên Base, dưới Bull"),
             ("Đắt", f"giá ≥ Bull <b>{ui.money(c.bull)}</b>",
-             f"Bull = trần định giá mỗi cổ phiếu, theo ROE p80 {_e(vv._pct(c.roe_bull))} của chính mã; trên mức này coi là đắt")):
+             f"Bull = trần định giá mỗi cổ phiếu, {_e(vv.bull_basis(c))} của chính mã; trên mức này coi là đắt")):
         now = " (hôm nay)" if name == c.zone else ""
         rows.append(f'<tr><td data-label="Vùng">{ui.chip(name, ZONE_KIND.get(name, ""))}{_e(now)}</td>'
                     f'<td data-label="Giá mỗi cổ phiếu">{cond}</td><td data-label="Dựa trên" class="small">{why}</td></tr>')
@@ -249,19 +253,26 @@ def _thirty_seconds(c) -> str:
              f'chi phí vốn chủ (Ke) {_e(vv._rate(a.ke))} đặt tay · lợi thế lợi nhuận phai dần λ {_num(a.lam, 1)} · không tăng '
              f'trưởng dài hạn (g = {_e(vv._rate(a.g))}) ⟹ Base = <b>{_num(c.base / c.book)} lần sổ sách</b>. {model}</p>'
              f'<p class="muted small">P/B hợp lý = 1 + (ROE − Ke) / (1 + Ke − (1 − λ)(1 + g)). Bear theo ROE p20 '
-             f'{_e(vv._pct(c.roe_bear))}, Bull theo ROE p80 {_e(vv._pct(c.roe_bull))} của {len(c.roes)} năm '
-             f'{c.roes[0][0]}-{c.roes[-1][0]}. Giá {ui.money(c.close)} ngầm định ROE bền vững {_e(vv._pct(implied))}.</p>')
+             f'{_e(vv._pct(c.roe_bear))}, Bull {_e(vv.bull_basis(c))}, ROE của {len(c.roes)} năm '
+             f'{c.roes[0][0]}-{c.roes[-1][0]}'
+             + (f'; mã không phải ngân hàng: Bull không thấp hơn Base với Ke trừ {cfg.SENSITIVITY_STEP * 100:g} điểm, để '
+                'vùng Hợp lý không biến mất' if c.bull_ke is not None else '')
+             + f'. Giá {ui.money(c.close)} ngầm định ROE bền vững {_e(vv._pct(implied))}.</p>')
     line = number_line([("Sổ sách/cp", c.book, "up"), ("Bear", c.bear, "up"), ("Bull", c.bull, "up"),
                         ("eab", c.eab, "down"), ("Base", c.base, "down")], c.close)
     note = ('<p class="muted small">Số trên trang là ước tính của một mô hình, dựng từ số liệu công bố, không phải khuyến '
             'nghị mua bán và không phải giá mục tiêu. Người đọc tự quyết định và tự chịu trách nhiệm.</p>')
+    weak = (' <b>Độ tin cậy THẤP</b> với mã này (xem «Độ tin cậy của thẻ»): vùng và MOS chỉ là mốc tham khảo yếu.'
+            if c.reliability == "thấp" else "")
     head = (f'<p style="margin:0 0 12px"><b>Vùng giá — rẻ · hợp lý · đắt.</b> Giá hôm nay <b>{ui.money(c.close)}</b> '
-            f'(phiên {c.day:%d/%m/%Y}) đang ở vùng {zone}. {model}</p>')
+            f'(phiên {c.day:%d/%m/%Y}) đang ở vùng {zone}. {model}{weak}</p>')
     return ui.card("30 giây", head + f'<div class="tiles t4">{"".join(tiles)}</div>' + '<div class="mt">' + table + "</div>"
                    + rests + line + note)
 
 
 def _book_card(c) -> str:
+    from tradingagents.dataflows import valuation_config as cfg
+
     vv = _vv()
     items = [f"<li>Vốn chủ sở hữu công ty mẹ {_e(c.period)} (tới {c.period_end:%d/%m/%Y}): {_num(c.equity / 1e9, 1)} tỷ "
              f"{_label('FACT', c.published, c.as_of)}</li>"]
@@ -288,8 +299,9 @@ def _book_card(c) -> str:
             + ui.card("Sổ sách và ROE", f'<ul class="small">{"".join(items)}</ul>' + table,
                       sub=f"ROE năm của VCI {_label('THỐNG KÊ', c.annual_published, c.as_of)}")
             + ui.card("Độ nhạy theo Ke", sens_table + '<p class="muted small" style="margin:12px 0 0">Ke là giả định đặt tay '
-                      "(ngân hàng 12%, mã khác 13%; đổi bằng VALUATION_KE_BANK / VALUATION_KE_DEFAULT): Base đổi nhiều khi Ke "
-                      "đổi 2 điểm.</p>")
+                      f"(ngân hàng {_e(vv._rate(cfg.assumptions('banking').ke))}, mã khác "
+                      f"{_e(vv._rate(cfg.assumptions('default').ke))}; đổi bằng VALUATION_KE_BANK / VALUATION_KE_DEFAULT): "
+                      "Base đổi nhiều khi Ke đổi 2 điểm.</p>")
             + "</div>")
 
 
@@ -340,7 +352,8 @@ def _kpis(code: str, profile: str, kpis: dict | None, as_of) -> str:
         head.append(("Trung vị ngân hàng cùng kỳ", "num"))
     sub = (f"Số TTM của VCI, kỳ {kpis['period']} " + (f"công bố {kpis['published']:%d/%m/%Y}" if kpis.get("published") else "")
            + (f"; {n_text}" if n_text else "; so với nhóm: bot chỉ tính cho ngân hàng (mọi ngân hàng niêm yết, ICB 8300)"
-              if profile != "banking" else "; trung vị nhóm: bot đọc sau phiên, chưa có hôm nay"))
+              if profile != "banking" else f"; trung vị nhóm: chưa có (bot đọc sau {dg.JOB_TIME} mỗi phiên khi "
+              "watchlist, Tài sản hoặc thẻ anh nhập có một ngân hàng)"))
     return ui.card("Chỉ số chính" + (" so với các ngân hàng" if profile == "banking" else ""),
                    ui.table(head, rows, "", stack=True) + rank_text, sub=_e(sub) + " " + _label("FACT", kpis.get("published"), as_of))
 
@@ -369,7 +382,7 @@ def _manual(code: str, account, bot_base: float | None) -> str:
                    + ' · sửa hoặc xoá ở <a href="/taisan#dinhgia">Danh mục → Thẻ định giá anh nhập</a> hoặc /tsdinhgia.</p>')
 
 
-def profile_body(code: str, seen, kpis, *, account=None, name: str = "") -> str:
+def profile_body(code: str, seen, kpis, *, account=None, name: str = "", tracked: bool = False) -> str:
     from tradingagents.market import vn_rules
 
     vv = _vv()
@@ -386,7 +399,7 @@ def profile_body(code: str, seen, kpis, *, account=None, name: str = "") -> str:
     c = result
     head = ui.title(_e(code), f"{lead} · {_e(dg.profile_label(c.profile))}",
                     right=f'<span class="big num">Giá <b>{ui.money(c.close)}</b></span> <span class="muted">({c.day:%d/%m/%Y})</span>')
-    parts = [head, _freshness(c, now_text), '<div class="mt">' + _thirty_seconds(c) + "</div>",
+    parts = [head, _freshness(c, now_text, tracked), '<div class="mt">' + _thirty_seconds(c) + "</div>",
              '<div class="grid g2 mt">' + _reliability(c) + _changes(row, prev) + "</div>", _book_card(c),
              '<div class="mt">' + _kpis(code, c.profile, kpis, c.as_of) + "</div>"]
     manual = _manual(code, account, c.base)
@@ -454,4 +467,9 @@ def register(app, data_dir, *, guard, show_bot=lambda: True, watchlist=lambda: [
             name = _name(code)
         except Exception:  # noqa: BLE001 - the page without the company's name
             name = ""
-        return render(code, back + profile_body(code, seen, kpis, account=account, name=name) + ui.card("", _search()))
+        try:
+            followed = code in tracked()
+        except Exception:  # noqa: BLE001 - said as not followed
+            followed = False
+        return render(code, back + profile_body(code, seen, kpis, account=account, name=name, tracked=followed)
+                      + ui.card("", _search()))
