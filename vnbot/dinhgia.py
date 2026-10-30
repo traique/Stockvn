@@ -13,7 +13,8 @@ refused on the session's data) skipped. With a bank among them it also reads eve
 once a day (``vn_peers.bank_peers``): a bank's KPIs against the median of the banks with the same quarter.
 
 The intraday monitor (``vnbot.intraday``) alerts on the kept cards when the price enters Rẻ or Đắt -
-no VCI call there - and the job's zone moves go into the next watchlist report (``night_block``).
+no VCI call there, a card kept after the session before's ``JOB_TIME`` only (``built_for``) - and the
+job's zone moves are sent once it is done for the session (``night_block``).
 
 Informational only: nothing of the Quant Engine reads it. The owner's card (/tsdinhgia) is shown
 beside the bot's, named as his, never as the bot's; in the alerts it overrides the bot's.
@@ -34,11 +35,15 @@ from vnbot.jobs import write_text_atomic
 logger = logging.getLogger(__name__)
 
 STATE_FILE = "valuation_cards.json"   # under data/ while the history store is off: each stock's two newest days
-ZONES_FILE = "valuation_zone_changes.json"   # under data/: the zones the newest evening job moved, for the report
-MAX_ZONE_LINES = 12                   # zone changes named in the watchlist report; the rest counted
+ZONES_FILE = "valuation_zone_changes.json"   # under data/: the zones the newest job moved, for its message
+MAX_ZONE_LINES = 12                   # zone changes named in the message; the rest counted
 JOB_TIME = "16:00"                    # the evening job, Vietnam time: the session's bars are out (15:05)
 JOB_WORKERS = 2                       # cards built at once (VCI is slow, the host has 2 GB)
 MARK_CHANGE = 0.003                   # a level moved this much (0,3%) is a change worth saying
+# The alerts' Đắt on the bot's card at least this far above Base: a bank's Bull by ROE p80 can sit a tick above
+# Base (MBB 30/10/2026: +0,37%, CTG 16/12/2025: +0,30%), inside the alerts' 0,5% buffer (taisan.ZONE_BUFFER_PCT),
+# and Rẻ then Đắt would both be said on a 0,6% move.
+ALERT_BAND = 0.02
 LEVELS = (("bear", "Bear"), ("eab", "eab"), ("base", "Base"), ("bull", "Bull"))
 COLUMNS = tuple(name for name, _ in store_mod.SCHEMA["valuations"][0])
 USAGE = "Dùng: /dinhgia FPT - định giá bot tự tính của một mã · /dinhgia - bảng các mã đang theo dõi (gõ tắt /dg)"
@@ -74,6 +79,26 @@ def _job_time(day: str) -> float:
     from tradingagents.market import vn_rules
 
     return datetime.fromisoformat(f"{day}T{JOB_TIME}").replace(tzinfo=vn_rules.VN_TZ).timestamp()
+
+
+def built_for(row: dict, session: str) -> bool:
+    """Whether ``row`` was kept after ``session``'s ``JOB_TIME``: the evening job keeps such a row of today
+    instead of building it again, and the intraday alerts of the next session use a card by the same rule
+    (a view between the bars, 15:05, and 16:00 is built again: it would be refused the next day)."""
+    return float(row.get("ts") or 0) >= _job_time(session)
+
+
+def alert_levels(row: dict) -> dict:
+    """The bot's card ``row`` as the intraday alerts read it: Đắt from Bull, or from Base + ``ALERT_BAND``
+    when Bull is closer to Base."""
+    return {**row, "bull": max(float(row["bull"]), float(row["base"]) * (1 + ALERT_BAND))}
+
+
+def band_note(base: float, bull: float) -> str:
+    """The card's note when its Bull is under Base + ``ALERT_BAND`` (the alerts' Đắt is there), else ""."""
+    floor = base * (1 + ALERT_BAND)
+    return (f"Bull sát Base ({signed_pct(bull / base - 1)}): cảnh báo trong phiên báo Đắt từ Base "
+            f"{signed_pct(ALERT_BAND, 0)} ({price(floor)})" if bull < floor else "")
 
 
 def ddmm(day: str) -> str:
@@ -230,37 +255,41 @@ def tracked(watchlist, account=None) -> list[str]:
     return out
 
 
+def _move(row: dict, prev: dict | None) -> dict | None:
+    """The zone ``row`` moved to from ``prev`` (both with a card), None when it did not."""
+    if not prev or row.get("base") is None or prev.get("base") is None or row.get("zone") == prev.get("zone"):
+        return None
+    return {"from": prev["zone"], "to": row["zone"], "close": row["close"], "base": row["base"], "bull": row["bull"]}
+
+
 def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = None,
             workers: int = JOB_WORKERS) -> dict[str, list[str]]:
-    """Build and keep today's card of each of ``symbols``, but those kept earlier today with the price
-    of ``session``, or refused after its ``JOB_TIME`` (a refusal from a morning view is built again: a
-    statement may have come out since). The stocks by outcome: done (the price of ``session``), behind
-    (an older price: the session's is not out yet), none (no card; the row says why), kept (done earlier
-    today), failed (VCI down - its breaker then fails the rest at once - or a fault). A bank among them
-    brings the day's read of every listed bank (``vn_peers.bank_peers``); "peers" is ["failed"] when they could
-    not be read (retried like a failed stock)."""
+    """Build and keep the card of each of ``symbols`` as its row of ``today`` (``session`` unless told: a job
+    caught up the day after keeps its rows as that session's), but those kept that day after ``session``'s
+    ``JOB_TIME`` (``built_for``) with its price or refused (a view before is built again: a statement may
+    have come out since, and the next session's alerts would not use it). The stocks by outcome: done (the
+    price of ``session``), behind (an older price: the session's is not out yet), none (no card; the row says
+    why), kept (done earlier), failed (VCI down - its breaker then fails the rest at once - or a fault). Each
+    stock's zone move against its row of an earlier day is kept for ``night_block``, a kept one's too. A bank
+    among them brings the day's read of every listed bank (``vn_peers.bank_peers``); "peers" is ["failed"]
+    when they could not be read (retried like a failed stock)."""
     vv = _vv()
-    today = today or today_vn()
+    today = today or session
     cards = Cards(data_dir)
     started = time.monotonic()
     out: dict[str, list[str]] = {k: [] for k in ("done", "behind", "none", "kept", "failed", "peers")}
-    refused_after = _job_time(session)
-
     moved: dict[str, dict] = {}
 
     def one(symbol: str) -> str:
         try:
             rows = cards.rows(symbol)
             last = rows[0] if rows and rows[0].get("day") == today else {}
-            if last and (last.get("price_day") == session
-                         or last.get("note") and float(last.get("ts") or 0) >= refused_after):
+            if last and built_for(last, session) and (last.get("price_day") == session or last.get("note")):
+                moved[symbol] = _move(last, rows[1] if len(rows) > 1 else None)
                 return "kept"
             result = vv.assess(symbol, None)
             row, prev = cards.record(result, today)
-            moved[symbol] = ({"from": prev["zone"], "to": row["zone"], "close": row["close"], "base": row["base"],
-                              "bull": row["bull"]}
-                             if prev and row.get("base") is not None and prev.get("base") is not None
-                             and row["zone"] != prev.get("zone") else None)
+            moved[symbol] = _move(row, prev)
         except Exception as exc:  # noqa: BLE001 - one stock never stops the others
             logger.warning("Valuation card of %s: %s: %s", symbol, type(exc).__name__, str(exc)[:200])
             return "failed"
@@ -272,14 +301,14 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
         for symbol, outcome in zip(symbols, pool.map(one, symbols)):
             out[outcome].append(symbol)
     try:
-        _keep_zone_changes(data_dir, today, moved)
-    except OSError as exc:  # the cards are kept; only the report's block is missing
+        _keep_zone_changes(data_dir, session, moved)
+    except OSError as exc:  # the cards are kept; only the zones message is missing
         logger.warning("Valuation cards: zone changes not kept: %s", exc)
     if any(vv.card_profile(s) == "banking" for s in symbols if s not in out["failed"]):
         try:
-            _peers().bank_peers(today, compute=True)
+            _peers().bank_peers(today_vn(), compute=True)   # read today, whatever session
         except Exception as exc:  # noqa: BLE001 - the page says the medians are missing; retried
-            logger.warning("Valuation cards: bank medians of %s not read: %s: %s", today, type(exc).__name__, exc)
+            logger.warning("Valuation cards: bank medians not read: %s: %s", type(exc).__name__, exc)
             out["peers"].append("failed")
     logger.info("Valuation cards %s: %d stocks in %.0f s - %d new, %d with an older price, %d without a card, "
                 "%d kept from earlier today, %d failed%s%s", session, len(symbols), time.monotonic() - started,
@@ -293,17 +322,17 @@ def _zones_path(data_dir) -> Path:
     return Path(data_dir) / ZONES_FILE
 
 
-def _keep_zone_changes(data_dir, day: str, moved: dict) -> None:
-    """The zones the evening job of ``day`` moved against each stock's row of an earlier day, its runs
-    of the day together (a stock built again: its newest outcome, None for no move), for ``night_block``."""
+def _keep_zone_changes(data_dir, session: str, moved: dict) -> None:
+    """The zones the job of ``session`` moved against each stock's row of an earlier day, its runs
+    together (a stock built again: its newest outcome, None for no move), for ``night_block``."""
     path = _zones_path(data_dir)
     with _file_lock:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = {}
-        if not isinstance(data, dict) or data.get("day") != day:
-            data = {"day": day, "changes": {}, "reported": ""}
+        if not isinstance(data, dict) or data.get("day") != session:
+            data = {"day": session, "changes": {}, "reported": ""}
         before = dict(data["changes"])
         for symbol, change in moved.items():
             if change:
@@ -314,22 +343,18 @@ def _keep_zone_changes(data_dir, day: str, moved: dict) -> None:
             write_text_atomic(path, json.dumps(data, ensure_ascii=False))
 
 
-def night_block(data_dir, today: str | None = None) -> str:
-    """The watchlist report's block: the zones the newest evening job moved (at the session's close), when
-    that job ran after the session before ``today`` and was not reported yet; said once (kept as reported)."""
-    from tradingagents.market import vn_rules
-
-    today = today or today_vn()
+def night_block(data_dir, session: str) -> str:
+    """The message of the zones the job of ``session`` moved (at its close), sent once the job is done for
+    the session (``service.DailyScheduler``); "" when none moved, or said already (kept as reported)."""
     path = _zones_path(data_dir)
     with _file_lock:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return ""
-        if (not isinstance(data, dict) or not data.get("changes") or data.get("day", "") < vn_rules.prev_session(today)
-                or data.get("reported")):
+        if not isinstance(data, dict) or not data.get("changes") or data.get("day") != session or data.get("reported"):
             return ""
-        data["reported"] = today
+        data["reported"] = today_vn()
         write_text_atomic(path, json.dumps(data, ensure_ascii=False))
     items = sorted(data["changes"].items(), key=lambda kv: (kv[1]["to"] != "Rẻ", kv[1]["to"] != "Đắt", kv[0]))
     parts = [f"{code} {c['from']} → {c['to']} (giá {price(c['close'])}, Base {price(c['base'])}, Bull {price(c['bull'])})"
@@ -363,10 +388,11 @@ def bank_line(t) -> str:
     if t is None or t.profile != "banking":
         return ""
     rows = {k.field: k for k in t.rows}
-    if t.peers_read is None or t.with_period < vp.MIN_PEERS:
+    if t.peers_read is None or not t.covered or t.with_period < vp.MIN_PEERS:
         own = " · ".join(f"{name} {vp.fmt(rows[f].value)}" for f, name in SHORT_KPIS if rows[f].value is not None)
-        why = (f"mới {t.with_period} ngân hàng đã có {t.period}" if t.peers_read else
-               f"bot đọc sau {JOB_TIME} khi watchlist, Tài sản hoặc thẻ anh nhập có một ngân hàng")
+        why = (f"bot đọc sau {JOB_TIME} khi watchlist, Tài sản hoặc thẻ anh nhập có một ngân hàng" if t.peers_read is None
+               else "số đọc sẵn không phủ kỳ này" if not t.covered
+               else f"mới {t.with_period} ngân hàng đã có {t.period} {vp.until_text(t)}")
         return f"🏦 Chỉ số {t.period}: {own} (chưa có trung vị các ngân hàng: {why})"
     parts = [f"{name} {vp.fmt(k.value)} ({vp.fmt(k.median)}" + (f" · {k.rank}/{k.n}" if k.rank else "") + ")"
              for f, name in SHORT_KPIS if (k := rows[f]).value is not None]
@@ -442,7 +468,7 @@ def card_text(result, row: dict, prev: dict | None, *, account=None, public_url:
         f"Giá {price(c.close)} (phiên {vv._day(c.day, as_of)}) → vùng {c.zone.upper()}{weak} · MOS {signed_pct(c.mos)} "
         f"so với Base {price(c.base)}",
         f"Bear {price(c.bear)} · eab {price(c.eab)} · Base {price(c.base)} · Bull {price(c.bull)}{bull} {model}",
-        ZONE_RULE,
+        " · ".join(x for x in (ZONE_RULE, band_note(c.base, c.bull)) if x),
     ]
     if multiples:
         lines.append(" · ".join(multiples) + f" {model}")

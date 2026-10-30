@@ -579,6 +579,39 @@ t.ok("the same day, stock and level from the owner's card and the bot's: one row
                                                                                       src="bot")
      and not both.record_alert("re", "SAME", 1, "2026-03-03", hook=False, src="bot"))
 
+# a bank's Bull by ROE p80 a tick above Base (CTG 16/12/2025: 33.889 → 33.991, +0,30%; MBB 30/10/2026 +0,37%):
+# the alerts' Đắt from Base + 2%, or Rẻ and Đắt would both be said on a 0,6% move
+WATCH.append("NAR")
+bot_row("NAR", 33_889, 33_991, day="2026-11-11")
+nar = [bpass("2026-11-12", hhmm, sw, NAR=p) for hhmm, p in (("09:20", 33_700), ("09:35", 34_100), ("09:50", 33_880),
+                                                              ("10:05", 34_120), ("10:20", 34_600))]
+nar = [[x for x in got if "NAR" in x] for got in nar]
+t.ok("Bull 0,3% above Base: 33.700 Rẻ, then 34.100 / 33.880 / 34.120 (over Bull, under Base + 2%) nothing, 34.600 Đắt "
+     "named as Base + 2%", len(nar[0]) == 1 and nar[0][0].startswith("🟢 NAR vào vùng Rẻ: giá 33.700 ≤ Base 33.889")
+     and nar[1:4] == [[], [], []] and len(nar[4]) == 1
+     and nar[4][0].startswith("🔺 NAR vào vùng Đắt: giá 34.600 ≥ Base +2% 34.567 (Bull 33.991 sát Base), MOS -2,1% (thẻ của bot"),
+     nar)
+t.ok("... and the card says so", dg.band_note(33_889, 33_991) == "Bull sát Base (+0,3%): cảnh báo trong phiên báo Đắt từ "
+     "Base +2% (34.567)" and dg.band_note(50_000, 60_000) == "")
+
+# the owner's card stale on an ex-date: the bot's card is past it too until rebuilt that evening - said, not 'ngừng báo'
+bc.market.price["EXO"] = 23_000.0
+bc.market.ev["EXO"] = [{"eventCode": "DIV", "publicDate": "2026-11-02T00:00:00", "exrightDate": "2026-11-13T00:00:00",
+                        "valuePerShare": 500.0}]
+NOW["t"] = at("2026-11-10")
+bc.set_valuation("EXO", 18_000, 22_000, 26_000)
+WATCH.append("EXO")
+bot_row("EXO", 20_000, 25_000, day="2026-11-12", expires="2026-11-13")
+got = bpass("2026-11-13", "09:20", sw, EXO=19_000)
+t.ok("the ex-date: his card 'cần cập nhật', the bot's from its rebuild that evening; no alert on either today",
+     "⚠️ EXO: thẻ định giá anh nhập cần cập nhật - GDKHQ 13/11/2026 (cổ tức tiền 500 đ/cp) sau ngày anh nhập 10/11/2026, "
+     "các mốc còn theo giá cũ → bot báo vùng Rẻ/Đắt theo thẻ của bot khi bot tính lại thẻ (sau 16:00); muốn dùng thẻ của anh "
+     "thì nhập lại: /tsdinhgia EXO BEAR BASE BULL" in got and not any("EXO vào vùng" in x for x in got), got)
+bot_row("EXO", 19_500, 24_000, day="2026-11-13")                          # the evening job on the new basis
+got = bpass("2026-11-16", "09:20", sw, EXO=19_000)
+t.ok("... the next session: the bot's card alerts", any(x.startswith("🟢 EXO vào vùng Rẻ: giá 19.000 ≤ Base 19.500")
+                                                       and "thẻ của bot" in x for x in got), got)
+
 # ───────────── 5. shadow results: the direction of each level ─────────────
 s = account("shadow")
 for level in ("re", "dat", "stop"):

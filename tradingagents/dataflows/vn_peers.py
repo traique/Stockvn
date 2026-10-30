@@ -60,7 +60,8 @@ OTHER_KPIS = (
     ("debtToEquity", "Nợ phải trả/VCSH", "x", None), ("currentRatio", "Thanh toán hiện hành", "x", None),
 )
 NIM_NOTE = "NIM của VCI là 4 quý gần nhất; công ty và nhiều báo cáo dùng quý quy năm, nên số có thể lệch"
-_parsed: dict[str, tuple[float, dict]] = {}       # path -> (mtime, the file's data)
+_parsed: dict[str, tuple[float, dict]] = {}       # path -> (mtime, the file's data): the newest two days only
+PARSED_MAX = 2
 _parsed_lock = threading.Lock()
 
 
@@ -131,6 +132,9 @@ def _read(path: str) -> dict | None:
     if not (isinstance(data, dict) and data.get("format") == FORMAT and isinstance(data.get("banks"), dict)):
         return None                   # v1.17.0 phase A's layout (no publication days): read again
     with _parsed_lock:
+        _parsed.pop(path, None)
+        while len(_parsed) >= PARSED_MAX:          # a new day's read each day: never one per day of uptime
+            _parsed.pop(next(iter(_parsed)))
         _parsed[path] = (mtime, data)
     return data
 
@@ -203,6 +207,7 @@ class KpiTable:
     published: date                 # when that quarter was published
     rows: tuple[Kpi, ...]
     peers_read: date | None = None  # the day the banks' figures were read (None: not a bank, or none read)
+    covered: bool = True            # the read's kept quarters reach back to ``key`` (a run date before: False)
     banks: int = 0                  # banks of that read with a quarter published by the run date
     with_period: int = 0            # of them, those with the stock's quarter
     newer: int = 0                  # of them, those with a later quarter out already
@@ -228,17 +233,26 @@ def _roe5(years: dict, cutoff: date) -> float | None:
     return statistics.median(v for _, v in seen) if len(seen) >= MIN_ROE_YEARS else None
 
 
+def _order(key: str) -> tuple[int, int]:
+    year, quarter = key.split("-")
+    return int(year), int(quarter)
+
+
 def compare(table: KpiTable, peers: dict | None) -> KpiTable:
     """``table`` (a bank's own KPIs) with the banks' medians and ranks of ``peers`` (a ``bank_peers``
     read): each KPI among the banks whose ``table.key`` quarter was published by the run date, the
     stock itself included with its own figures (no median under ``MIN_PEERS`` banks: early in a reporting
-    season, or a run date before the read's quarters); the 5-year median ROE among every bank with three
-    annual ROEs or more published by then."""
+    season); the 5-year median ROE among every bank with three annual ROEs or more published by then.
+    A bank whose kept quarters (its ``PEER_QUARTERS`` newest) start after ``table.key`` cannot say whether
+    it had that quarter out: left out; none left with a quarter out by the run date is ``covered`` False (a
+    run date before the read's quarters: not "1/1 bank published")."""
     if not peers or not peers.get("banks"):
         return table
-    cutoff = table.as_of
+    cutoff, key = table.as_of, _order(table.key)
     others = {c: b for c, b in peers["banks"].items() if c != table.symbol}
-    visible = {c: b for c, b in others.items()
+    covering = {c: b for c, b in others.items()
+                if b.get("q") and (len(b["q"]) < PEER_QUARTERS or min(map(_order, b["q"])) <= key)}
+    visible = {c: b for c, b in covering.items()
                if any(date.fromisoformat(q["pub"]) <= cutoff for q in b.get("q", {}).values())}
     same = {c: q for c, b in visible.items()
             if (q := b.get("q", {}).get(table.key)) and date.fromisoformat(q["pub"]) <= cutoff}
@@ -253,11 +267,10 @@ def compare(table: KpiTable, peers: dict | None) -> KpiTable:
             rows.append(replace(k, median=statistics.median([*values, k.value]), n=len(values) + 1,
                                 rank=_rank(k.value, values, k.better)))
     roe5s = [v for b in others.values() if (v := _roe5(b.get("y", {}), cutoff)) is not None]
-    order = tuple(int(x) for x in table.key.split("-"))
-    newer = sum(1 for b in visible.values() if any(tuple(int(x) for x in k.split("-")) > order
-                                                   and date.fromisoformat(q["pub"]) <= cutoff for k, q in b["q"].items()))
+    newer = sum(1 for b in visible.values() if any(_order(k) > key and date.fromisoformat(q["pub"]) <= cutoff
+                                                   for k, q in b["q"].items()))
     out = replace(table, rows=tuple(rows), peers_read=date.fromisoformat(peers["day"]), banks=len(visible) + 1,
-                  with_period=len(same) + 1, newer=newer)
+                  with_period=len(same) + 1, newer=newer, covered=bool(visible) or not others)
     if table.roe5 is None:
         return replace(out, roe5_median=statistics.median(roe5s) if roe5s else None, roe5_of=len(roe5s))
     return replace(out, roe5_median=statistics.median([*roe5s, table.roe5]), roe5_rank=_rank(table.roe5, roe5s, "high"),
@@ -323,6 +336,17 @@ def rank_text(k: Kpi) -> str:
 LOWER_IS_BETTER = ", ".join(label.split(" (")[0] for _, label, _, better in BANK_KPIS if better == "low")
 
 
+def seen_day(t: KpiTable) -> date:
+    """The day the banks' figures of ``t`` stand at: the run date, or the read's day when it is older (a
+    read after a past run date answers it with what was published by then, never with its own day)."""
+    return min(t.peers_read, t.as_of)
+
+
+def until_text(t: KpiTable) -> str:
+    """"tới 30/10/2026", or "tới ngày VCI đọc 01/10/2026" when the read is older than the run date."""
+    return (f"tới ngày VCI đọc {t.peers_read:%d/%m/%Y}" if t.peers_read < t.as_of else f"tới {t.as_of:%d/%m/%Y}")
+
+
 def fundamentals_lines(t: KpiTable | None) -> list[str]:
     """A bank's KPIs against the banks' medians for the fundamentals report (two lines)."""
     if t is None or t.profile != "banking":
@@ -330,14 +354,17 @@ def fundamentals_lines(t: KpiTable | None) -> list[str]:
     if t.peers_read is None:
         return [("- So với các ngân hàng: chưa có số đọc sẵn (bot đọc chỉ số mọi ngân hàng niêm yết mỗi tối khi "
                  "watchlist, Tài sản hoặc thẻ anh nhập có một ngân hàng)")]
-    if t.with_period < MIN_PEERS:
-        lines = [f"- So với các ngân hàng: mới {t.with_period}/{t.banks} ngân hàng đã công bố {t.period} tới ngày này (số "
-                 f"VCI đọc {t.peers_read:%d/%m/%Y}), chưa đủ để lấy trung vị cùng kỳ"]
+    if not t.covered:
+        lines = [(f"- So với các ngân hàng: số đọc sẵn không phủ kỳ {t.period} (bot giữ {PEER_QUARTERS} quý gần nhất "
+                  "của mỗi ngân hàng), không so được cùng kỳ")]
+    elif t.with_period < MIN_PEERS:
+        lines = [(f"- So với các ngân hàng: mới {t.with_period}/{t.banks} ngân hàng đã công bố {t.period} "
+                  f"{until_text(t)}, chưa đủ để lấy trung vị cùng kỳ")]
     else:
         parts = [f"{k.label} {fmt(k.value, k.kind)} (cùng kỳ {fmt(k.prior, k.kind)}; trung vị {fmt(k.median, k.kind)}"
                  + (f", hạng {k.rank}/{k.n}" if k.rank else "") + ")" for k in t.rows if k.value is not None]
         lines = [f"- So với trung vị các ngân hàng cùng kỳ {t.period} ({t.with_period}/{t.banks} ngân hàng đã công bố kỳ "
-                 f"này; số VCI đọc {t.peers_read:%d/%m/%Y}) {vn_valuation._label('THỐNG KÊ', t.peers_read, t.as_of)}: "
+                 f"này {until_text(t)}) {vn_valuation._label('THỐNG KÊ', seen_day(t), t.as_of)}: "
                  + " | ".join(parts) + f". Hạng 1 là tốt nhất ({LOWER_IS_BETTER}: thấp là tốt). {NIM_NOTE}"]
     if t.roe5 is not None:
         lines.append(f"- ROE trung vị {len(t.roe5_years)} năm {t.roe5_years[0]}-{t.roe5_years[-1]}: {fmt(t.roe5)}, "

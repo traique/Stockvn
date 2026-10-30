@@ -125,13 +125,14 @@ class DailyScheduler:
       stamped: it is tried again every ``LATE_BAR_RETRY_SECONDS`` until
       ``LATE_BAR_CUTOFF``, then taken as a holiday (or the stock as suspended).
     - session days from ``dinhgia.JOB_TIME``, on a thread of their own: the bot's own valuation
-      cards of the tracked stocks (vnbot.dinhgia), informational only.
+      cards of the tracked stocks (vnbot.dinhgia), informational only; the zones they moved sent once
+      done (``dinhgia.night_block``). A session whose job was missed (the bot down that evening) is
+      caught up at the next start or check, before the session after it.
     - weekdays at ``daily_report_time``: the watchlist, screened by the
       quantitative engine (no AI); only the best ``daily_ai_max`` codes whose
       action is in ``daily_ai_actions`` get the full AI analysis, within the
       day's AI budget (a missing bar after the close is likewise waited for
-      until ``LATE_BAR_CUTOFF``); with it, one block of the zones the newest
-      evening valuation job moved (``dinhgia.night_block``).
+      until ``LATE_BAR_CUTOFF``).
     """
 
     RETRY_SECONDS = 600            # first retry; doubles per failure up to MAX_RETRY_SECONDS
@@ -234,6 +235,9 @@ class DailyScheduler:
             time.sleep(30)
 
     def _valuation_due(self) -> str | None:
+        """The session whose valuation job is due: today's from ``dinhgia.JOB_TIME``, else the session
+        before when its job never ran (the bot down that evening: without it no card is used for the
+        alerts of the next session)."""
         from tradingagents.market import vn_rules
         from vnbot import dinhgia
 
@@ -242,13 +246,13 @@ class DailyScheduler:
         now = vn_rules.now_vn()
         day = now.strftime("%Y-%m-%d")
         if not vn_rules.is_session_day(day) or now.strftime("%H:%M") < dinhgia.JOB_TIME:
-            return None
-        return None if self._read(self._valuation_stamp) == day else day
+            day = vn_rules.prev_session(day)
+        return None if self._read(self._valuation_stamp) >= day else day
 
     def _valuation_run(self, day: str) -> None:
-        """Today's cards of the watchlist, the Tài sản holdings and the owner's cards; done for the day
+        """The cards of session ``day`` of the watchlist, the Tài sản holdings and the owner's cards; done
         when none failed or lagged and the banks' medians (when asked) were read, or after
-        VALUATION_MAX_TRIES runs (a closure the calendar did not know)."""
+        VALUATION_MAX_TRIES runs (a closure the calendar did not know); then the zones they moved are sent."""
         from vnbot import dinhgia
 
         if self._valuation_day != day:
@@ -260,6 +264,9 @@ class DailyScheduler:
         if (out["failed"] or out["behind"] or out.get("peers")) and self._valuation_tries < self.VALUATION_MAX_TRIES:
             return
         write_text_atomic(self._valuation_stamp, day)
+        block = dinhgia.night_block(self.settings.data_dir, day)     # the zones moved at the close, once
+        if block:
+            self.notify(block)
 
     def _pick_loop(self) -> None:
         while True:
@@ -583,14 +590,6 @@ class DailyScheduler:
         write_text_atomic(self._stamp, day)
         if self.settings.daily_ai_mode == "critic" and picked:
             text += "\n\n" + self._critique(picked, day)
-        try:
-            from vnbot import dinhgia
-
-            zones = dinhgia.night_block(self.settings.data_dir, day)
-        except Exception as exc:  # noqa: BLE001 - the report goes out without the block
-            logger.warning("Daily run %s: valuation zone changes unread: %s", day, exc)
-            zones = ""
-        text = "\n\n".join(x for x in (text, zones) if x)
         if text:
             self.notify(text)
 

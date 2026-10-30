@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.17.0"
 RELEASED = "2026-10-30"
-RELEASE_BUILD = "ac9399f"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "133faf7"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -49,7 +49,9 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Có thẻ anh nhập thì báo theo thẻ của anh, tin ghi rõ thẻ nào; hết hạn/qua GDKHQ thì về thẻ của bot",
         "Thẻ của bot chỉ dùng khi tính sau phiên trước và chưa tới ngày GDKHQ; tắt ở /ai (Kênh thông báo)",
         "Kết quả cảnh báo vùng tách thẻ của bot và thẻ anh nhập để so độ chính xác",
-        "Báo cáo watchlist hằng ngày thêm một khối: mã đổi vùng theo thẻ của bot sau phiên",
+        "Bull sát Base (ngân hàng ROE ổn định): báo Đắt từ Base +2%, giá quanh Base không báo cả Rẻ lẫn Đắt",
+        "Thẻ xem sáng ngày GDKHQ hết hạn ngay hôm đó; việc 16:00 bị lỡ (bot tắt) được chạy bù trước phiên sau",
+        "Việc 16:00 xong thì nhắn một tin các mã đổi vùng theo thẻ của bot (thay khối trong báo cáo hôm sau)",
         "Thẻ anh nhập (/tsdinhgia) thành tuỳ chọn, thay thẻ của bot; trên /taisan hai thẻ nằm cạnh nhau",
         "/phienban chỉ in các bản gần nhất cho vừa một tin; đủ lịch sử ở trang /phienban",
         "Chỉ là thông tin: không đổi quyết định, stop/target hay cổng chặn của Quant",

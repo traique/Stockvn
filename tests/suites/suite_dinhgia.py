@@ -493,6 +493,15 @@ peers = PEERS_FX["peers"]
                                                    encoding="utf-8")       # v1.17.0 phase A's layout: no publication days
 t.ok("the newest read kept, an older layout (no publication days) passed over", vp.latest_bank_peers()["day"] == "2026-10-29"
      and vp.latest_bank_peers("2026-10-28") is None and vp.bank_peers("2026-10-30") is None)
+for old_day in ("2026-10-27", "2026-10-28"):
+    (VALDIR / f"peers-8300-{old_day}.json").write_text(json.dumps(dict(peers, day=old_day)), encoding="utf-8")
+    vp.latest_bank_peers(old_day)
+vp.latest_bank_peers()
+t.ok(f"a new day's read parsed each day: only the newest {vp.PARSED_MAX} kept in memory (not one per day of uptime)",
+     sorted(os.path.basename(k) for k in vp._parsed) == ["peers-8300-2026-10-28.json", "peers-8300-2026-10-29.json"],
+     list(vp._parsed))
+for old_day in ("2026-10-27", "2026-10-28"):
+    (VALDIR / f"peers-8300-{old_day}.json").unlink()
 ctg = vp.kpi_table("CTG", "2026-10-30")
 rows = {k.field: k for k in ctg.rows}
 same = [b["q"]["2026-2"] for c, b in peers["banks"].items() if c != "CTG" and "2026-2" in b["q"]]
@@ -528,8 +537,8 @@ t.ok("mixed periods: VPB's Q3/2026 against the banks that had published Q3 by th
 season = vp.compare(dataclasses.replace(vpb, as_of=date(2026, 10, 21)), peers)
 t.ok(f"... on 21/10 only 3 banks had Q3 out (under {vp.MIN_PEERS}): no median nor rank, said so, the 5-year ROE still ranked",
      season.with_period == 3 and all(k.median is None and k.rank is None for k in season.rows)
-     and vp.fundamentals_lines(season)[0] == "- So với các ngân hàng: mới 3/27 ngân hàng đã công bố Q3/2026 tới ngày này (số "
-                                              "VCI đọc 30/10/2026), chưa đủ để lấy trung vị cùng kỳ"
+     and vp.fundamentals_lines(season)[0] == "- So với các ngân hàng: mới 3/27 ngân hàng đã công bố Q3/2026 tới 21/10/2026, "
+                                              "chưa đủ để lấy trung vị cùng kỳ"
      and "chưa có trung vị các ngân hàng: mới 3 ngân hàng đã có Q3/2026" in dg.bank_line(season), vp.fundamentals_lines(season))
 aug = vp.kpi_table("CTG", "2026-08-18")
 aug_rows = {k.field: k for k in aug.rows}
@@ -539,6 +548,33 @@ t.ok("a past run date, point-in-time: 18/08 is before CTG's Q2 (19/08) - its Q1/
      and 0 < q2_by < 26 and aug_rows["cir"].median == statistics.median(
          [b["q"]["2026-1"]["cir"] for c, b in peers["banks"].items() if c != "CTG"] + [aug_rows["cir"].value]),
      (aug.period, aug.newer, q2_by))
+aug_line = vp.fundamentals_lines(aug)[0]
+t.ok("... its text dated by the run date, never by the later read (29/10) the analyst would quote",
+     "(27/27 ngân hàng đã công bố kỳ này tới 18/08/2026) [THỐNG KÊ 18/08]: " in aug_line and "29/10" not in aug_line, aug_line)
+old = vp.compare(dataclasses.replace(vpb, as_of=date(2023, 6, 1), key="2023-1", period="Q1/2023"), peers)
+t.ok("a run date before the read's quarters: 'không phủ', not '1/1 bank published' (all of them had)",
+     not old.covered and vp.fundamentals_lines(old)[0] == "- So với các ngân hàng: số đọc sẵn không phủ kỳ Q1/2023 (bot giữ 12 "
+                                                           "quý gần nhất của mỗi ngân hàng), không so được cùng kỳ"
+     and "số đọc sẵn không phủ kỳ này" in dg.bank_line(old) and all(k.median is None for k in old.rows),
+     vp.fundamentals_lines(old))
+
+
+def twelve(first: tuple[int, int]) -> dict:
+    """A bank's read of its 12 newest quarters from ``first``, each published 4 weeks after its quarter."""
+    out, (y, q) = {}, first
+    for _ in range(vp.PEER_QUARTERS):
+        out[f"{y}-{q}"] = {"pub": date(y + (q == 4), 1 if q == 4 else 3 * q + 1, 28).isoformat(), "cir": 0.3, "npl": 0.02}
+        y, q = (y + 1, 1) if q == 4 else (y, q + 1)
+    return {"q": out, "y": {}}
+
+
+cut = {"day": "2026-10-30", "banks": {**{f"A{i}": twelve((2023, 4)) for i in range(6)},      # Q3/2026 out: Q3/2023 cut
+                                      **{f"L{i}": twelve((2023, 3)) for i in range(5)}}}      # Q2/2026 newest: Q3/2023 kept
+q3_23 = vp.compare(dataclasses.replace(vpb, as_of=date(2024, 3, 1), key="2023-3", period="Q3/2023"), cut)
+t.ok("... a bank whose kept quarters start after the stock's is left out (its Q3/2023 was cut, not unpublished): "
+     "5 banks with it kept + the stock", q3_23.covered and (q3_23.banks, q3_23.with_period) == (6, 6), (q3_23.banks, q3_23.with_period))
+t.ok("... and none kept that far back: not covered",
+     not vp.compare(dataclasses.replace(vpb, as_of=date(2024, 3, 1), key="2023-2", period="Q2/2023"), cut).covered)
 march = vp.kpi_table("CTG", "2026-03-30")
 t.ok("... the 5-year ROE of 30/03/2026: the 2025 annual report (31/03) not out yet - 2020-2024, the banks' likewise",
      march.roe5_years == (2020, 2021, 2022, 2023, 2024) and march.roe5_published == date(2025, 3, 5)
@@ -547,8 +583,8 @@ t.ok("... the 5-year ROE of 30/03/2026: the 2025 annual report (31/03) not out y
      (march.roe5_years, march.roe5_published, march.roe5_of))
 lines = vp.fundamentals_lines(ctg)
 t.ok("the fundamentals report's two lines: same quarter, n/M banks, the read's date, labels, the same quarter a year before",
-     lines[0].startswith("- So với trung vị các ngân hàng cùng kỳ Q2/2026 (27/27 ngân hàng đã công bố kỳ này; số VCI đọc "
-                         "29/10/2026) [THỐNG KÊ 29/10]: ")
+     lines[0].startswith("- So với trung vị các ngân hàng cùng kỳ Q2/2026 (27/27 ngân hàng đã công bố kỳ này tới ngày VCI "
+                         "đọc 29/10/2026) [THỐNG KÊ 29/10]: ")
      and "Chi phí/thu nhập (CIR) 24,1% (cùng kỳ 28,0%; trung vị 35,2%, hạng 3/27)" in lines[0]
      and "Cho vay/huy động (LDR) 110,7% (cùng kỳ 110,4%; trung vị 110,6%)" in lines[0] and "quý quy năm" in lines[0]
      and lines[1] == "- ROE trung vị 5 năm 2021-2025: 17,1%, hạng 11/27 ngân hàng (trung vị nhóm 14,9%) [THỐNG KÊ 31/03]",
@@ -559,6 +595,14 @@ t.ok("get_fundamentals (the analyst): the bank line with the signs fixed, then t
      and lines[0] in report and lines[1] in report, report[:1500])
 t.ok("... a past run date reads the same file point-in-time",
      vp.fundamentals_lines(aug)[0] in vf.get_fundamentals("CTG", "2026-08-18"))
+real_rows = vf.published_ratio_rows
+vf.published_ratio_rows = lambda sym, as_of: [dict(real_rows(sym, as_of)[0], npl=0.0, loansLossReservesToNPLs=0.0)]
+zero = vf.get_fundamentals("CTG")
+vf.published_ratio_rows = real_rows
+t.ok("... VCI's 0 for a bank (VBB Q3/2026: NPL and cover 0) is no figure: N/A, not 'NPL 0,00%' to the analyst",
+     "| NPL: N/A | Bao phủ nợ xấu: N/A | Chi phí tín dụng: 0,95%" in zero and "NPL: 0,00%" not in zero
+     and "Bao phủ nợ xấu: 0,00%" not in zero,
+     zero[:900])
 t.ok("... no bank's read kept: said, nothing asked of VCI", vp.fundamentals_lines(ctg_own)[0].startswith(
     "- So với các ngân hàng: chưa có số đọc sẵn"))
 money_flows._down_until.clear()
@@ -714,7 +758,9 @@ real_run = dg.run_job
 dg.run_job = lambda syms, data_dir, session: runs.append((syms, session)) or results[len(runs) - 1]
 sched = DailyScheduler(SETTINGS, JobQueue(SETTINGS), watch, bot=SimpleNamespace(taisan=account))
 NOW["t"] = datetime(2026, 10, 30, 15, 59, tzinfo=vn_rules.VN_TZ)
-t.ok("before 16:00: not due", sched._valuation_due() is None)
+t.ok("never run (a first start), before 16:00: the session before's job is caught up", sched._valuation_due() == "2026-10-29")
+(SETTINGS.data_dir / "last_valuation_run.txt").write_text("2026-10-29", encoding="utf-8")
+t.ok("before 16:00, the session before's job done: not due", sched._valuation_due() is None)
 NOW["t"] = datetime(2026, 10, 30, 16, 0, tzinfo=vn_rules.VN_TZ)
 day = sched._valuation_due()
 sched._valuation_run(day)
@@ -724,13 +770,18 @@ t.ok("16:00 on a session day: the tracked stocks (watchlist + Tài sản); an ol
 sched._valuation_next = 0.0
 sched._valuation_run(sched._valuation_due())
 t.ok("... the banks' medians not read: tried again in an hour too", len(runs) == 2 and sched._valuation_due() is None
-     and not (SETTINGS.data_dir / "last_valuation_run.txt").exists())
+     and (SETTINGS.data_dir / "last_valuation_run.txt").read_text(encoding="utf-8") == "2026-10-29")
 sched._valuation_next = 0.0
 sched._valuation_run(sched._valuation_due())
 t.ok("... all done: stamped, not due again today", len(runs) == 3 and sched._valuation_due() is None
      and (SETTINGS.data_dir / "last_valuation_run.txt").read_text(encoding="utf-8") == "2026-10-30")
 NOW["t"] = datetime(2026, 10, 31, 17, 0, tzinfo=vn_rules.VN_TZ)
 t.ok("a Saturday: not due", sched._valuation_due() is None)
+(SETTINGS.data_dir / "last_valuation_run.txt").write_text("2026-10-29", encoding="utf-8")
+NOW["t"] = datetime(2026, 11, 2, 8, 30, tzinfo=vn_rules.VN_TZ)
+sched._valuation_next = 0.0                     # a restart
+t.ok("the bot down on Friday evening: Monday 08:30 catches up Friday's job (the session's alerts need its cards)",
+     sched._valuation_due() == "2026-10-30")
 dg.run_job = real_run
 
 # the zones the evening job moved: one block of the next watchlist report, said once
@@ -751,15 +802,45 @@ dg.run_job(["ZA"], ZJ, session="2026-10-30", today="2026-10-30")
 t.ok("... a later run of the day that finds ZA back where it was: no move kept for it",
      set(json.loads((ZJ / dg.ZONES_FILE).read_text(encoding="utf-8"))["changes"]) == {"ZB"})
 vv.assess = real_assess
-block = dg.night_block(ZJ, "2026-11-02")
-t.ok("the next session's watchlist report: one block, the move at the close with its levels",
+block = dg.night_block(ZJ, "2026-10-30")
+t.ok("the job of 30/10 done: one message, the move at the close with its levels",
      block == "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 30/10, theo giá đóng cửa): ZB Đắt → Hợp lý (giá 21.200, "
               "Base 16.983, Bull 21.440). Chi tiết: /dinhgia MÃ (tham khảo, không vào quyết định).", block)
-t.ok("... said once; an older job's moves are not said a session later", dg.night_block(ZJ, "2026-11-02") == ""
-     and dg.night_block(ZJ, "2026-11-03") == "")
-dg._keep_zone_changes(ZJ, "2026-11-03", {"ZC": {"from": "Hợp lý", "to": "Đắt", "close": 1.0, "base": 1.0, "bull": 1.0}})
-t.ok("a report time after the job (the same day): that day's moves", dg.night_block(ZJ, "2026-11-03").startswith(
-    "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 03/11"))
+t.ok("... said once", dg.night_block(ZJ, "2026-10-30") == "")
+ZJ2 = ROOT / "zonejob2"
+ZJ2.mkdir()
+dg._keep_zone_changes(ZJ2, "2026-10-30", {"ZC": {"from": "Hợp lý", "to": "Đắt", "close": 1.0, "base": 1.0, "bull": 1.0}})
+t.ok("another session's job (the moves of 30/10 asked for 02/11): not said, not marked as said",
+     dg.night_block(ZJ2, "2026-11-02") == "" and json.loads((ZJ2 / dg.ZONES_FILE).read_text(encoding="utf-8"))["reported"] == "")
+t.ok("... its own session's: said", dg.night_block(ZJ2, "2026-10-30").startswith(
+    "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 30/10"))
+
+# a view after the bars (15:35) and before the job: built again by the job, so the next session's alerts use it
+from vnbot.intraday import IntradayMonitor  # noqa: E402
+
+VJ = ROOT / "viewjob"
+VJ.mkdir()
+NOW["t"] = datetime(2026, 10, 29, 16, 10, tzinfo=vn_rules.VN_TZ)
+for sym in ("VW", "VK"):
+    dg.Cards(VJ).record(replace(hpg, symbol=sym, zone="Hợp lý"), "2026-10-29")             # the job of 29/10
+NOW["t"] = datetime(2026, 10, 30, 15, 35, tzinfo=vn_rules.VN_TZ)
+dg.Cards(VJ).record(replace(hpg, symbol="VW", zone="Rẻ", day=date(2026, 10, 30)), "2026-10-30")   # /dinhgia VW, 15:35
+NOW["t"] = datetime(2026, 10, 30, 16, 0, 30, tzinfo=vn_rules.VN_TZ)
+dg.Cards(VJ).record(replace(hpg, symbol="VK", zone="Rẻ", day=date(2026, 10, 30)), "2026-10-30")   # /dinhgia VK, 16:00
+NOW["t"] = datetime(2026, 10, 30, 16, 5, tzinfo=vn_rules.VN_TZ)
+vv.assess = lambda symbol, as_of: replace(hpg, symbol=symbol, zone="Rẻ", day=date(2026, 10, 30))
+viewed = dg.run_job(["VW", "VK"], VJ, session="2026-10-30")
+vv.assess = real_assess
+t.ok("the job: a view at 15:35 (the session's close, before 16:00) built again, one after 16:00 kept",
+     viewed["done"] == ["VW"] and viewed["kept"] == ["VK"], viewed)
+t.ok("... both zone moves kept for the message, the kept card's too",
+     set(json.loads((VJ / dg.ZONES_FILE).read_text(encoding="utf-8"))["changes"]) == {"VW", "VK"})
+NOW["t"] = datetime(2026, 11, 2, 9, 20, tzinfo=vn_rules.VN_TZ)
+mon = IntradayMonitor(SimpleNamespace(data_dir=VJ), None, print, watchlist=lambda: ["VW", "VK"])
+t.ok("... and the next session's alerts use both cards (the job's rule is theirs: built after 16:00 of 30/10)",
+     sorted(mon._bot_cards("2026-11-02", ["VW", "VK"])) == ["VK", "VW"])
+NOW["t"] = datetime(2026, 10, 30, 10, 0, tzinfo=vn_rules.VN_TZ)
+
 dg._keep_zone_changes(SETTINGS.data_dir, "2026-10-29", {"FPT": {"from": "Hợp lý", "to": "Đắt", "close": 52_700.0,
                                                                "base": 29_212.0, "bull": 30_358.0}})
 reported = []
@@ -769,10 +850,14 @@ rep._scan_codes = lambda: ["FPT"]
 rep._screen = lambda codes, day: ([], "📋 Quét watchlist 2026-10-30: Quant Engine đã xét 1 mã (không tốn lượt AI).")
 rep._record_screen = lambda day: ""
 rep._report("2026-10-30")
-t.ok("the daily watchlist report carries the block after the screen", len(reported) == 1
-     and reported[0].startswith("📋 Quét watchlist 2026-10-30") and "\n\n📐 Thẻ định giá của bot đổi vùng (tính sau phiên "
-                                                                   "29/10, theo giá đóng cửa): FPT Hợp lý → Đắt" in reported[0],
-     reported)
+t.ok("the watchlist report (15:30) no longer carries the moves of the session before's job", len(reported) == 1
+     and reported[0].startswith("📋 Quét watchlist 2026-10-30") and "📐" not in reported[0], reported)
+dg.run_job = lambda syms, data_dir, session: {k: [] for k in ("done", "behind", "none", "kept", "failed", "peers")}
+rep._valuation_run("2026-10-29")
+dg.run_job = real_run
+t.ok("... the job done for its session sends them at once, once", len(reported) == 2 and reported[1].startswith(
+    "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 29/10, theo giá đóng cửa): FPT Hợp lý → Đắt")
+     and dg.night_block(SETTINGS.data_dir, "2026-10-29") == "", reported)
 
 # ───────────── 7. informational only ─────────────
 repo = _common.REPO

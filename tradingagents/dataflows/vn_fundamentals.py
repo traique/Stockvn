@@ -297,12 +297,12 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
         f"- ROE: {_pct(latest.get('roe'))} | ROA: {_pct(latest.get('roa'))} | ROIC: {_pct(latest.get('roic'))}",
     ]
     if profile.key == "banking":
-        lines.append(
-            f"- NIM: {_pct(latest.get('netInterestMargin'))} | CIR: {_pct(ratio_value(latest, 'cir'))} | "
-            f"NPL: {_pct(latest.get('npl'))} | Bao phủ nợ xấu: {_pct(ratio_value(latest, 'loansLossReservesToNPLs'))} | "
-            f"Chi phí tín dụng: {_pct(ratio_value(latest, 'provisionToOutstandingLoans'))} | "
-            f"CASA: {_pct(latest.get('casaRatio'))} | LDR: {_pct(latest.get('ldrLoanDepositRatio'))}"
-        )
+        from tradingagents.dataflows import vn_peers
+
+        # VCI's 0 is its "no figure" for a bank's KPI: N/A, never 0% (vn_peers.value)
+        lines.append(" | ".join(f"{name}: {_pct(vn_peers.value(latest, field))}" for field, name in (
+            ("netInterestMargin", "- NIM"), ("cir", "CIR"), ("npl", "NPL"), ("loansLossReservesToNPLs", "Bao phủ nợ xấu"),
+            ("provisionToOutstandingLoans", "Chi phí tín dụng"), ("casaRatio", "CASA"), ("ldrLoanDepositRatio", "LDR"))))
     else:
         lines.append(
             f"- Biên lãi gộp: {_pct(latest.get('grossMargin'))} | Biên lãi ròng: {_pct(latest.get('afterTaxProfitMargin'))} | "

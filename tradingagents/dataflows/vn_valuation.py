@@ -394,7 +394,7 @@ class ValuationCard:
     mos: float                    # (Base − price) / Base
     zone: str                     # Rẻ (price ≤ Base) / Hợp lý / Đắt (price ≥ Bull)
     sensitivity: tuple[tuple[float, float], ...]  # (Ke, Base)
-    next_ex: date | None          # the next ex-date already announced, within EVENT_LOOKAHEAD_DAYS
+    next_ex: date | None          # the next ex-date announced after ``day``, within EVENT_LOOKAHEAD_DAYS
     profile: str = "banking"      # valuation_config.PROFILES key
     reliability: str = ""         # cao / trung bình / thấp: how far the book anchors the value
     reliability_why: str = ""
@@ -490,7 +490,9 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
         public = _parse_day(event.get("publicDate")) or ex
         if ex is None or public > as_of:
             continue
-        if ex > as_of:
+        # after the price's session, not the run date: on an ex-date morning the bars end the session
+        # before, so the card (old basis) expires that day, not at the next one (CTG 17/12/2025, 44,6%)
+        if ex > day:
             upcoming.append(ex)
         elif not period_end < ex <= day:
             continue

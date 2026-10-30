@@ -141,6 +141,7 @@ class IntradayMonitor:
         self.path = Path(settings.data_dir) / "intraday_alerts.json"
         self.zones_path = Path(settings.data_dir) / "valuation_zones.json"     # the last zone of each card
         self._last_check = 0.0
+        self._stale_said = ""               # the day the bot's cards not rebuilt were logged
         self._thread = threading.Thread(target=self._loop, name="intraday", daemon=True)
 
     def start(self) -> None:
@@ -329,27 +330,31 @@ class IntradayMonitor:
         self._remember(day, keys, texts, at)
         self.notify(f"🔔 Cảnh báo trong phiên {at} (không gọi AI)\n" + "\n".join(texts) + "\n" + FOOTER)
 
-    def _bot_cards(self, day: str, tracked: list[str]) -> dict[str, dict]:
-        """The bot's cards of the tracked stocks usable today: built on the previous session's data or
-        later, before their next ex-date (the evening job builds them again). The stored rows only, no
+    def _bot_cards(self, day: str, tracked: list[str], latest: dict[str, dict] | None = None) -> dict[str, dict]:
+        """The bot's cards of the tracked stocks usable today: built today or after the previous session's
+        evening job (``dinhgia.built_for``, the job's own rule), before their next ex-date - one on the old
+        share basis until rebuilt after it. ``latest``: ``dinhgia.Cards.latest()``. The stored rows only, no
         VCI call."""
         from tradingagents.market import vn_rules
         from vnbot import dinhgia
 
-        built_after = dinhgia._job_time(vn_rules.prev_session(day))
-        latest = dinhgia.Cards(self.settings.data_dir).latest()
-        out = {}
+        before = vn_rules.prev_session(day)
+        latest = dinhgia.Cards(self.settings.data_dir).latest() if latest is None else latest
+        out, stale = {}, []
         for symbol in tracked:
             row = latest.get(symbol)
             if not row or row.get("base") is None or row.get("bull") is None:
                 continue                      # not built yet, or no card (the row says why)
-            if row.get("day") != day and float(row.get("ts") or 0) < built_after:
-                logger.debug("Intraday: the bot's card of %s is from %s, not rebuilt since: no zone alert", symbol,
-                            row.get("day"))
+            if row.get("day") != day and not dinhgia.built_for(row, before):
+                stale.append(symbol)
                 continue
             if row.get("expires") and row["expires"] <= day:
                 continue                      # an ex-date: its per-share levels are on the old basis until tonight
             out[symbol] = row
+        if stale and self._stale_said != day:
+            self._stale_said = day
+            logger.warning("Intraday: the bot's cards of %s not rebuilt after the %s evening job: no zone alert on "
+                           "them until they are", ", ".join(stale), before)
         return out
 
     def _zone_alerts(self, day: str, price_of) -> list[str]:
@@ -367,7 +372,8 @@ class IntradayMonitor:
         manual = account.valuations() if account is not None else {}
         bot_on = self.switches is None or self.switches.on("zones_bot")
         tracked = dinhgia.tracked(self.watchlist(), account) if bot_on else []
-        bot = self._bot_cards(day, tracked) if bot_on else {}
+        latest = dinhgia.Cards(self.settings.data_dir).latest() if bot_on else {}
+        bot = self._bot_cards(day, tracked, latest) if bot_on else {}
         if not manual and not bot and not self.zones_path.exists():
             return []
         try:
@@ -390,14 +396,20 @@ class IntradayMonitor:
                     seen = remembered(symbol, "|".join(str(card.get(k)) for k in ("at", "bear", "base", "bull")),
                                       card.get("zone"))
                     if not seen.get("muted"):
-                        line = self._zone_line(account, symbol, card, seen, day, price_of, bot_next=row is not None)
+                        later = symbol in tracked and (latest.get(symbol) or {}).get("base") is not None
+                        line = self._zone_line(account, symbol, card, seen, day, price_of,
+                                               bot_next="now" if row is not None else "later" if later else "")
                         if line:
                             out.append(line)
                     if not seen.get("muted"):
                         continue              # the owner's card stands: the bot's is not looked at
                 if row is not None:
                     ident = "bot|" + "|".join([str(row.get("period"))] + [f"{float(row[k]):.0f}" for k in ("bear", "base", "bull")])
-                    line = self._bot_zone_line(account, symbol, row, remembered(f"{symbol}@bot", ident, row.get("zone")),
+                    # from the zone at the close, on the alerts' levels (a close between Bull and Base + 2% is Hợp lý)
+                    start = row.get("zone")
+                    if start == "Đắt" and float(row.get("close") or 0) < dinhgia.alert_levels(row)["bull"]:
+                        start = "Hợp lý"
+                    line = self._bot_zone_line(account, symbol, row, remembered(f"{symbol}@bot", ident, start),
                                                day, price_of)
                     if line:
                         out.append(line)
@@ -437,14 +449,17 @@ class IntradayMonitor:
                 else f"🔺 {symbol} vào vùng Đắt: giá {_fmt(p)} ≥ Bull {_fmt(card['bull'])}")
 
     @classmethod
-    def _zone_line(cls, account, symbol: str, card: dict, seen: dict, day: str, price_of, *, bot_next: bool = False) -> str | None:
+    def _zone_line(cls, account, symbol: str, card: dict, seen: dict, day: str, price_of, *, bot_next: str = "") -> str | None:
         """The alert of one card the owner entered, if any; ``seen`` (its memory) updated in place.
-        ``bot_next``: the bot has a card of the stock to take over once this one is silenced."""
+        ``bot_next``: the bot's card of the stock takes over once this one is silenced - "now", or "later"
+        (not usable today: an ex-date today, or not rebuilt yet), "" none (no card, the switch off)."""
+        from vnbot import dinhgia
         from vnbot import taisan as ts
 
         status = account.valuation_status(symbol, card, day)
         again = f"nhập lại: /tsdinhgia {symbol} BEAR BASE BULL"
-        after = ("bot báo vùng Rẻ/Đắt theo thẻ của bot; muốn dùng thẻ của anh thì " + again if bot_next
+        when = f" khi bot tính lại thẻ (sau {dinhgia.JOB_TIME})" if bot_next == "later" else ""
+        after = (f"bot báo vùng Rẻ/Đắt theo thẻ của bot{when}; muốn dùng thẻ của anh thì " + again if bot_next
                  else "bot ngừng báo vùng Rẻ/Đắt; " + again)
         if status["expired"]:
             seen["muted"] = "expired"
@@ -474,11 +489,15 @@ class IntradayMonitor:
         p = price_of(symbol)
         if not p:
             return None
-        zone = cls._entered(account, symbol, row, seen, day, p, "bot")
+        levels = dinhgia.alert_levels(row)
+        zone = cls._entered(account, symbol, levels, seen, day, p, "bot")
         if zone is None:
             return None
         weak = ", tin cậy THẤP" if row.get("reliability") == "thấp" else ""
-        return (f"{cls._what(symbol, zone, row, p)}, {ts.mos_text(row, p)} (thẻ của bot{weak}, BCTC {row.get('period')}, "
+        what = (f"🔺 {symbol} vào vùng Đắt: giá {_fmt(p)} ≥ Base {dinhgia.signed_pct(dinhgia.ALERT_BAND, 0)} "
+                f"{_fmt(levels['bull'])} (Bull {_fmt(row['bull'])} sát Base)"
+                if zone == "Đắt" and levels["bull"] > float(row["bull"]) else cls._what(symbol, zone, row, p))
+        return (f"{what}, {ts.mos_text(row, p)} (thẻ của bot{weak}, BCTC {row.get('period')}, "
                 f"tính sau phiên {dinhgia.ddmm(row.get('price_day') or '')}: {ts.card_levels(row)}; tham khảo, không phải "
                 f"lệnh; /dinhgia {symbol})")
 

@@ -239,7 +239,8 @@ def _thirty_seconds(c) -> str:
              f"{ui.money(c.eab)} là Base đã trừ biên an toàn {_num(c.assumptions.margin * 100, 1)}%"),
             ("Hợp lý", "giữa mức Rẻ và mức Đắt", "trên Base, dưới Bull"),
             ("Đắt", f"giá ≥ Bull <b>{ui.money(c.bull)}</b>",
-             f"Bull = trần định giá mỗi cổ phiếu, {_e(vv.bull_basis(c))} của chính mã; trên mức này coi là đắt")):
+             f"Bull = trần định giá mỗi cổ phiếu, {_e(vv.bull_basis(c))} của chính mã; trên mức này coi là đắt"
+             + (f". {_e(note)}" if (note := dg.band_note(c.base, c.bull)) else ""))):
         now = " (hôm nay)" if name == c.zone else ""
         rows.append(f'<tr><td data-label="Vùng">{ui.chip(name, ZONE_KIND.get(name, ""))}{_e(now)}</td>'
                     f'<td data-label="Giá mỗi cổ phiếu">{cond}</td><td data-label="Dựa trên" class="small">{why}</td></tr>')
