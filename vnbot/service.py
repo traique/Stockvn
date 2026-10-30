@@ -130,7 +130,8 @@ class DailyScheduler:
       quantitative engine (no AI); only the best ``daily_ai_max`` codes whose
       action is in ``daily_ai_actions`` get the full AI analysis, within the
       day's AI budget (a missing bar after the close is likewise waited for
-      until ``LATE_BAR_CUTOFF``).
+      until ``LATE_BAR_CUTOFF``); with it, one block of the zones the newest
+      evening valuation job moved (``dinhgia.night_block``).
     """
 
     RETRY_SECONDS = 600            # first retry; doubles per failure up to MAX_RETRY_SECONDS
@@ -582,6 +583,14 @@ class DailyScheduler:
         write_text_atomic(self._stamp, day)
         if self.settings.daily_ai_mode == "critic" and picked:
             text += "\n\n" + self._critique(picked, day)
+        try:
+            from vnbot import dinhgia
+
+            zones = dinhgia.night_block(self.settings.data_dir, day)
+        except Exception as exc:  # noqa: BLE001 - the report goes out without the block
+            logger.warning("Daily run %s: valuation zone changes unread: %s", day, exc)
+            zones = ""
+        text = "\n\n".join(x for x in (text, zones) if x)
         if text:
             self.notify(text)
 

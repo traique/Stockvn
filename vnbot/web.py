@@ -734,6 +734,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             ("zoom_commands", "Zoom · nhận lệnh", bool(zoom and zoom.commands_on), "Lệnh gõ trong Zoom (/webhook/zoom)"),
             ("intraday", "Cảnh báo trong phiên", trader is not None and settings.trade_mode != "off",
              f"Mỗi {settings.intraday_interval_min} phút trong giờ khớp lệnh · không dùng AI"),
+            ("zones_bot", "Vùng Rẻ/Đắt theo thẻ của bot", trader is not None and settings.trade_mode != "off",
+             ("Trong cảnh báo trong phiên: giá vào vùng Rẻ/Đắt theo thẻ định giá bot tự tính (watchlist, mã đang giữ); "
+              "mã có thẻ anh nhập (/tsdinhgia) luôn báo theo thẻ của anh")),
             ("altcoin", "Altcoin · thông báo", (os.environ.get("ALTCOIN_ENABLED") or "").strip() == "1",
              "Tin của bot Altcoin, mở đầu “🪙 Altcoin ›”, qua Telegram và Zoom ở trên; lệnh: /alt"),
         ]

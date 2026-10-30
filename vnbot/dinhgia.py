@@ -10,10 +10,13 @@ After the close (``service.DailyScheduler``, a thread of its own) ``run_job`` co
 cards of the tracked stocks - the watchlist, the Tài sản holdings, the stocks with a card the owner
 entered - two at a time, behind VCI's breaker, a stock already done with the session's price (or
 refused on the session's data) skipped. With a bank among them it also reads every listed bank's KPIs
-once a day (``bank_peers``), for the page's "so với trung vị ngân hàng".
+once a day (``vn_peers.bank_peers``): a bank's KPIs against the median of the banks with the same quarter.
+
+The intraday monitor (``vnbot.intraday``) alerts on the kept cards when the price enters Rẻ or Đắt -
+no VCI call there - and the job's zone moves go into the next watchlist report (``night_block``).
 
 Informational only: nothing of the Quant Engine reads it. The owner's card (/tsdinhgia) is shown
-beside the bot's, named as his, never as the bot's.
+beside the bot's, named as his, never as the bot's; in the alerts it overrides the bot's.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ from vnbot.jobs import write_text_atomic
 logger = logging.getLogger(__name__)
 
 STATE_FILE = "valuation_cards.json"   # under data/ while the history store is off: each stock's two newest days
+ZONES_FILE = "valuation_zone_changes.json"   # under data/: the zones the newest evening job moved, for the report
+MAX_ZONE_LINES = 12                   # zone changes named in the watchlist report; the rest counted
 JOB_TIME = "16:00"                    # the evening job, Vietnam time: the session's bars are out (15:05)
 JOB_WORKERS = 2                       # cards built at once (VCI is slow, the host has 2 GB)
 MARK_CHANGE = 0.003                   # a level moved this much (0,3%) is a change worth saying
@@ -232,7 +237,7 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
     statement may have come out since). The stocks by outcome: done (the price of ``session``), behind
     (an older price: the session's is not out yet), none (no card; the row says why), kept (done earlier
     today), failed (VCI down - its breaker then fails the rest at once - or a fault). A bank among them
-    brings the day's medians of every listed bank (``bank_peers``); "peers" is ["failed"] when they could
+    brings the day's read of every listed bank (``vn_peers.bank_peers``); "peers" is ["failed"] when they could
     not be read (retried like a failed stock)."""
     vv = _vv()
     today = today or today_vn()
@@ -240,6 +245,8 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
     started = time.monotonic()
     out: dict[str, list[str]] = {k: [] for k in ("done", "behind", "none", "kept", "failed", "peers")}
     refused_after = _job_time(session)
+
+    moved: dict[str, dict] = {}
 
     def one(symbol: str) -> str:
         try:
@@ -249,7 +256,11 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
                          or last.get("note") and float(last.get("ts") or 0) >= refused_after):
                 return "kept"
             result = vv.assess(symbol, None)
-            cards.record(result, today)
+            row, prev = cards.record(result, today)
+            moved[symbol] = ({"from": prev["zone"], "to": row["zone"], "close": row["close"], "base": row["base"],
+                              "bull": row["bull"]}
+                             if prev and row.get("base") is not None and prev.get("base") is not None
+                             and row["zone"] != prev.get("zone") else None)
         except Exception as exc:  # noqa: BLE001 - one stock never stops the others
             logger.warning("Valuation card of %s: %s: %s", symbol, type(exc).__name__, str(exc)[:200])
             return "failed"
@@ -260,9 +271,13 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
     with ThreadPoolExecutor(max_workers=max(1, workers), thread_name_prefix="dinhgia") as pool:
         for symbol, outcome in zip(symbols, pool.map(one, symbols)):
             out[outcome].append(symbol)
+    try:
+        _keep_zone_changes(data_dir, today, moved)
+    except OSError as exc:  # the cards are kept; only the report's block is missing
+        logger.warning("Valuation cards: zone changes not kept: %s", exc)
     if any(vv.card_profile(s) == "banking" for s in symbols if s not in out["failed"]):
         try:
-            bank_peers(today, compute=True)
+            _peers().bank_peers(today, compute=True)
         except Exception as exc:  # noqa: BLE001 - the page says the medians are missing; retried
             logger.warning("Valuation cards: bank medians of %s not read: %s: %s", today, type(exc).__name__, exc)
             out["peers"].append("failed")
@@ -274,129 +289,93 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
     return out
 
 
-# ─── KPIs, and a bank's against every listed bank ────────────────────────────
-
-BANK_ICB = "8300"
-PEER_QUARTERS = 4            # each bank's newest quarters kept: the stock's own may be one or two behind
-# (VCI ratio field, label, "pct" or "x"); VCI's TTM figures of the quarter, its stray minus signs dropped.
-# VCI's debtToEquity is total liabilities (bsa54) / equity (bsa78), not borrowings: HPG Q2/2026 0,971 =
-# 137.414 / 141.516 tỷ, borrowings 0,70 (checked live 30/10/2026); an insurer's is mostly reserves (BVH 10,8).
-BANK_KPIS = (("roe", "ROE (4 quý)", "pct"), ("netInterestMargin", "NIM (4 quý, theo VCI)", "pct"),
-             ("cir", "Chi phí/thu nhập (CIR)", "pct"), ("npl", "Nợ xấu (NPL)", "pct"),
-             ("loansLossReservesToNPLs", "Bao phủ nợ xấu", "pct"), ("provisionToOutstandingLoans", "Dự phòng/dư nợ", "pct"),
-             ("casaRatio", "CASA", "pct"), ("ldrLoanDepositRatio", "Cho vay/huy động (LDR)", "pct"))
-OTHER_KPIS = (("roe", "ROE (4 quý)", "pct"), ("roa", "ROA (4 quý)", "pct"), ("grossMargin", "Biên lãi gộp", "pct"),
-              ("afterTaxProfitMargin", "Biên lãi ròng", "pct"), ("debtToEquity", "Nợ phải trả/VCSH", "x"),
-              ("currentRatio", "Thanh toán hiện hành", "x"))
+def _zones_path(data_dir) -> Path:
+    return Path(data_dir) / ZONES_FILE
 
 
-def kpi_fields(profile: str) -> tuple:
-    return BANK_KPIS if profile == "banking" else OTHER_KPIS
-
-
-def own_kpis(symbol: str, profile: str, as_of: str | None = None) -> dict | None:
-    """The newest published quarter's KPIs: {"key": "2026-2", "period": "Q2/2026", "published": date,
-    "values": {field: value}}; None without one. VCI's ratio rows, cached half an hour (the card read them)."""
-    from tradingagents.dataflows import vn_fundamentals as vf
-
-    rows = _informational(lambda: vf.published_ratio_rows(symbol, as_of))
-    if not rows:
-        return None
-    r = rows[0]
-    year, quarter = int(r.get("yearReport") or 0), int(r.get("quarter") or 0)
-    published = vf._statement_quarters(symbol).get((year, quarter))
-    return {"key": f"{year}-{quarter}", "period": f"Q{quarter}/{year}", "published": published,
-            "values": {f: vf.ratio_value(r, f) for f, _, _ in kpi_fields(profile)}}
-
-
-def _informational(call):
-    """``call`` behind the breaker of the informational VCI calls (``money_flows.VCI_INFO``); a stock
-    without the data (``NoMarketDataError``) is None, not an outage that trips the breaker."""
-    from tradingagents.dataflows import money_flows
-    from tradingagents.dataflows.errors import NoMarketDataError
-
-    def guarded():
+def _keep_zone_changes(data_dir, day: str, moved: dict) -> None:
+    """The zones the evening job of ``day`` moved against each stock's row of an earlier day, its runs
+    of the day together (a stock built again: its newest outcome, None for no move), for ``night_block``."""
+    path = _zones_path(data_dir)
+    with _file_lock:
         try:
-            return call()
-        except NoMarketDataError:
-            return None
-
-    return money_flows._guarded(money_flows.VCI_INFO, guarded)
-
-
-def _peers_path(day: str) -> Path:
-    from tradingagents.dataflows.config import get_config
-
-    return Path(get_config()["data_cache_dir"]) / "valuation" / f"peers-{BANK_ICB}-{day}.json"
-
-
-def bank_peers(day: str, *, compute: bool = False) -> dict | None:
-    """Every listed bank's (ICB 8300 in VCI's listing) KPIs of its ``PEER_QUARTERS`` newest quarters
-    published by ``day`` and its 5-year median ROE: {"day", "banks": {code: {"q": {"2026-2": {field:
-    value}}, "roe5": x}}}, kept on disk for the day. None when not read yet; ``compute`` reads it now
-    (the evening job: two VCI calls a bank, ~27 banks). VCI down, or no bank read (a listing without
-    banks, no bank's ratios), raises and nothing is kept: the job tries again, the page shows older ones."""
-    import numpy as np
-
-    from tradingagents.dataflows import vn_fundamentals as vf
-    from tradingagents.dataflows.errors import NoMarketDataError
-    from tradingagents.dataflows.vendors import vci
-
-    path = _peers_path(day)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("banks"), dict):
-            return data
-    except (OSError, ValueError):
-        pass
-    if not compute:
-        return None
-    started = time.monotonic()
-    listing = _informational(vci.fetch_listing) or []
-    codes = sorted({str(r.get("symbol") or "").upper() for r in listing
-                    if str(r.get("icbCode2")) == BANK_ICB and r.get("type") == "STOCK"} - {""})
-    banks = {}
-    for code in codes:
-        rows = _informational(lambda code=code: vf.published_ratio_rows(code, day))
-        annual = _informational(lambda code=code: vf.published_annual_ratio_rows(code, day))
-        if not rows:                         # PCB: no ratio rows at VCI (checked live 29/10/2026)
-            continue
-        quarters = {f"{int(r['yearReport'])}-{int(r['quarter'])}": {f: vf.ratio_value(r, f) for f, _, _ in BANK_KPIS}
-                    for r in rows[:PEER_QUARTERS]}
-        roes = [v for r, _ in annual or [] if (v := vf._num(r.get("roe"))) is not None][:5]
-        banks[code] = {"q": quarters, "roe5": float(np.median(roes)) if roes else None}
-    if not banks:
-        raise NoMarketDataError(f"ICB {BANK_ICB}", None, f"no bank KPIs read ({len(codes)} banks in VCI's listing)")
-    data = {"day": day, "banks": banks}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(path, json.dumps(data))
-    logger.info("Valuation cards: KPIs of %d banks read in %.0f s", len(banks), time.monotonic() - started)
-    return data
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        if not isinstance(data, dict) or data.get("day") != day:
+            data = {"day": day, "changes": {}, "reported": ""}
+        before = dict(data["changes"])
+        for symbol, change in moved.items():
+            if change:
+                data["changes"][symbol] = change
+            else:
+                data["changes"].pop(symbol, None)
+        if data["changes"] != before:
+            write_text_atomic(path, json.dumps(data, ensure_ascii=False))
 
 
-def latest_bank_peers(day: str) -> dict | None:
-    """The newest banks' KPIs read by ``day`` (the evening job's; a page never reads VCI for them)."""
-    folder = _peers_path(day).parent
-    days = sorted((p.stem.rsplit("-", 3)[-3:] for p in folder.glob(f"peers-{BANK_ICB}-*.json")), reverse=True)
-    for parts in days:
-        found = "-".join(parts)
-        if found <= day and (data := bank_peers(found)) and data["banks"]:
-            return data
-    return None
+def night_block(data_dir, today: str | None = None) -> str:
+    """The watchlist report's block: the zones the newest evening job moved (at the session's close), when
+    that job ran after the session before ``today`` and was not reported yet; said once (kept as reported)."""
+    from tradingagents.market import vn_rules
+
+    today = today or today_vn()
+    path = _zones_path(data_dir)
+    with _file_lock:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        if (not isinstance(data, dict) or not data.get("changes") or data.get("day", "") < vn_rules.prev_session(today)
+                or data.get("reported")):
+            return ""
+        data["reported"] = today
+        write_text_atomic(path, json.dumps(data, ensure_ascii=False))
+    items = sorted(data["changes"].items(), key=lambda kv: (kv[1]["to"] != "Rẻ", kv[1]["to"] != "Đắt", kv[0]))
+    parts = [f"{code} {c['from']} → {c['to']} (giá {price(c['close'])}, Base {price(c['base'])}, Bull {price(c['bull'])})"
+             for code, c in items[:MAX_ZONE_LINES]]
+    more = f" · và {len(items) - MAX_ZONE_LINES} mã khác" if len(items) > MAX_ZONE_LINES else ""
+    return (f"📐 Thẻ định giá của bot đổi vùng (tính sau phiên {ddmm(data['day'])}, theo giá đóng cửa): "
+            + " · ".join(parts) + more + ". Chi tiết: /dinhgia MÃ (tham khảo, không vào quyết định).")
 
 
-def peer_medians(peers: dict, key: str) -> dict:
-    """{field: (median, n)} over the banks with quarter ``key`` (a 0 is VCI's "no figure": left out),
-    and {"roe5": {code: x}} for the rank."""
-    import numpy as np
+# ─── KPIs, and a bank's against every listed bank (tradingagents.dataflows.vn_peers) ──
 
-    out = {}
-    for field, _, _ in BANK_KPIS:
-        values = [q[field] for b in peers.get("banks", {}).values() if (q := b.get("q", {}).get(key))
-                  and q.get(field) not in (None, 0)]
-        out[field] = (float(np.median(values)), len(values)) if values else (None, 0)
-    out["roe5"] = {c: b["roe5"] for c, b in peers.get("banks", {}).items() if b.get("roe5") is not None}
-    return out
+def _peers():
+    from tradingagents.dataflows import vn_peers
+
+    return vn_peers
+
+
+def kpi_table(symbol: str, profile: str):
+    """The stock's KPI table of today (``vn_peers.kpi_table``: a bank's against the banks' medians of the
+    evening job's read), None without one; VCI down raises."""
+    return _peers().kpi_table(symbol, None, profile)
+
+
+SHORT_KPIS = (("netInterestMargin", "NIM"), ("cir", "CIR"), ("npl", "NPL"), ("loansLossReservesToNPLs", "bao phủ nợ xấu"),
+              ("provisionToOutstandingLoans", "chi phí tín dụng"))
+
+
+def bank_line(t) -> str:
+    """/dinhgia MÃ of a bank: its main KPIs against the banks with the same quarter, one line."""
+    vp = _peers()
+    if t is None or t.profile != "banking":
+        return ""
+    rows = {k.field: k for k in t.rows}
+    if t.peers_read is None or t.with_period < vp.MIN_PEERS:
+        own = " · ".join(f"{name} {vp.fmt(rows[f].value)}" for f, name in SHORT_KPIS if rows[f].value is not None)
+        why = (f"mới {t.with_period} ngân hàng đã có {t.period}" if t.peers_read else
+               f"bot đọc sau {JOB_TIME} khi watchlist, Tài sản hoặc thẻ anh nhập có một ngân hàng")
+        return f"🏦 Chỉ số {t.period}: {own} (chưa có trung vị các ngân hàng: {why})"
+    parts = [f"{name} {vp.fmt(k.value)} ({vp.fmt(k.median)}" + (f" · {k.rank}/{k.n}" if k.rank else "") + ")"
+             for f, name in SHORT_KPIS if (k := rows[f]).value is not None]
+    if t.roe5 is not None:
+        parts.append(f"ROE {len(t.roe5_years)} năm {vp.fmt(t.roe5)} ({vp.fmt(t.roe5_median)} · {t.roe5_rank}/{t.roe5_of})")
+    newer = f"; {t.newer} NH đã có kỳ mới hơn" if t.newer else ""
+    return (f"🏦 So với {t.with_period} ngân hàng đã có {t.period} (trong ngoặc: trung vị nhóm · hạng, 1 là tốt nhất{newer}; "
+            f"VCI đọc {ddmm(t.peers_read.isoformat())}) {_vv()._label('THỐNG KÊ', t.peers_read, t.as_of)}: "
+            + " · ".join(parts))
 
 
 # ─── the phone text ───────────────────────────────────────────────────────────
@@ -437,7 +416,7 @@ def _multiple_text(rank, label: str) -> str:
             f"{rank.since:%m/%Y}")
 
 
-def card_text(result, row: dict, prev: dict | None, *, account=None, public_url: str = "") -> str:
+def card_text(result, row: dict, prev: dict | None, *, account=None, public_url: str = "", kpis=None) -> str:
     """/dinhgia MÃ: the card on a phone - zone and MOS first, then the levels, the multiple's
     percentile, what Base rests on, the sensitivity, the reliability, the dates, the changes, the
     owner's card - every figure with its label and date."""
@@ -476,6 +455,7 @@ def card_text(result, row: dict, prev: dict | None, *, account=None, public_url:
         f"{vv._rate(high_ke)} → {price(low_base)}",
         f"Độ tin cậy: {c.reliability.upper()} - {c.reliability_why}",
         f"BCTC {c.period} công bố {vv._day(c.published, as_of)} · {vv._expiry(c)}",
+        *([line] if (line := bank_line(kpis)) else []),
         changes_line(row, prev),
     ]
     manual = _manual_line(code, account, c.base)
@@ -551,4 +531,10 @@ def command(args: str, data_dir, *, watchlist=(), account=None, public_url: str 
         result, row, prev = view(code, data_dir)
     except VendorError as exc:
         return f"⚠️ VCI đang lỗi hoặc chậm, chưa tính được định giá {code} ({exc}). Thử lại sau ít phút."
-    return card_text(result, row, prev, account=account, public_url=public_url)
+    table = None
+    if result.profile == "banking":
+        try:
+            table = kpi_table(code, result.profile)
+        except Exception as exc:  # noqa: BLE001 - the card without the banks' line
+            logger.info("/dinhgia %s: KPIs unread: %s", code, exc)
+    return card_text(result, row, prev, account=account, public_url=public_url, kpis=table)

@@ -854,7 +854,7 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
                           ("Hạn dùng", ""), ("Thẻ của bot", ""), ("Lệch Base", ""), ("", "")], rows, "", stack=True)
         table = f'<p class="muted small" style="margin:0 0 12px">{e(_price_label(label))}</p>' + table
     else:
-        table = '<p class="muted" style="margin:0">Chưa có thẻ định giá nào.</p>'
+        table = '<p class="muted" style="margin:0">Chưa có thẻ định giá anh nhập nào (không bắt buộc).</p>'
     today = ts.today_vn()
     choices = sorted(set(book.holdings) | set(cards))
     datalist = '<datalist id="ts-vsyms">' + "".join(f'<option value="{e(x)}">' for x in choices) + "</datalist>"
@@ -878,9 +878,10 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
       onclick="return confirm('Xoá thẻ định giá của mã này?')">Xoá thẻ của mã</button>
   </div>
   <p class="muted small" style="margin:12px 0 0">Giá theo đồng: 30164, 30.164 hoặc 30,164 (dấu chấm/phẩy chỉ ngăn hàng nghìn).
-  Cần Bear &lt; Base &lt; Bull. Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. Bot báo trong phiên khi giá vào Rẻ hoặc
-  Đắt, một lần mỗi lần vào; thẻ hết hạn hoặc qua ngày GDKHQ thì ngừng báo. Chỉ để tham khảo: không đổi cắt lỗ, mục tiêu hay
-  quyết định của bot. Trong Telegram/Zoom: /tsdinhgia.</p>
+  Cần Bear &lt; Base &lt; Bull. Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. <b>Không bắt buộc nhập</b>: bot tự
+  tính thẻ (<a href="/dinhgia">Định giá</a>) cho watchlist và mã đang giữ, tự báo khi giá vào Rẻ/Đắt. Thẻ anh nhập thay thẻ
+  của bot cho mã đó, một lần mỗi lần vào vùng; hết hạn hoặc qua ngày GDKHQ thì báo một lần rồi quay về thẻ của bot. Chỉ để
+  tham khảo: không đổi cắt lỗ, mục tiêu hay quyết định của bot. Trong Telegram/Zoom: /tsdinhgia.</p>
 </form>"""
     return ui.acc("dinhgia", "Định giá", "Thẻ định giá anh nhập", table + form, opened=bool(cards))
 

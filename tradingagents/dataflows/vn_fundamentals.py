@@ -105,27 +105,30 @@ def _statement_quarters(symbol: str) -> dict[tuple[int, int], date]:
     }
 
 
-def published_ratio_rows(symbol: str, as_of_date: str | None) -> list[dict]:
-    """TTM ratio rows of quarters public by the run date, newest first.
+def dated_ratio_rows(symbol: str) -> list[tuple[dict, date]]:
+    """Every TTM ratio row of a quarter with the day it became public, newest quarter first.
 
     A quarter is public when its income statement was; when VCI has no
     statement for it, the quarterly filing deadline decides.
     """
     rows = [r for r in vci.fetch_ratios(symbol) if 1 <= int(r.get("quarter") or 0) <= 4]
     statements = _statement_quarters(symbol)
-    cutoff = _as_of_day(as_of_date)
-    visible = []
+    dated = []
     for row in rows:
         key = (int(row.get("yearReport") or 0), int(row.get("quarter") or 0))
-        public = statements.get(key) or published_on({**row, "lengthReport": key[1]})
-        if public <= cutoff:
-            visible.append(row)
-    return sorted(visible, key=lambda r: (r.get("yearReport") or 0, r.get("quarter") or 0), reverse=True)
+        dated.append((row, statements.get(key) or published_on({**row, "lengthReport": key[1]})))
+    return sorted(dated, key=lambda rp: (rp[0].get("yearReport") or 0, rp[0].get("quarter") or 0), reverse=True)
 
 
-def published_annual_ratio_rows(symbol: str, as_of_date: str | None) -> list[tuple[dict, date]]:
-    """Annual ratio rows (``quarter`` 5, which ``published_ratio_rows`` leaves out) of the years
-    whose annual report was public by the run date, newest first, each with that day.
+def published_ratio_rows(symbol: str, as_of_date: str | None) -> list[dict]:
+    """TTM ratio rows of quarters public by the run date, newest first (``dated_ratio_rows``)."""
+    cutoff = _as_of_day(as_of_date)
+    return [row for row, public in dated_ratio_rows(symbol) if public <= cutoff]
+
+
+def dated_annual_ratio_rows(symbol: str) -> list[tuple[dict, date]]:
+    """Every annual ratio row (``quarter`` 5, which ``published_ratio_rows`` leaves out) with the day
+    its annual report became public, newest year first.
 
     The annual income statement's ``publicDate`` decides (CTG 2025: 31/03/2026); when VCI has no
     statement for the year, the annual filing deadline.
@@ -135,15 +138,15 @@ def published_annual_ratio_rows(symbol: str, as_of_date: str | None) -> list[tup
                  for r in vci.fetch_statement(symbol, "INCOME_STATEMENT")["years"]}
     except NoMarketDataError:
         years = {}
+    dated = [(row, years.get(int(row.get("yearReport") or 0)) or published_on(row, annual=True))
+             for row in vci.fetch_ratios(symbol) if int(row.get("quarter") or 0) == 5]
+    return sorted(dated, key=lambda rp: int(rp[0].get("yearReport") or 0), reverse=True)
+
+
+def published_annual_ratio_rows(symbol: str, as_of_date: str | None) -> list[tuple[dict, date]]:
+    """``dated_annual_ratio_rows`` of the years whose annual report was public by the run date."""
     cutoff = _as_of_day(as_of_date)
-    visible = []
-    for row in vci.fetch_ratios(symbol):
-        if int(row.get("quarter") or 0) != 5:
-            continue
-        public = years.get(int(row.get("yearReport") or 0)) or published_on(row, annual=True)
-        if public <= cutoff:
-            visible.append((row, public))
-    return sorted(visible, key=lambda rp: int(rp[0].get("yearReport") or 0), reverse=True)
+    return [(row, public) for row, public in dated_annual_ratio_rows(symbol) if public <= cutoff]
 
 
 def _num(value) -> float | None:
@@ -248,6 +251,18 @@ def _valuation_card_line(symbol: str, as_of_date: str | None) -> str:
         return vn_valuation.fundamentals_line(None)
 
 
+def _bank_peer_lines(symbol: str, as_of_date: str | None) -> list[str]:
+    """A bank's KPIs against the median of the banks with the same quarter published by the run date
+    (the evening job's read, point-in-time; no VCI call for the other banks)."""
+    from tradingagents.dataflows import vn_peers
+
+    try:
+        return vn_peers.fundamentals_lines(vn_peers.kpi_table(symbol, as_of_date, "banking"))
+    except Exception as exc:  # noqa: BLE001 - the comparison is enrichment
+        logger.warning("Bank KPIs of %s against the banks unavailable: %s", symbol, exc)
+        return []
+
+
 def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
     """Valuation, profitability, leverage and growth as known on the run date."""
     symbol = normalize_symbol(ticker)
@@ -284,7 +299,9 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
     if profile.key == "banking":
         lines.append(
             f"- NIM: {_pct(latest.get('netInterestMargin'))} | CIR: {_pct(ratio_value(latest, 'cir'))} | "
-            f"NPL: {_pct(latest.get('npl'))} | CASA: {_pct(latest.get('casaRatio'))} | LDR: {_pct(latest.get('ldrLoanDepositRatio'))}"
+            f"NPL: {_pct(latest.get('npl'))} | Bao phủ nợ xấu: {_pct(ratio_value(latest, 'loansLossReservesToNPLs'))} | "
+            f"Chi phí tín dụng: {_pct(ratio_value(latest, 'provisionToOutstandingLoans'))} | "
+            f"CASA: {_pct(latest.get('casaRatio'))} | LDR: {_pct(latest.get('ldrLoanDepositRatio'))}"
         )
     else:
         lines.append(
@@ -301,6 +318,7 @@ def get_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
     lines.append(_own_history_line(symbol, metric, as_of_date))
     if profile.key == "banking":
         lines.append(_valuation_card_line(symbol, as_of_date))
+        lines += _bank_peer_lines(symbol, as_of_date)
     if historical:
         lines.append(f"- So sánh ngành: bị giữ lại cho lượt phân tích ngày {as_of_date} (theo số VCI của kỳ, giá sau ngày này).")
     else:

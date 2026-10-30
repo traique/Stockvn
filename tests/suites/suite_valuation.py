@@ -393,9 +393,10 @@ readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbo
                  if "vn_valuation" in p.read_text(encoding="utf-8", errors="replace")
                  and p.name not in ("vn_valuation.py", "valuation_config.py"))
 t.ok("only text writers read vn_valuation: the fundamentals report, the card after the engine's report, the Output "
-     "Guard, /nhanh, the /taisan page, /dinhgia and its pages (no engine, policy, simulator, calibration)",
+     "Guard, /nhanh, the /taisan page, /dinhgia and its pages, the banks' KPIs (no engine, policy, simulator, calibration)",
      readers == ["tradingagents/agents/output_guard.py", "tradingagents/agents/quant_engine.py",
-                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/dinhgia.py", "vnbot/dinhgia_web.py",
+                 "tradingagents/dataflows/vn_fundamentals.py", "tradingagents/dataflows/vn_peers.py",
+                 "vnbot/dinhgia.py", "vnbot/dinhgia_web.py",
                  "vnbot/service.py", "vnbot/taisan_web.py"], readers)
 
 t.done()

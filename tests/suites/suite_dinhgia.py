@@ -6,6 +6,7 @@ behind the password, the evening job (bounded, skips what is done, retried, stam
 medians. FPT, HPG and VHM recorded from VCI on 30/10/2026 (tests/fixtures/dinhgia_*_2026-10-30.json:
 every 5th session since 2018 and the last 15), CTG from v1.16.0's fixture; the rest synthetic."""
 import copy
+import dataclasses
 import json
 import os
 import re
@@ -47,6 +48,9 @@ t = _common.Checks()
 FX = {s: json.loads((_common.FIXTURES / f"dinhgia_{s}_2026-10-30.json").read_text(encoding="utf-8"))
       for s in ("FPT", "HPG", "VHM")}
 FX["CTG"] = json.loads((_common.FIXTURES / "valuation_CTG_2026-10-28.json").read_text(encoding="utf-8"))
+# every listed bank's KPIs as the evening job read them on 30/10/2026 (newest 5 quarters), CTG's raw ratio rows
+PEERS_FX = json.loads((_common.FIXTURES / "bank_peers_2026-10-30.json").read_text(encoding="utf-8"))
+FX["CTG"]["ratios"] = PEERS_FX["ctg_ratios"]
 
 
 def fixture_prices(fx: dict) -> pd.DataFrame:
@@ -464,46 +468,146 @@ links = sorted({h for h in re.findall(r'href="(/[^"#?]*)', page.text + prof)})
 broken = [h for h in links if web.get(h, auth=AUTH).status_code >= 400]
 t.ok("every link on the two pages answers", not broken and "/dinhgia/FPT" in links, broken)
 
-# a bank: the medians of every listed bank, from the evening job's file (the page never reads VCI for them)
-peers = {"day": "2026-10-29", "banks": {
-    "CTG": {"q": {"2026-2": {"roe": 0.2176, "cir": 0.24, "npl": 0.012}}, "roe5": 0.1712},
-    "AAA": {"q": {"2026-2": {"roe": 0.10, "cir": 0.40, "npl": 0.02}}, "roe5": 0.12},
-    "BBB": {"q": {"2026-2": {"roe": 0.14, "cir": 0.30, "npl": 0.0}, "2026-3": {"roe": 0.5}}, "roe5": 0.20}}}
-(CACHE / "valuation").mkdir(parents=True, exist_ok=True)
-(CACHE / "valuation" / "peers-8300-2026-10-29.json").write_text(json.dumps(peers), encoding="utf-8")
-med = dg.peer_medians(peers, "2026-2")
-t.ok("medians of the banks with the same quarter; VCI's 0 (no figure) left out", med["roe"] == (0.14, 3)
-     and med["npl"] == (0.016, 2) and med["cir"] == (0.30, 3) and dg.latest_bank_peers("2026-10-30")["day"] == "2026-10-29"
-     and dg.latest_bank_peers("2026-10-28") is None)
+# a bank: its KPIs against the median of the banks with the same quarter (the evening job's read, point-in-time)
+import statistics  # noqa: E402
+
+from tradingagents.dataflows import vn_fundamentals as vf, vn_peers as vp  # noqa: E402
+
+VALDIR = CACHE / "valuation"
+VALDIR.mkdir(parents=True, exist_ok=True)
+t.ok("VCI's signs dropped (CIR, cover, credit cost come negative); a bank's 0 is VCI's 'no figure', another stock's is 0",
+     vp.value({"cir": -0.2409}, "cir") == 0.2409 and vp.value({"loansLossReservesToNPLs": -1.34}, "loansLossReservesToNPLs") == 1.34
+     and vp.value({"provisionToOutstandingLoans": -0.0095}, "provisionToOutstandingLoans") == 0.0095
+     and vp.value({"npl": 0.0}, "npl") is None and vp.value({"grossMargin": 0.0}, "grossMargin", bank=False) == 0.0)
+ctg_own = vp.own("CTG", "2026-10-30")
+rows = {k.field: k for k in ctg_own.rows}
+t.ok("CTG's own KPIs of Q2/2026 (published 19/08) and of Q2/2025 beside them, signs fixed; its 5-year median ROE "
+     "2021-2025 (the card's sustainable ROE)", ctg_own.period == "Q2/2026" and ctg_own.published == date(2026, 8, 19)
+     and round(rows["cir"].value, 4) == 0.2409 and round(rows["cir"].prior, 4) == 0.2795
+     and round(rows["loansLossReservesToNPLs"].value, 4) == 1.3395 and round(rows["npl"].value, 4) == 0.0120
+     and round(rows["provisionToOutstandingLoans"].value, 4) == 0.0095 and ctg_own.roe5_years == (2021, 2022, 2023, 2024, 2025)
+     and round(ctg_own.roe5, 4) == 0.1712 and ctg_own.peers_read is None, ctg_own)
+peers = PEERS_FX["peers"]
+(VALDIR / "peers-8300-2026-10-29.json").write_text(json.dumps(dict(peers, day="2026-10-29")), encoding="utf-8")
+(VALDIR / "peers-8300-2026-10-30.json").write_text(json.dumps({"day": "2026-10-30", "banks": {"CTG": {"q": {}, "roe5": 0.17}}}),
+                                                   encoding="utf-8")       # v1.17.0 phase A's layout: no publication days
+t.ok("the newest read kept, an older layout (no publication days) passed over", vp.latest_bank_peers()["day"] == "2026-10-29"
+     and vp.latest_bank_peers("2026-10-28") is None and vp.bank_peers("2026-10-30") is None)
+ctg = vp.kpi_table("CTG", "2026-10-30")
+rows = {k.field: k for k in ctg.rows}
+same = [b["q"]["2026-2"] for c, b in peers["banks"].items() if c != "CTG" and "2026-2" in b["q"]]
+t.ok("CTG against the 27 banks with Q2/2026 (15 of them have Q3 out already, not mixed in): CIR 24,1% (median 35,2%, "
+     "3rd), NPL 1,20% (1,87%, 6th), cover 134,0% (66,8%, 3rd) - the PDF's own figures, the medians the bot's",
+     ctg.with_period == 27 and ctg.banks == 27 and ctg.newer == 15
+     and vp.fmt(rows["cir"].value) == "24,1%" and vp.fmt(rows["cir"].median) == "35,2%" and rows["cir"].rank == 3
+     and vp.fmt(rows["npl"].value) == "1,20%" and vp.fmt(rows["npl"].median) == "1,87%" and rows["npl"].rank == 6
+     and vp.fmt(rows["loansLossReservesToNPLs"].value) == "134,0%" and vp.fmt(rows["loansLossReservesToNPLs"].median) == "66,8%"
+     and rows["loansLossReservesToNPLs"].rank == 3 and rows["cir"].n == 27
+     and rows["cir"].median == statistics.median([q["cir"] for q in same] + [rows["cir"].value]),
+     [(k.field, vp.fmt(k.value), vp.fmt(k.median), k.rank, k.n) for k in ctg.rows])
+t.ok("... ranks by the KPI's way: lower is better for CIR, NPL, credit cost; higher for ROE, NIM, cover, CASA; LDR not "
+     "ranked", [k.better for k in ctg.rows] == ["high", "high", "low", "low", "high", "low", "high", None]
+     and rows["ldrLoanDepositRatio"].rank is None and rows["ldrLoanDepositRatio"].median is not None)
+t.ok("... its 5-year median ROE 17,1%: 11th of 27 banks, their median 14,9%", vp.fmt(ctg.roe5) == "17,1%"
+     and (ctg.roe5_rank, ctg.roe5_of) == (11, 27) and vp.fmt(ctg.roe5_median) == "14,9%")
+vpb_q = peers["banks"]["VPB"]["q"]["2026-3"]
+vpb = vp.KpiTable(symbol="VPB", profile="banking", as_of=date(2026, 10, 25), key="2026-3", period="Q3/2026",
+                  published=date(2026, 10, 19), rows=tuple(vp.Kpi(f, label, kind, better, vpb_q[f], None)
+                                                           for f, label, kind, better in vp.BANK_KPIS))
+early = vp.compare(vpb, peers)
+late = vp.compare(dataclasses.replace(vpb, as_of=date(2026, 10, 30)), peers)
+q3 = {c: b["q"]["2026-3"] for c, b in peers["banks"].items() if "2026-3" in b["q"]}
+t.ok("mixed periods: VPB's Q3/2026 against the banks that had published Q3 by the run date only - 6 on 25/10 (VPB, TCB, "
+     "LPB, ABB, PGB, SGB), 15 on 30/10; a Q2 bank's figures never in its median",
+     early.with_period == 6 and late.with_period == 15 and early.banks == late.banks == 27
+     and {k.field: k for k in early.rows}["cir"].median == statistics.median(
+         q["cir"] for c, q in q3.items() if q["pub"] <= "2026-10-25" and q["cir"] is not None)
+     and {k.field: k for k in late.rows}["npl"].median == statistics.median(
+         q["npl"] for q in q3.values() if q["npl"] is not None),
+     (early.with_period, late.with_period))
+season = vp.compare(dataclasses.replace(vpb, as_of=date(2026, 10, 21)), peers)
+t.ok(f"... on 21/10 only 3 banks had Q3 out (under {vp.MIN_PEERS}): no median nor rank, said so, the 5-year ROE still ranked",
+     season.with_period == 3 and all(k.median is None and k.rank is None for k in season.rows)
+     and vp.fundamentals_lines(season)[0] == "- So với các ngân hàng: mới 3/27 ngân hàng đã công bố Q3/2026 tới ngày này (số "
+                                              "VCI đọc 30/10/2026), chưa đủ để lấy trung vị cùng kỳ"
+     and "chưa có trung vị các ngân hàng: mới 3 ngân hàng đã có Q3/2026" in dg.bank_line(season), vp.fundamentals_lines(season))
+aug = vp.kpi_table("CTG", "2026-08-18")
+aug_rows = {k.field: k for k in aug.rows}
+q2_by = sum(1 for c, b in peers["banks"].items() if c != "CTG" and b["q"].get("2026-2", {}).get("pub", "9") <= "2026-08-18")
+t.ok("a past run date, point-in-time: 18/08 is before CTG's Q2 (19/08) - its Q1/2026 against the banks' Q1, the banks "
+     "with Q2 out by then counted as newer", aug.period == "Q1/2026" and aug.with_period == 27 and aug.newer == q2_by
+     and 0 < q2_by < 26 and aug_rows["cir"].median == statistics.median(
+         [b["q"]["2026-1"]["cir"] for c, b in peers["banks"].items() if c != "CTG"] + [aug_rows["cir"].value]),
+     (aug.period, aug.newer, q2_by))
+march = vp.kpi_table("CTG", "2026-03-30")
+t.ok("... the 5-year ROE of 30/03/2026: the 2025 annual report (31/03) not out yet - 2020-2024, the banks' likewise",
+     march.roe5_years == (2020, 2021, 2022, 2023, 2024) and march.roe5_published == date(2025, 3, 5)
+     and march.roe5_of == 1 + sum(1 for c, b in peers["banks"].items() if c != "CTG"
+                                  and sum(1 for e in b["y"].values() if e["pub"] <= "2026-03-30") >= vp.MIN_ROE_YEARS),
+     (march.roe5_years, march.roe5_published, march.roe5_of))
+lines = vp.fundamentals_lines(ctg)
+t.ok("the fundamentals report's two lines: same quarter, n/M banks, the read's date, labels, the same quarter a year before",
+     lines[0].startswith("- So với trung vị các ngân hàng cùng kỳ Q2/2026 (27/27 ngân hàng đã công bố kỳ này; số VCI đọc "
+                         "29/10/2026) [THỐNG KÊ 29/10]: ")
+     and "Chi phí/thu nhập (CIR) 24,1% (cùng kỳ 28,0%; trung vị 35,2%, hạng 3/27)" in lines[0]
+     and "Cho vay/huy động (LDR) 110,7% (cùng kỳ 110,4%; trung vị 110,6%)" in lines[0] and "quý quy năm" in lines[0]
+     and lines[1] == "- ROE trung vị 5 năm 2021-2025: 17,1%, hạng 11/27 ngân hàng (trung vị nhóm 14,9%) [THỐNG KÊ 31/03]",
+     lines)
+report = vf.get_fundamentals("CTG")
+t.ok("get_fundamentals (the analyst): the bank line with the signs fixed, then the comparison and the rank",
+     "CIR: 24,09% | NPL: 1,20% | Bao phủ nợ xấu: 133,95% | Chi phí tín dụng: 0,95%" in report
+     and lines[0] in report and lines[1] in report, report[:1500])
+t.ok("... a past run date reads the same file point-in-time",
+     vp.fundamentals_lines(aug)[0] in vf.get_fundamentals("CTG", "2026-08-18"))
+t.ok("... no bank's read kept: said, nothing asked of VCI", vp.fundamentals_lines(ctg_own)[0].startswith(
+    "- So với các ngân hàng: chưa có số đọc sẵn"))
 money_flows._down_until.clear()
-read = dg.bank_peers("2026-10-30", compute=True)
-t.ok("the evening job's read of every listed bank: PGB without ratio rows skipped (no breaker tripped), CTG's quarters "
-     "published by the day and its 5-year median ROE, kept on disk for the day",
-     sorted(read["banks"]) == ["CTG"] and sorted(read["banks"]["CTG"]["q"]) == ["2025-4", "2026-1", "2026-2"]
-     and round(read["banks"]["CTG"]["roe5"], 4) == 0.1712 and not money_flows._down_until
-     and dg.bank_peers("2026-10-30") == read and dg.bank_peers("2026-10-31") is None)
-(CACHE / "valuation" / "peers-8300-2026-10-30.json").unlink()
-dinhgia_web.look("CTG", SETTINGS.data_dir, wait=30)
-bank = web.get("/dinhgia/CTG", auth=AUTH).text
-t.ok("CTG's page: the bank's KPIs against the medians, its 5-year ROE rank",
-     "Trung vị ngân hàng cùng kỳ" in bank and "14,00%" in bank and "(3 NH)" in bank and "hạng 2/3" in bank, bank[-3000:])
-t.ok("... CTG followed by nothing (watchlist, Tài sản, cards): computed when viewed, not said to be recomputed at 16:00",
-     "bot tính khi có người xem, không tự tính sau phiên" in bank and "Bot tự tính lại sau" not in bank)
-os.environ["VALUATION_KE_BANK"] = "10"
-ke10 = dinhgia_web._book_card(vv.assess("CTG", "2026-10-28"))
-del os.environ["VALUATION_KE_BANK"]
-t.ok("the Ke note follows VALUATION_KE_BANK (10%): 'ngân hàng 10%', the row in use 10%",
-     "ngân hàng 10%, mã khác 13%" in ke10 and "10% (đang dùng)" in ke10 and "ngân hàng 12%" not in ke10)
+(VALDIR / "peers-8300-2026-10-30.json").unlink()
+read = vp.bank_peers("2026-10-30", compute=True)
+ctg_read = read["banks"]["CTG"]
+t.ok("the evening job's read of every listed bank: PGB without ratio rows skipped (no breaker tripped), CTG's quarters with "
+     "their publication day, signs fixed, its annual ROEs; kept on disk for the day",
+     sorted(read["banks"]) == ["CTG"] and read["format"] == vp.FORMAT and ctg_read["q"]["2026-2"]["pub"] == "2026-08-19"
+     and ctg_read["q"]["2026-2"]["cir"] > 0 and len(ctg_read["q"]) == 6 and ctg_read["y"]["2025"]["pub"] == "2026-03-31"
+     and not money_flows._down_until and vp.bank_peers("2026-10-30") == read and vp.bank_peers("2026-10-31") is None)
+(VALDIR / "peers-8300-2026-10-30.json").unlink()
 LISTING_DOWN["nodata"] = True
 try:
-    dg.bank_peers("2026-10-30", compute=True)
+    vp.bank_peers("2026-10-30", compute=True)
     refused = False
 except NoMarketDataError:
     refused = True
 LISTING_DOWN["nodata"] = False
 t.ok("VCI's listing without banks: nothing kept for the day (an empty file would hide 29/10's), raised for the job to retry",
-     refused and not (CACHE / "valuation" / "peers-8300-2026-10-30.json").exists()
-     and dg.latest_bank_peers("2026-10-30")["day"] == "2026-10-29")
+     refused and not (VALDIR / "peers-8300-2026-10-30.json").exists() and vp.latest_bank_peers()["day"] == "2026-10-29")
+dinhgia_web.look("CTG", SETTINGS.data_dir, wait=30)
+bank = web.get("/dinhgia/CTG", auth=AUTH).text
+t.ok("CTG's page: the PDF's table - chỉ số · CTG · median of the same quarter · rank and note · label and date",
+     all(x in bank for x in ("Trung vị ngân hàng cùng kỳ", "Hạng · ghi chú", "Nhãn · ngày", "24,1%", "35,2% <span",
+                             "(27 NH)", "hạng 3/27 (thấp là tốt) · cùng kỳ Q2/2025: 28,0%", "ROE trung vị 5 năm",
+                             "hạng 11/27 (cao là tốt)", "15 ngân hàng đã có kỳ mới hơn nhưng vẫn so cùng kỳ",
+                             "FACT 19/08", "THỐNG KÊ 29/10", "THỐNG KÊ 31/03")),
+     [x for x in ("Trung vị ngân hàng cùng kỳ", "Hạng · ghi chú", "Nhãn · ngày", "24,1%", "35,2% <span",
+                  "(27 NH)", "hạng 3/27 (thấp là tốt) · cùng kỳ Q2/2025: 28,0%", "ROE trung vị 5 năm",
+                  "hạng 11/27 (cao là tốt)", "15 ngân hàng đã có kỳ mới hơn nhưng vẫn so cùng kỳ",
+                  "FACT 19/08", "THỐNG KÊ 29/10", "THỐNG KÊ 31/03") if x not in bank])
+t.ok("... CTG followed by nothing (watchlist, Tài sản, cards): computed when viewed, not said to be recomputed at 16:00",
+     "bot tính khi có người xem, không tự tính sau phiên" in bank and "Bot tự tính lại sau" not in bank)
+tg._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/dinhgia CTG"})
+bank_text = sent[-1][1]
+t.ok("/dinhgia CTG: one line of its KPIs against the banks (median · rank) with the read's date and label",
+     "🏦 So với 27 ngân hàng đã có Q2/2026 (trong ngoặc: trung vị nhóm · hạng, 1 là tốt nhất; 15 NH đã có kỳ mới hơn; VCI "
+     "đọc 29/10) [THỐNG KÊ 29/10]: NIM 2,69% (2,69% · 14/27) · CIR 24,1% (35,2% · 3/27) · NPL 1,20% (1,87% · 6/27) · "
+     "bao phủ nợ xấu 134,0% (66,8% · 3/27) · chi phí tín dụng 0,95% (0,99% · 13/27) · ROE 5 năm 17,1% (14,9% · 11/27)"
+     in bank_text, bank_text)
+t.ok("... a stock not a bank: no such line", "🏦" not in text)
+t.ok("... no banks' read: the bank's own figures, and why there is no median",
+     dg.bank_line(ctg_own).startswith("🏦 Chỉ số Q2/2026: NIM 2,69% · CIR 24,1%") and "chưa có trung vị" in dg.bank_line(ctg_own))
+os.environ["VALUATION_KE_BANK"] = "10"
+ke10 = dinhgia_web._book_card(vv.assess("CTG", "2026-10-28"))
+del os.environ["VALUATION_KE_BANK"]
+t.ok("the Ke note follows VALUATION_KE_BANK (10%): 'ngân hàng 10%', the row in use 10%",
+     "ngân hàng 10%, mã khác 13%" in ke10 and "10% (đang dùng)" in ke10 and "ngân hàng 12%" not in ke10)
 
 
 # the card built off the request: "đang tính" and a reload, and a cap on the pages' builds
@@ -553,8 +657,8 @@ def counted(symbol, as_of):
 
 vv.assess = counted
 asked_peers = []
-real_peers = dg.bank_peers
-dg.bank_peers = lambda day, compute=False: asked_peers.append((day, compute))
+real_peers = vp.bank_peers
+vp.bank_peers = lambda day, compute=False: asked_peers.append((day, compute))
 symbols = ["A01", "A02", "A03", "A04", "OLD", "NONE", "BAD"]
 out = dg.run_job(symbols, JOB, session="2026-10-29", today="2026-10-30")
 t.ok("the job: each stock's outcome; at most two built at once",
@@ -567,7 +671,7 @@ t.ok("run again the same day: done and refused ones kept, the older price and th
      again["kept"] == ["A01", "A02", "A03", "A04", "NONE"] and again["behind"] == ["OLD"] and again["failed"] == ["BAD"])
 dg.run_job(["CTG"], JOB, session="2026-10-29", today="2026-10-30")
 t.ok("a bank among them: the day's banks' KPIs asked for", asked_peers == [("2026-10-30", True)])
-dg.bank_peers = lambda day, compute=False: (_ for _ in ()).throw(VendorUnavailableError("VCI-info failed recently"))
+vp.bank_peers = lambda day, compute=False: (_ for _ in ()).throw(VendorUnavailableError("VCI-info failed recently"))
 t.ok("... not read: said in the outcome (the scheduler tries again)",
      dg.run_job(["CTG"], JOB, session="2026-10-29", today="2026-10-30")["peers"] == ["failed"])
 dg.Cards(JOB).record(vv.NoCard("MORN", date(2026, 10, 30), "default", "đang lỗ"), "2026-10-30")   # a view at 10:00
@@ -578,7 +682,7 @@ t.ok("a refusal from a morning view is built again by the evening job (a stateme
      morning["none"] == ["MORN"] and evening["kept"] == ["MORN"], (morning, evening))
 NOW["t"] = datetime(2026, 10, 30, 10, 0, tzinfo=vn_rules.VN_TZ)
 vv.assess = real_assess
-dg.bank_peers = real_peers
+vp.bank_peers = real_peers
 
 # VCI's price history down for a stock never fetched: an outage, not "no card"
 money_flows._down_until.clear()
@@ -628,6 +732,47 @@ t.ok("... all done: stamped, not due again today", len(runs) == 3 and sched._val
 NOW["t"] = datetime(2026, 10, 31, 17, 0, tzinfo=vn_rules.VN_TZ)
 t.ok("a Saturday: not due", sched._valuation_due() is None)
 dg.run_job = real_run
+
+# the zones the evening job moved: one block of the next watchlist report, said once
+ZJ = ROOT / "zonejob"
+ZJ.mkdir()
+for sym, zone in (("ZA", "Hợp lý"), ("ZB", "Đắt"), ("ZC", "Hợp lý")):
+    dg.Cards(ZJ).save(dict(dg.row_of(hpg, "2026-10-29"), symbol=sym, zone=zone))
+ZONES = {"ZA": "Rẻ", "ZB": "Hợp lý", "ZC": "Hợp lý"}
+vv.assess = lambda symbol, as_of: replace(hpg, symbol=symbol, zone=ZONES[symbol])
+dg.run_job(["ZA", "ZB", "ZC"], ZJ, session="2026-10-30", today="2026-10-30")
+moved = json.loads((ZJ / dg.ZONES_FILE).read_text(encoding="utf-8"))
+t.ok("the evening job keeps the zones it moved against each stock's row of an earlier day (ZC did not move)",
+     moved["day"] == "2026-10-30" and moved["changes"] == {
+         "ZA": {"from": "Hợp lý", "to": "Rẻ", "close": hpg.close, "base": hpg.base, "bull": hpg.bull},
+         "ZB": {"from": "Đắt", "to": "Hợp lý", "close": hpg.close, "base": hpg.base, "bull": hpg.bull}}, moved)
+ZONES["ZA"] = "Hợp lý"
+dg.run_job(["ZA"], ZJ, session="2026-10-30", today="2026-10-30")
+t.ok("... a later run of the day that finds ZA back where it was: no move kept for it",
+     set(json.loads((ZJ / dg.ZONES_FILE).read_text(encoding="utf-8"))["changes"]) == {"ZB"})
+vv.assess = real_assess
+block = dg.night_block(ZJ, "2026-11-02")
+t.ok("the next session's watchlist report: one block, the move at the close with its levels",
+     block == "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 30/10, theo giá đóng cửa): ZB Đắt → Hợp lý (giá 21.200, "
+              "Base 16.983, Bull 21.440). Chi tiết: /dinhgia MÃ (tham khảo, không vào quyết định).", block)
+t.ok("... said once; an older job's moves are not said a session later", dg.night_block(ZJ, "2026-11-02") == ""
+     and dg.night_block(ZJ, "2026-11-03") == "")
+dg._keep_zone_changes(ZJ, "2026-11-03", {"ZC": {"from": "Hợp lý", "to": "Đắt", "close": 1.0, "base": 1.0, "bull": 1.0}})
+t.ok("a report time after the job (the same day): that day's moves", dg.night_block(ZJ, "2026-11-03").startswith(
+    "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 03/11"))
+dg._keep_zone_changes(SETTINGS.data_dir, "2026-10-29", {"FPT": {"from": "Hợp lý", "to": "Đắt", "close": 52_700.0,
+                                                               "base": 29_212.0, "bull": 30_358.0}})
+reported = []
+rep = DailyScheduler(SETTINGS, JobQueue(SETTINGS), watch, bot=None, notify=reported.append)
+rep._is_trading_day = lambda day: True
+rep._scan_codes = lambda: ["FPT"]
+rep._screen = lambda codes, day: ([], "📋 Quét watchlist 2026-10-30: Quant Engine đã xét 1 mã (không tốn lượt AI).")
+rep._record_screen = lambda day: ""
+rep._report("2026-10-30")
+t.ok("the daily watchlist report carries the block after the screen", len(reported) == 1
+     and reported[0].startswith("📋 Quét watchlist 2026-10-30") and "\n\n📐 Thẻ định giá của bot đổi vùng (tính sau phiên "
+                                                                   "29/10, theo giá đóng cửa): FPT Hợp lý → Đắt" in reported[0],
+     reported)
 
 # ───────────── 7. informational only ─────────────
 repo = _common.REPO

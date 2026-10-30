@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.17.0"
 RELEASED = "2026-10-30"
-RELEASE_BUILD = "6a3378c"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "ac9399f"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -42,8 +42,15 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Có gì đổi so với lần xem trước: mốc đổi từ 0,3%, đổi vùng, BCTC mới, đổi giả định (lưu data/bot.db)",
         "Sau 16:00 mỗi phiên bot tự tính thẻ của watchlist, mã đang giữ (Tài sản) và mã có thẻ anh nhập",
         "/dinhgia: bảng các mã theo dõi xếp theo MOS; trang web /dinhgia và /dinhgia/MÃ theo bố cục hồ sơ PDF",
-        "Trang /dinhgia/MÃ của ngân hàng: chỉ số so với trung vị mọi ngân hàng niêm yết cùng kỳ",
-        "Thẻ anh nhập (/tsdinhgia) thành tuỳ chọn; trên /taisan, thẻ của bot nằm cạnh nó cho mọi mã",
+        "Ngân hàng: NIM, CIR, nợ xấu, bao phủ, chi phí tín dụng so với trung vị các ngân hàng có cùng quý",
+        "Kèm hạng N/M và ROE trung vị 5 năm; có ở /dinhgia MÃ, trang /dinhgia/MÃ và báo cáo cơ bản cho AI",
+        "Ngày cũ vẫn đúng thời điểm: chỉ tính quý và năm đã công bố tới ngày đó",
+        "Bot tự báo trong phiên khi giá vào Rẻ/Đắt theo thẻ của bot: mã watchlist và mã đang giữ, không cần nhập",
+        "Có thẻ anh nhập thì báo theo thẻ của anh, tin ghi rõ thẻ nào; hết hạn/qua GDKHQ thì về thẻ của bot",
+        "Thẻ của bot chỉ dùng khi tính sau phiên trước và chưa tới ngày GDKHQ; tắt ở /ai (Kênh thông báo)",
+        "Kết quả cảnh báo vùng tách thẻ của bot và thẻ anh nhập để so độ chính xác",
+        "Báo cáo watchlist hằng ngày thêm một khối: mã đổi vùng theo thẻ của bot sau phiên",
+        "Thẻ anh nhập (/tsdinhgia) thành tuỳ chọn, thay thẻ của bot; trên /taisan hai thẻ nằm cạnh nhau",
         "/phienban chỉ in các bản gần nhất cho vừa một tin; đủ lịch sử ở trang /phienban",
         "Chỉ là thông tin: không đổi quyết định, stop/target hay cổng chặn của Quant",
     )),

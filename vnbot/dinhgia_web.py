@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import html
 import logging
-import statistics
 import threading
 import time
 from urllib.parse import quote
@@ -67,7 +66,7 @@ def _compute(code: str, data_dir) -> None:
     try:
         seen = dg.view(code, data_dir)
         try:
-            kpis = dg.own_kpis(code, seen[0].profile)
+            kpis = dg.kpi_table(code, seen[0].profile)
         except Exception as exc:  # noqa: BLE001 - the card without its KPIs
             logger.info("Định giá web: KPIs of %s: %s", code, exc)
             kpis = None
@@ -321,47 +320,58 @@ def _changes(row: dict, prev: dict | None) -> str:
     return ui.card(title, body, sub="Mốc đổi từ 0,3%, đổi vùng, BCTC mới, đổi giả định")
 
 
-def _kpis(code: str, profile: str, kpis: dict | None, as_of) -> str:
-    if not kpis:
+def _kpis(code: str, profile: str, t, as_of) -> str:
+    """The KPIs as the PDF's table: chỉ số · the stock · the banks' median of the same quarter · rank and
+    note · label and date. A bank's against every listed bank's (``vn_peers``), another stock's alone."""
+    from tradingagents.dataflows import vn_peers as vp
+
+    if t is None:
         return ui.card("Chỉ số chính", '<p class="muted" style="margin:0">Chưa đọc được chỉ số của VCI.</p>')
-    fields = dg.kpi_fields(profile)
-    medians, n_text, rank_text = {}, "", ""
-    if profile == "banking":
-        peers = dg.latest_bank_peers(dg.today_vn())
-        if peers:
-            medians = dg.peer_medians(peers, kpis["key"])
-            roe5 = medians.get("roe5") or {}
-            if code in roe5:
-                rank = 1 + sum(1 for c, v in roe5.items() if c != code and v > roe5[code])
-                med5 = statistics.median(roe5.values())
-                rank_text = (f'<p class="small" style="margin:12px 0 0">ROE trung vị 5 năm {_pct(roe5[code])} · trung vị '
-                             f'{len(roe5)} ngân hàng {_pct(med5)} · hạng {rank}/{len(roe5)} '
-                             f'{_label("THỐNG KÊ", _date(peers["day"]), as_of)}</p>')
-            n_text = f"trung vị ngân hàng đã có {kpis['period']} (VCI, lấy {dg.ddmm(peers['day'])})"
+    bank = profile == "banking"
+    peers = bank and t.peers_read is not None and t.with_period >= vp.MIN_PEERS
+    own_label = _label("FACT", t.published, as_of)
+    peer_label = _label("THỐNG KÊ", t.peers_read, as_of) if peers else ""
+    prior = f"{t.key.split('-')[1]}/{int(t.key.split('-')[0]) - 1}"
     rows = []
-    for field, name, kind in fields:
-        value = kpis["values"].get(field)
-        text = _pct(value) if kind == "pct" else _num(value)
-        median, n = medians.get(field, (None, 0)) if medians else (None, 0)
-        peer = ((_pct(median) if kind == "pct" else _num(median)) + f' <span class="muted small">({n} NH)</span>'
-                if median is not None else ui.NONE)
-        rows.append(f'<tr><td data-label="Chỉ số">{_e(name)}</td><td data-label="{_e(code)}" class="num">{text}</td>'
-                    + (f'<td data-label="Trung vị nhóm" class="num">{peer}</td>' if profile == "banking" else "") + "</tr>")
-    head = [("Chỉ số", ""), (f"{_e(code)} {_e(kpis['period'])}", "num")]
-    if profile == "banking":
+    for k in t.rows:
+        notes = [x for x in (vp.rank_text(k) if peers else "",
+                             f"cùng kỳ Q{prior}: {vp.fmt(k.prior, k.kind)}" if k.prior is not None else "",
+                             "4 quý của VCI; nhiều báo cáo dùng quý quy năm" if k.field == "netInterestMargin" else "") if x]
+        median = (f'{vp.fmt(k.median, k.kind)} <span class="muted small">({k.n} NH)</span>' if k.median is not None
+                  else ui.NONE)
+        rows.append(f'<tr><td data-label="Chỉ số">{_e(k.label)}</td><td data-label="{_e(code)}" class="num">'
+                    f'{vp.fmt(k.value, k.kind)}</td>'
+                    + (f'<td data-label="Trung vị cùng kỳ" class="num">{median}</td>' if bank else "")
+                    + f'<td data-label="Hạng · ghi chú" class="small">{_e(" · ".join(notes)) or ui.NONE}</td>'
+                    f'<td data-label="Nhãn · ngày">{own_label}{" " + peer_label if peers and k.median is not None else ""}</td></tr>')
+    if bank and t.roe5 is not None:
+        median = (f'{vp.fmt(t.roe5_median)} <span class="muted small">({t.roe5_of} NH)</span>'
+                  if t.roe5_median is not None else ui.NONE)
+        note = (f"hạng {t.roe5_rank}/{t.roe5_of} (cao là tốt) · " if t.roe5_rank else "") + \
+            f"ROE năm {t.roe5_years[0]}-{t.roe5_years[-1]}; là ROE bền vững của thẻ"
+        rows.append(f'<tr><td data-label="Chỉ số">ROE trung vị {len(t.roe5_years)} năm</td>'
+                    f'<td data-label="{_e(code)}" class="num">{vp.fmt(t.roe5)}</td>'
+                    f'<td data-label="Trung vị" class="num">{median}</td><td data-label="Hạng · ghi chú" class="small">'
+                    f'{_e(note)}</td><td data-label="Nhãn · ngày">{_label("THỐNG KÊ", t.roe5_published, as_of)}</td></tr>')
+    head = [("Chỉ số", ""), (f"{_e(code)} {_e(t.period)}", "num")]
+    if bank:
         head.append(("Trung vị ngân hàng cùng kỳ", "num"))
-    sub = (f"Số TTM của VCI, kỳ {kpis['period']} " + (f"công bố {kpis['published']:%d/%m/%Y}" if kpis.get("published") else "")
-           + (f"; {n_text}" if n_text else "; so với nhóm: bot chỉ tính cho ngân hàng (mọi ngân hàng niêm yết, ICB 8300)"
-              if profile != "banking" else f"; trung vị nhóm: chưa có (bot đọc sau {dg.JOB_TIME} mỗi phiên khi "
-              "watchlist, Tài sản hoặc thẻ anh nhập có một ngân hàng)"))
-    return ui.card("Chỉ số chính" + (" so với các ngân hàng" if profile == "banking" else ""),
-                   ui.table(head, rows, "", stack=True) + rank_text, sub=_e(sub) + " " + _label("FACT", kpis.get("published"), as_of))
-
-
-def _date(text: str):
-    from datetime import date
-
-    return date.fromisoformat(text)
+    head += [("Hạng · ghi chú", ""), ("Nhãn · ngày", "")]
+    sub = f"Số TTM của VCI, kỳ {t.period} công bố {t.published:%d/%m/%Y}"
+    if peers:
+        sub += (f"; trung vị {t.with_period}/{t.banks} ngân hàng niêm yết (ICB 8300) đã công bố {t.period}"
+                + (f", {t.newer} ngân hàng đã có kỳ mới hơn nhưng vẫn so cùng kỳ" if t.newer else "")
+                + f"; VCI đọc {t.peers_read:%d/%m/%Y}. Hạng 1 là tốt nhất")
+    elif bank and t.peers_read is not None:
+        sub += (f"; trung vị nhóm: chưa có, mới {t.with_period}/{t.banks} ngân hàng đã công bố {t.period} "
+                f"(VCI đọc {t.peers_read:%d/%m/%Y})")
+    elif bank:
+        sub += (f"; trung vị nhóm: chưa có (bot đọc sau {dg.JOB_TIME} mỗi phiên khi watchlist, Tài sản hoặc thẻ anh "
+                "nhập có một ngân hàng)")
+    else:
+        sub += "; so với nhóm: bot chỉ tính cho ngân hàng (mọi ngân hàng niêm yết, ICB 8300)"
+    return ui.card("Chỉ số chính" + (" so với các ngân hàng" if bank else ""), ui.table(head, rows, "", stack=True),
+                   sub=_e(sub))
 
 
 def _manual(code: str, account, bot_base: float | None) -> str:
