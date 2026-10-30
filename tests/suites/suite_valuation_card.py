@@ -258,7 +258,9 @@ for bad in ("abc", "50", "2"):
     os.environ["VALUATION_KE_BANK"] = bad
     t.ok(f"VALUATION_KE_BANK={bad!r}: ignored, Ke 12%", valuation_config.assumptions("banking").ke == 0.12)
 del os.environ["VALUATION_KE_BANK"]
-t.ok("no profile for non-banks", valuation_config.assumptions("default") is None)
+t.ok("non-banks (v1.17.0): Ke 13% by default, VALUATION_KE_BANK does not move it",
+     valuation_config.assumptions("default").ke == 0.13 and valuation_config.assumptions("realestate").ke == 0.13
+     and valuation_config.assumptions("nope") is None)
 
 # ───────────── 6. the cache per (stock, run date) ─────────────
 def age(sym: str, day: str) -> None:
@@ -370,6 +372,17 @@ t.ok("a bonus issue going ex on a session VCI has not posted: that session not a
      "(51.000 over 5.369.991.748 shares), not 34.700 over the old count",
      (ex_card.day, ex_card.close, ex_card.shares) == (date(2025, 12, 16), 51_000.0, 5_369_991_748.0)
      and ("CTG", "2025-12-17", "2025-12-17", "ISS") in CALLS["events"], (ex_card.day, ex_card.close, ex_card.shares))
+t.ok("... and it expires that day (the card's session is 16/12): 'Hạn dùng' names today's ex-date",
+     ex_card.next_ex == date(2025, 12, 17) and vv._expiry(ex_card).endswith("(17/12)"), (ex_card.next_ex, vv._expiry(ex_card)))
+from vnbot import dinhgia as dg  # noqa: E402
+from vnbot.intraday import IntradayMonitor  # noqa: E402
+
+EXDIR = Path(tempfile.mkdtemp(prefix="exdate-"))
+dg.Cards(EXDIR).save(dg.row_of(ex_card, "2025-12-17"))           # /dinhgia CTG on the ex-date morning
+ex_mon = IntradayMonitor(SimpleNamespace(data_dir=EXDIR), None, print, watchlist=lambda: ["CTG"])
+t.ok("... a view of it that morning, then an intraday pass at 33.500 (new basis, under the old Base 33.889): no "
+     "'vào vùng Rẻ' on old-basis levels", ex_mon._bot_cards("2025-12-17", ["CTG"]) == {}
+     and ex_mon._zone_alerts("2025-12-17", lambda code: 33_500.0) == [])
 ex_line = vv.multiple_line("CTG", "pb", "2025-12-17")
 t.ok("... and the P/B line says 'phiên gần nhất có dữ liệu' with the 16/12 close (not 'P/B hôm nay 1,10')",
      ex_line.startswith("- P/B phiên gần nhất có dữ liệu 1,62 (giá đóng cửa 16/12/2025: 51.000;"), ex_line)
@@ -614,9 +627,11 @@ readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbo
                  if re.search(r"vn_valuation|valuation_config", p.read_text(encoding="utf-8", errors="replace"))
                  and p.name not in ("vn_valuation.py", "valuation_config.py"))
 t.ok("who reads the card: the fundamentals tool, the graph's engine node, the Output Guard, /nhanh, the /taisan "
-     "page beside the owner's cards - not the engine, policy, simulator, calibration or params",
+     "page beside the owner's cards, /dinhgia and its pages, the banks' KPIs - not the engine, policy, simulator, calibration or params",
      readers == ["tradingagents/agents/output_guard.py", "tradingagents/agents/quant_engine.py",
-                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/service.py", "vnbot/taisan_web.py"], readers)
+                 "tradingagents/dataflows/vn_fundamentals.py", "tradingagents/dataflows/vn_peers.py",
+                 "vnbot/dinhgia.py", "vnbot/dinhgia_web.py",
+                 "vnbot/service.py", "vnbot/taisan_web.py"], readers)
 t.ok("engine.analyze is not where the card is made (it runs for every stock of a scan)",
      "vn_valuation" not in Path(engine.__file__).read_text(encoding="utf-8") and analyzed)
 

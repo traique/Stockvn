@@ -1,6 +1,7 @@
 """The version: one source (vnbot/version.py), the build fingerprint and the release check,
 shown on the web (header pill, footer, /phienban, /health, the boot page) and in
-Telegram/Zoom (/phienban, /trogiup, /trangthai), and announced once when it changes (offline)."""
+Telegram/Zoom (/phienban, /trogiup, /trangthai), and announced once when it changes (offline);
+the altcoin guide names the release."""
 import importlib.util
 import os
 import re
@@ -23,6 +24,16 @@ t.ok("dates YYYY-MM-DD, never newer than the release", all(re.fullmatch(r"\d{4}-
                                                            for _, d, _ in ver.NOTES))
 t.ok("every release says what changed (short lines)", all(notes and all(0 < len(n) <= 110 for n in notes)
                                                           for _, _, notes in ver.NOTES))
+alt_ver = (_common.REPO / "altcoin" / "bot" / "version.py").read_text(encoding="utf-8")
+alt = (re.search(r'^VERSION = "([^"]+)"', alt_ver, re.M).group(1), re.search(r'^RELEASE_BUILD = "([^"]+)"', alt_ver, re.M).group(1))
+guide = (_common.REPO / "docs" / "ALTCOIN_TRONG_STOCKVN.md").read_text(encoding="utf-8")
+t.ok("the altcoin guide names this release (at each release update docs/ALTCOIN_TRONG_STOCKVN.md: its header and §6): its "
+     "release line, the bundle's name, the builder's lines; the canary checks the version uploaded, none fixed",
+     f"Bản phát hành: **Stockvn {ver.VERSION}** và **Altcoin {alt[0]}** (bản dựng `{alt[1]}`)" in guide
+     and f"dist/stockvn-botkeep-{ver.VERSION}-alt{alt[0]}.zip" in guide
+     and f"`Stock {ver.VERSION}: bản dựng … = bản phát hành` và `Altcoin {alt[0]}: bản dựng {alt[1]} = bản phát hành`" in guide
+     and '`/phienban` báo đúng bản vừa upload' in guide,
+     re.findall(r"Stockvn v[\d.]+|stockvn-botkeep-[^ ]+|Stock v[\d.]+: |`/phienban` báo [^\"]*", guide))
 
 # ── the build fingerprint ──
 b = ver.build()

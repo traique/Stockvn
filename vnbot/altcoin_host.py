@@ -85,6 +85,20 @@ SECRET_NAME = re.compile(r"TOKEN|SECRET|KEY|PASS|DATABASE_URL")
 CHILD_FIELDS = ("leader", "mode", "version", "build", "seam_ok")
 
 
+def off_but_uploaded(environ=None, hosted: Path | None = None) -> bool:
+    """ALTCOIN_ENABLED is not 1 but the altcoin's code is uploaded: the section switch then says
+    "Altcoin (tắt)" and the stock's own /altcoin/ page says how to turn it on (vnbot.web);
+    nothing else answers under /altcoin/ (no Hub: nothing proxied, no _hub)."""
+    env = os.environ if environ is None else environ
+    return (env.get("ALTCOIN_ENABLED") or "").strip() != "1" and Path(hosted or HOSTED).is_file()
+
+
+def alt_data_dir(stock_dir, environ=None) -> Path:
+    """The altcoin's own data folder: ALT_DATA_DIR, else <DATA_DIR>/altcoin (the SQLite bot.db there)."""
+    env = os.environ if environ is None else environ
+    return Path((env.get("ALT_DATA_DIR") or "").strip() or Path(stock_dir).resolve() / "altcoin").resolve()
+
+
 def _set_value(value) -> str:
     """A real value: not blank, not a <...> placeholder, not Botkeep's mask."""
     value = (value or "").strip()
@@ -209,7 +223,7 @@ class Supervisor:
         env = self.environ
         self.enabled = (env.get("ALTCOIN_ENABLED") or "").strip() == "1"
         self.stock_dir = Path(data_dir).resolve()
-        self.data_dir = Path((env.get("ALT_DATA_DIR") or "").strip() or self.stock_dir / "altcoin").resolve()
+        self.data_dir = alt_data_dir(self.stock_dir, env)
         public_url = (public_url or "").rstrip("/")
         self.public_url = ((env.get("ALT_PUBLIC_URL") or "").strip().rstrip("/")
                            or (f"{public_url}/altcoin" if public_url else ""))
@@ -245,6 +259,11 @@ class Supervisor:
         snap = self._snap
         return {**snap, "rss_mb": {"stock": _rss_mb(os.getpid()),
                                    "altcoin": _rss_mb(snap["pid"]) if snap["pid"] else None}}
+
+    def sections(self):
+        """What vnbot.ui.SECTIONS gets (main_botkeep): ``state`` when the altcoin's code is uploaded,
+        on or off ("Altcoin (tắt)"); None (no switch) when off and not uploaded."""
+        return self.state if self.enabled or off_but_uploaded(self.environ, self.hosted) else None
 
     def health(self) -> dict:
         """The public /health gets the state alone: no mode, reason, leader or counters."""

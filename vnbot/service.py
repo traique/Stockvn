@@ -111,7 +111,7 @@ def _bar_may_be_late(day: str) -> bool:
 
 
 class DailyScheduler:
-    """Two daily runs (Vietnam time):
+    """The daily runs (Vietnam time):
 
     - from ``trade_time`` (never before 15:05, when the day's bar is final): the
       trading bot catches up every session it has not processed yet, then the
@@ -124,6 +124,10 @@ class DailyScheduler:
       traded the session before - ``TradingBot._fresh_gaps``), the day is not
       stamped: it is tried again every ``LATE_BAR_RETRY_SECONDS`` until
       ``LATE_BAR_CUTOFF``, then taken as a holiday (or the stock as suspended).
+    - session days from ``dinhgia.JOB_TIME``, on a thread of their own: the bot's own valuation
+      cards of the tracked stocks (vnbot.dinhgia), informational only; the zones they moved sent once
+      done (``dinhgia.night_block``). A session whose job was missed (the bot down that evening) is
+      caught up at the next start or check, before the session after it.
     - weekdays at ``daily_report_time``: the watchlist, screened by the
       quantitative engine (no AI); only the best ``daily_ai_max`` codes whose
       action is in ``daily_ai_actions`` get the full AI analysis, within the
@@ -155,6 +159,11 @@ class DailyScheduler:
     # that cannot be reached is tried again with a growing delay, then the day is given up.
     PICK_RETRY_SECONDS = 900
     PICK_MAX_TRIES = 4
+    # The bot's own valuation cards (vnbot.dinhgia) of the tracked stocks, from dinhgia.JOB_TIME on a
+    # session day; a stock that failed (VCI down) or still has the session before's price is tried again
+    # past the hour a card (and VCI's price history) is kept, at most VALUATION_MAX_TRIES runs a day.
+    VALUATION_RETRY_SECONDS = 3900
+    VALUATION_MAX_TRIES = 3
 
     def __init__(self, settings: Settings, jobs: JobQueue, watchlist: Watchlist, bot=None, notify=None,
                  critic_llm=None, zoom_notify=None):
@@ -184,6 +193,10 @@ class DailyScheduler:
         self._week_next = 0.0
         self._week_tries = 0
         self._week_day = ""
+        self._valuation_stamp = settings.data_dir / "last_valuation_run.txt"
+        self._valuation_next = 0.0
+        self._valuation_tries = 0
+        self._valuation_day = ""
         self.critic_log = CriticLog(settings.data_dir)
         self._critic_llm = critic_llm
         self._screened: dict = {}
@@ -208,6 +221,52 @@ class DailyScheduler:
         threading.Thread(target=self._taisan_loop, name="taisan", daemon=True).start()
         # The AI's evening choice: one to three minutes with the searches, on its own as well.
         threading.Thread(target=self._pick_loop, name="ai-pick", daemon=True).start()
+        # The valuation cards: minutes of VCI calls on a first run, never in the way of the reports.
+        threading.Thread(target=self._valuation_loop, name="dinhgia", daemon=True).start()
+
+    def _valuation_loop(self) -> None:
+        while True:
+            try:
+                day = self._valuation_due()
+                if day:
+                    self._valuation_run(day)
+            except Exception:  # noqa: BLE001 - the loop must keep running
+                logger.exception("Valuation cards loop failed")
+            time.sleep(30)
+
+    def _valuation_due(self) -> str | None:
+        """The session whose valuation job is due: today's from ``dinhgia.JOB_TIME``, else the session
+        before when its job never ran (the bot down that evening: without it no card is used for the
+        alerts of the next session)."""
+        from tradingagents.market import vn_rules
+        from vnbot import dinhgia
+
+        if time.time() < self._valuation_next:
+            return None
+        now = vn_rules.now_vn()
+        day = now.strftime("%Y-%m-%d")
+        if not vn_rules.is_session_day(day) or now.strftime("%H:%M") < dinhgia.JOB_TIME:
+            day = vn_rules.prev_session(day)
+        return None if self._read(self._valuation_stamp) >= day else day
+
+    def _valuation_run(self, day: str) -> None:
+        """The cards of session ``day`` of the watchlist, the Tài sản holdings and the owner's cards; done
+        when none failed or lagged and the banks' medians (when asked) were read, or after
+        VALUATION_MAX_TRIES runs (a closure the calendar did not know); then the zones they moved are sent."""
+        from vnbot import dinhgia
+
+        if self._valuation_day != day:
+            self._valuation_day, self._valuation_tries = day, 0
+        self._valuation_tries += 1
+        self._valuation_next = time.time() + self.VALUATION_RETRY_SECONDS     # a fault below: not again in 30 s
+        symbols = dinhgia.tracked(self.watchlist.get(), getattr(self.bot, "taisan", None))
+        out = dinhgia.run_job(symbols, self.settings.data_dir, session=day)
+        if (out["failed"] or out["behind"] or out.get("peers")) and self._valuation_tries < self.VALUATION_MAX_TRIES:
+            return
+        write_text_atomic(self._valuation_stamp, day)
+        block = dinhgia.night_block(self.settings.data_dir, day)     # the zones moved at the close, once
+        if block:
+            self.notify(block)
 
     def _pick_loop(self) -> None:
         while True:

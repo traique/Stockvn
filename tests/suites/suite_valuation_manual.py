@@ -9,6 +9,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -132,8 +133,11 @@ t.ok("/tsdinhgia MÃ: that card only", "• CTG" in say("/tsdinhgia", "ctg") and
 t.ok("/tsdinhgia MÃ without a card says so", say("/tsdinhgia", "HPG").startswith("Chưa có thẻ định giá HPG."))
 t.ok("/tsdinhgia MÃ xoa", say("/tsdinhgia", "VCB xoa") == "✅ Đã xoá thẻ định giá VCB." and "VCB" not in a.valuations())
 t.ok("removing a card that is not there is refused", raises(lambda: say("/tsdinhgia", "VCB xoá"), "Không có thẻ định giá VCB"))
-t.ok("an empty list says how to add", say("/tsdinhgia", "") .startswith("📐") and account("empty").handle(
-    "/tsdinhgia", "").startswith("Chưa có thẻ định giá nào. Dùng: /tsdinhgia CTG 27904 30164 33309"))
+empty = account("empty").handle("/tsdinhgia", "")
+t.ok("an empty list: entering a card is optional (the bot computes its own), and how to add one",
+     say("/tsdinhgia", "").startswith("📐") and empty.startswith("Chưa có thẻ định giá anh nhập nào. Không bắt buộc nhập: "
+                                                               "bot tự tính thẻ định giá (/dinhgia)")
+     and "Thẻ anh nhập thay thẻ của bot cho mã đó. Dùng: /tsdinhgia CTG 27904 30164 33309" in empty, empty)
 many = account("many")
 for i in range(ts.MAX_VALUATIONS):
     many.set_valuation(f"A{i:02d}", 1000, 2000, 3000)
@@ -314,10 +318,12 @@ PRICE.update({"CTG": 34_000, "VCB": 75_000})
 NOW["t"] = at("2026-11-03")
 out = monitor(e).check("2026-11-03", now=NOW["t"])
 t.ok("past its date: said once that the alerts stop, no Đắt alert",
-     any(x == "⌛ CTG: thẻ định giá hết hạn 30/10/2026 → bot ngừng báo vùng Rẻ/Đắt; nhập lại: /tsdinhgia CTG BEAR BASE BULL"
+     any(x == "⌛ CTG: thẻ định giá anh nhập hết hạn 30/10/2026 → bot ngừng báo vùng Rẻ/Đắt; nhập lại: /tsdinhgia CTG BEAR "
+         "BASE BULL"
          for x in out) and not any("vào vùng Đắt" in x for x in out), out)
 t.ok("an ex-date since the card: cần cập nhật, said once, no Đắt alert",
-     any(x.startswith("⚠️ VCB: thẻ định giá cần cập nhật - GDKHQ 03/11/2026 (cổ tức tiền 450 đ/cp) sau ngày anh nhập 29/10/2026")
+     any(x.startswith("⚠️ VCB: thẻ định giá anh nhập cần cập nhật - GDKHQ 03/11/2026 (cổ tức tiền 450 đ/cp) sau ngày anh "
+                      "nhập 29/10/2026")
          for x in out) and len(out) == 2, out)
 t.ok("then silent", monitor(e).check("2026-11-03", now=at("2026-11-03", "11:00")) == []
      and monitor(e).check("2026-11-04", now=at("2026-11-04", "10:00")) == [])
@@ -382,8 +388,8 @@ PRICE["CTG"] = 34_700                                        # 51.000 before the
 NOW["t"] = at("2025-12-17")
 out = monitor(b).check("2025-12-17", now=NOW["t"])
 t.ok("17/12, VCI down: cần cập nhật from what was kept, no false 'vào vùng Rẻ', no 're' row",
-     len(out) == 1 and out[0].startswith("⚠️ CTG: thẻ định giá cần cập nhật - GDKHQ 17/12/2025 (cổ phiếu thưởng/cổ tức bằng "
-                                         "cổ phiếu 44,6%) sau ngày anh nhập 10/12/2025")
+     len(out) == 1 and out[0].startswith("⚠️ CTG: thẻ định giá anh nhập cần cập nhật - GDKHQ 17/12/2025 (cổ phiếu thưởng/cổ "
+                                         "tức bằng cổ phiếu 44,6%) sau ngày anh nhập 10/12/2025")
      and not [r for r in b.state()["shadow"] if r["level"] == "re"], out)
 
 # ───────────── 4b. VCI down: the old alerts first and at once, each card asked again only after an hour ─────────────
@@ -453,6 +459,159 @@ t.ok("... not the engine's: its flow fetches from VCI are still asked",
 vci.fetch_events = real_fetch_events
 money_flows.reset_breaker()
 
+# ───────────── 4c. the bot's own cards: every tracked stock, the owner's card overriding ─────────────
+from vnbot import dinhgia as dg  # noqa: E402
+from vnbot.channels import Switches  # noqa: E402
+
+BDIR = ROOT / "botcards"
+BDIR.mkdir()
+BSETTINGS = settings_module.Settings(**{**ISETTINGS.__dict__, "data_dir": BDIR})
+bc = account("botcards")
+bc.add("DEPOSIT", "2026-10-01", amount=100_000_000)
+bc.add("BUY", "2026-10-02", symbol="HPG", qty=100, price=25_000)          # held, not in the watchlist
+bc.market.price["MBB"] = 23_000.0
+NOW["t"] = at("2026-11-05")
+bc.set_valuation("MBB", 18_000, 22_000, 26_000)                          # the owner's card: Hợp lý when saved
+WATCH = ["VCB", "MBB", "OLD", "EXD", "NOC"]
+CARDS = dg.Cards(BDIR)
+
+
+def bot_row(symbol, base, bull, *, day="2026-11-05", hhmm="16:10", zone="Hợp lý", expires="", period="Q3/2026"):
+    """The evening job's row of the bot's card (vnbot.dinhgia), built at ``hhmm`` of ``day``."""
+    row = dict.fromkeys(dg.COLUMNS)
+    row.update(day=day, symbol=symbol, ts=at(day, hhmm).timestamp(), profile="banking", price_day=day, close=base,
+               period=period, bvps=base / 1.2, roe=0.17, ke=0.12, lam=0.4, bear=base * 0.9, eab=base * 0.863, base=base,
+               bull=bull, zone=zone, mos=0.0, pb_pct=50.0, expires=expires, reliability="cao", note="")
+    CARDS.save(row)
+
+
+bot_row("VCB", 50_000, 60_000)
+bot_row("HPG", 20_000, 24_000)
+bot_row("MBB", 20_000, 25_000)
+bot_row("OLD", 30_000, 40_000, day="2026-11-04")                         # not rebuilt since the session before
+bot_row("EXD", 30_000, 40_000, expires="2026-11-06")                     # an ex-date today: old basis until tonight
+bot_row("ZZZ", 30_000, 40_000)                                           # not tracked
+nocard = dict.fromkeys(dg.COLUMNS)
+nocard.update(day="2026-11-05", symbol="NOC", ts=at("2026-11-05", "16:10").timestamp(), profile="default", note="đang lỗ")
+CARDS.save(nocard)
+asked_vci = []
+
+
+def bmon(switches=None):
+    """A new monitor at each pass (a restart); the bot's cards need no VCI: a call would be recorded."""
+    return IntradayMonitor(BSETTINGS, FakeTrader(bc), notes.append, price=lambda code, day: PRICE.get(code),
+                           index_change=lambda day: None, exchange_of=lambda code: "HOSE", switches=switches,
+                           watchlist=lambda: list(WATCH))
+
+
+def bpass(day, hhmm, switches=None, **prices):
+    PRICE.update(prices)
+    NOW["t"] = at(day, hhmm)
+    return bmon(switches).check(day, now=NOW["t"])
+
+
+real_card_events = bc.market.card_events
+bc.market.card_events = lambda symbol, start, end: asked_vci.append(symbol) or real_card_events(symbol, start, end)
+first = bpass("2026-11-06", "09:20", VCB=52_000, HPG=21_000, MBB=23_000, OLD=1, EXD=1, NOC=1, ZZZ=1)
+t.ok("the bot's cards: nothing on the first pass in Hợp lý; a card not rebuilt since the session before, one past an "
+     "ex-date today, a stock without a card, one not tracked: never alerted (OLD/EXD/ZZZ at 1 đ would be Rẻ)", first == [], first)
+got = bpass("2026-11-06", "09:35", VCB=49_000, HPG=24_500, MBB=21_000)
+t.ok("a watchlist stock and a held one alert on the bot's card, named as the bot's, with its statement and session",
+     "🟢 VCB vào vùng Rẻ: giá 49.000 ≤ Base 50.000, MOS +2,0% (thẻ của bot, BCTC Q3/2026, tính sau phiên 05/11: "
+     "Bear 45.000 · eab 43.150 · Base 50.000 · Bull 60.000; tham khảo, không phải lệnh; /dinhgia VCB)" in got
+     and any(x.startswith("🔺 HPG vào vùng Đắt: giá 24.500 ≥ Bull 24.000") and "(thẻ của bot" in x for x in got), got)
+t.ok("the owner's card overrides the bot's: MBB at 21.000 is Rẻ on his (Base 22.000), Hợp lý on the bot's (Base 20.000)",
+     any(x.startswith("🟢 MBB vào vùng Rẻ: giá 21.000 ≤ Base 22.000") and "(thẻ anh nhập 05/11" in x for x in got)
+     and not any("MBB" in x and "thẻ của bot" in x for x in got) and len(got) == 3, got)
+shadow = [(r["symbol"], r["level"], r.get("src")) for r in bc.state()["shadow"]]
+t.ok("kept in the shadow results with the card's source", shadow == [("HPG", "dat", "bot"), ("MBB", "re", "tay"),
+                                                                     ("VCB", "re", "bot")], shadow)
+t.ok("no VCI for the bot's cards (only the owner's card's events, once a day)", asked_vci == ["MBB"], asked_vci)
+t.ok("restart, same prices: nothing again; the memory keeps the bot's card apart ('<code>@bot')",
+     bpass("2026-11-06", "09:50") == [] and {"VCB@bot", "HPG@bot", "MBB"} <= set(json.loads(
+         (BDIR / "valuation_zones.json").read_text(encoding="utf-8"))))
+for sym, base, bull in (("VCB", 50_000, 60_000), ("HPG", 20_000, 24_000), ("MBB", 20_000, 25_000)):
+    bot_row(sym, base, bull, day="2026-11-06", zone="Rẻ" if sym == "VCB" else "Hợp lý")
+t.ok("the next session, the evening job rebuilt the same levels: still Rẻ, not said again",
+     bpass("2026-11-09", "09:20") == [])
+t.ok("... a card not rebuilt that evening (VCI down all night) is not used: OLD stays silent", "OLD@bot" not in json.loads(
+    (BDIR / "valuation_zones.json").read_text(encoding="utf-8")))
+bot_row("VCB", 48_000, 58_000, day="2026-11-09", zone="Hợp lý", period="Q4/2026")     # a new statement: new levels
+got = bpass("2026-11-10", "09:20", VCB=47_500)
+t.ok("a card rebuilt with other levels starts from the zone of its row (Hợp lý at the close): entering Rẻ is said",
+     len(got) == 1 and got[0].startswith("🟢 VCB vào vùng Rẻ: giá 47.500 ≤ Base 48.000") and "BCTC Q4/2026" in got[0], got)
+sw = Switches(BDIR, {})
+sw.set("zones_bot", False)
+for sym, base, bull in (("HPG", 20_000, 24_000), ("MBB", 20_000, 25_000)):
+    bot_row(sym, base, bull, day="2026-11-09")
+got = bpass("2026-11-10", "09:35", sw, VCB=61_000, MBB=26_500)
+t.ok("the 'zones_bot' switch off: no alert on the bot's cards (VCB at Đắt), the owner's card still alerts (MBB Đắt)",
+     len(got) == 1 and got[0].startswith("🔺 MBB vào vùng Đắt: giá 26.500 ≥ Bull 26.000") and "thẻ anh nhập" in got[0], got)
+t.ok("... the bot's memory is kept while off", json.loads((BDIR / "valuation_zones.json").read_text(
+    encoding="utf-8"))["VCB@bot"]["zone"] == "Rẻ")
+sw.set("zones_bot", True)
+for sym, base, bull in (("VCB", 48_000, 58_000), ("HPG", 20_000, 24_000), ("MBB", 20_000, 25_000)):
+    bot_row(sym, base, bull, day="2026-11-10", period="Q4/2026" if sym == "VCB" else "Q3/2026")
+bc._forget_live()
+bc.market.price["MBB"] = 23_000.0
+bc.set_valuation("MBB", 18_000, 22_000, 26_000, expires="2026-11-10")
+got = bpass("2026-11-11", "09:20", sw, VCB=55_000, MBB=19_000)
+t.ok("the owner's card past its date: said once, and the bot's card takes over at once (MBB 19.000 ≤ its Base 20.000)",
+     "⌛ MBB: thẻ định giá anh nhập hết hạn 10/11/2026 → bot báo vùng Rẻ/Đắt theo thẻ của bot; muốn dùng thẻ của anh thì "
+     "nhập lại: /tsdinhgia MBB BEAR BASE BULL" in got
+     and any(x.startswith("🟢 MBB vào vùng Rẻ: giá 19.000 ≤ Base 20.000") and "thẻ của bot" in x for x in got), got)
+t.ok("... then the bot's card only, not said again", bpass("2026-11-11", "09:35", sw) == [])
+stats = [(s["level"], s["src"], s["name"], s["alerts"]) for s in bc.shadow_stats() if s["level"] in ts.ZONE_LEVELS]
+t.ok("the shadow results of the zones apart per card source, to compare the owner's cards with the bot's",
+     stats == [("re", "tay", "Vào vùng Rẻ · thẻ anh nhập", 1), ("re", "bot", "Vào vùng Rẻ · thẻ của bot", 3),
+               ("dat", "tay", "Vào vùng Đắt · thẻ anh nhập", 1), ("dat", "bot", "Vào vùng Đắt · thẻ của bot", 1)], stats)
+both = account("cap-src")
+for i in range(3):
+    both.record_alert("re", f"T{i}", 10_000, f"2026-01-0{i + 2}", hook=False)
+for i in range(ts.SHADOW_ROWS + 10):
+    both.record_alert("dat", f"B{i % 40:02d}", 10_000, f"2026-{i // 28 % 12 + 1:02d}-{i % 28 + 1:02d}", hook=False, src="bot")
+rows = both.state()["shadow"]
+t.ok(f"the bot's zone rows have their own {ts.SHADOW_ROWS}: they never push out the owner's",
+     sum(1 for r in rows if r.get("src") == "bot") == ts.SHADOW_ROWS
+     and [r["symbol"] for r in rows if r.get("src") != "bot"] == ["T0", "T1", "T2"], len(rows))
+t.ok("the same day, stock and level from the owner's card and the bot's: one row each",
+     both.record_alert("re", "SAME", 1, "2026-03-03", hook=False) and both.record_alert("re", "SAME", 1, "2026-03-03", hook=False,
+                                                                                      src="bot")
+     and not both.record_alert("re", "SAME", 1, "2026-03-03", hook=False, src="bot"))
+
+# a bank's Bull by ROE p80 a tick above Base (CTG 16/12/2025: 33.889 → 33.991, +0,30%; MBB 30/10/2026 +0,37%):
+# the alerts' Đắt from Base + 2%, or Rẻ and Đắt would both be said on a 0,6% move
+WATCH.append("NAR")
+bot_row("NAR", 33_889, 33_991, day="2026-11-11")
+nar = [bpass("2026-11-12", hhmm, sw, NAR=p) for hhmm, p in (("09:20", 33_700), ("09:35", 34_100), ("09:50", 33_880),
+                                                              ("10:05", 34_120), ("10:20", 34_600))]
+nar = [[x for x in got if "NAR" in x] for got in nar]
+t.ok("Bull 0,3% above Base: 33.700 Rẻ, then 34.100 / 33.880 / 34.120 (over Bull, under Base + 2%) nothing, 34.600 Đắt "
+     "named as Base + 2%", len(nar[0]) == 1 and nar[0][0].startswith("🟢 NAR vào vùng Rẻ: giá 33.700 ≤ Base 33.889")
+     and nar[1:4] == [[], [], []] and len(nar[4]) == 1
+     and nar[4][0].startswith("🔺 NAR vào vùng Đắt: giá 34.600 ≥ Base +2% 34.567 (Bull 33.991 sát Base), MOS -2,1% (thẻ của bot"),
+     nar)
+t.ok("... and the card says so", dg.band_note(33_889, 33_991) == "Bull sát Base (+0,3%): cảnh báo trong phiên báo Đắt từ "
+     "Base +2% (34.567)" and dg.band_note(50_000, 60_000) == "")
+
+# the owner's card stale on an ex-date: the bot's card is past it too until rebuilt that evening - said, not 'ngừng báo'
+bc.market.price["EXO"] = 23_000.0
+bc.market.ev["EXO"] = [{"eventCode": "DIV", "publicDate": "2026-11-02T00:00:00", "exrightDate": "2026-11-13T00:00:00",
+                        "valuePerShare": 500.0}]
+NOW["t"] = at("2026-11-10")
+bc.set_valuation("EXO", 18_000, 22_000, 26_000)
+WATCH.append("EXO")
+bot_row("EXO", 20_000, 25_000, day="2026-11-12", expires="2026-11-13")
+got = bpass("2026-11-13", "09:20", sw, EXO=19_000)
+t.ok("the ex-date: his card 'cần cập nhật', the bot's from its rebuild that evening; no alert on either today",
+     "⚠️ EXO: thẻ định giá anh nhập cần cập nhật - GDKHQ 13/11/2026 (cổ tức tiền 500 đ/cp) sau ngày anh nhập 10/11/2026, "
+     "các mốc còn theo giá cũ → bot báo vùng Rẻ/Đắt theo thẻ của bot khi bot tính lại thẻ (sau 16:00); muốn dùng thẻ của anh "
+     "thì nhập lại: /tsdinhgia EXO BEAR BASE BULL" in got and not any("EXO vào vùng" in x for x in got), got)
+bot_row("EXO", 19_500, 24_000, day="2026-11-13")                          # the evening job on the new basis
+got = bpass("2026-11-16", "09:20", sw, EXO=19_000)
+t.ok("... the next session: the bot's card alerts", any(x.startswith("🟢 EXO vào vùng Rẻ: giá 19.000 ≤ Base 19.500")
+                                                       and "thẻ của bot" in x for x in got), got)
+
 # ───────────── 5. shadow results: the direction of each level ─────────────
 s = account("shadow")
 for level in ("re", "dat", "stop"):
@@ -480,8 +639,9 @@ t.ok(f"zone rows have their own {ts.SHADOW_ROWS}: 530 of them do not push out th
      [r["level"] for r in rows[:2]] == ["stop", "sell"] and sum(1 for r in rows if r["level"] in ts.ZONE_LEVELS) == ts.SHADOW_ROWS,
      (len(rows), rows[:3]))
 lines = "\n".join(s._shadow_lines())
-t.ok("the weekly lines say which way is right", "🟢 Vào vùng Rẻ: 1 lần" in lines and "giá cao hơn 100% số lần" in lines
-     and "🔺 Vào vùng Đắt: 1 lần" in lines and "sau 🟢 Rẻ: giá tăng là đúng" in lines, lines)
+t.ok("the weekly lines say which way is right, and whose card", "🟢 Vào vùng Rẻ · thẻ anh nhập: 1 lần" in lines
+     and "giá cao hơn 100% số lần" in lines and "🔺 Vào vùng Đắt · thẻ anh nhập: 1 lần" in lines
+     and "sau 🟢 Rẻ: giá tăng là đúng" in lines, lines)
 
 import vnbot.trader as T  # noqa: E402
 
@@ -513,10 +673,17 @@ class BotCard:
 
 BOT = {"CTG": BotCard(27_643.0), "VCB": BotCard(52_000.0), "BID": BotCard(40_000.0)}
 built_in = []
+building, most, build_lock = [0], [0], threading.Lock()
 
 
 def bot_card(symbol, as_of):
     built_in.append(threading.current_thread().name)
+    with build_lock:
+        building[0] += 1
+        most[0] = max(most[0], building[0])
+    time.sleep(0.05)
+    with build_lock:
+        building[0] -= 1
     return BOT.get(symbol)
 
 
@@ -551,7 +718,8 @@ r = web.post("/taisan/dinhgia", data={"symbol": "CTG", "bear": "1000", "base": "
 t.ok("POST /taisan/dinhgia cross-site -> 403, nothing saved", r.status_code == 403 and w.valuations() == {}, r.status_code)
 page = web.get("/taisan", auth=AUTH)
 t.ok("empty portfolio: the cards section is there to start with", page.status_code == 200 and 'id="dinhgia"' in page.text
-     and "Chưa có thẻ định giá nào." in page.text and 'action="/taisan/dinhgia"' in page.text)
+     and "Chưa có thẻ định giá anh nhập nào (không bắt buộc)." in page.text and 'action="/taisan/dinhgia"' in page.text
+     and "<b>Không bắt buộc nhập</b>: bot tự" in page.text)
 code, loc = post({"symbol": "ctg", "bear": "27.904", "base": "30,164", "bull": "33309", "eab": "26.039",
                   "han": "2026-12-30", "nguon": "<script>alert(1)</script>", "action": "save"})
 t.ok("same-origin form saves a card of a stock not held, message back", code == 303 and "#dinhgia" in loc
@@ -574,7 +742,11 @@ t.ok("the bot's cards are not looked at in the request: the first view says so",
 looked()
 page = web.get("/taisan", auth=AUTH).text
 t.ok("... they are built in the background, once, for the next view",
-     sorted(built_in) == ["bot-card-BID", "bot-card-CTG", "bot-card-TCB", "bot-card-VCB"], built_in)
+     sorted(built_in) == ["bot-card-BID", "bot-card-CTG", "bot-card-FPT", "bot-card-TCB", "bot-card-VCB"], built_in)
+from vnbot import taisan_web  # noqa: E402
+
+t.ok(f"... at most {taisan_web.BOT_LOOKS} at once (five cards: not five bursts of VCI calls)",
+     1 <= most[0] <= taisan_web.BOT_LOOKS == 2, most)
 section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
 row = {sym: section.split(f"<b>{sym}</b>", 1)[-1].split("</tr>", 1)[0] for sym in ("CTG", "VCB", "FPT", "TCB", "BID")}
 t.ok("CTG: zone, MOS, expiry, the bot's card beside it, the gap under 10% not flagged",
@@ -583,8 +755,8 @@ t.ok("CTG: zone, MOS, expiry, the bot's card beside it, the gap under 10% not fl
      and "lệch" not in row["CTG"] and "Ke 12% đặt tay" in row["CTG"], row["CTG"])
 t.ok("VCB: Base 15% over the bot's: flagged", "lệch +15,38%" in row["VCB"] and "chip-neg" in row["VCB"]
      and "quá 10%: xem lại giả định" in row["VCB"], row["VCB"])
-t.ok("FPT: not a bank, no bot card; an ex-date since the card: cần cập nhật, no zone or MOS on the old levels",
-     "chỉ có cho ngân hàng" in row["FPT"] and "cần cập nhật · GDKHQ 30/10" in row["FPT"]
+t.ok("FPT: no bot card (v1.17.0: any stock may have one, the stub has none); an ex-date since the card: cần cập nhật, "
+     "no zone or MOS on the old levels", "bot không lập thẻ (lý do: /dinhgia mã)" in row["FPT"] and "cần cập nhật · GDKHQ 30/10" in row["FPT"]
      and "mốc theo giá cũ, cần nhập lại" in row["FPT"] and not re.search(">(Rẻ|Hợp lý|Đắt)<", row["FPT"])
      and 'data-label="MOS" class="num ">—</td>' in row["FPT"], row["FPT"])
 t.ok("BID: stale, so no gap to the bot's re-based card (25% would be flagged)", "Base 40.000" in row["BID"]
@@ -605,7 +777,15 @@ section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
 t.ok("full page: the section, a held stock marked", "<b>CTG</b> <span class=\"badge b-info\">đang giữ</span>" in section
      and '<option value="CTG">' in section)
 t.ok("the shadow table names both directions", "Kết quả cảnh báo bán và vùng định giá" in page and "Đúng hướng" in page)
-from vnbot import taisan_web  # noqa: E402
+ai = web.get("/ai", auth=AUTH).text
+row = ai.split("Vùng Rẻ/Đắt theo thẻ của bot", 1)[-1].split("</tr>", 1)[0]
+t.ok("/ai: the row of the bot's cards' zone alerts (no trading bot in this app: 'chưa cấu hình', as the intraday row); "
+     "on by default", "Vùng Rẻ/Đắt theo thẻ của bot" in ai and "chưa cấu hình" in row
+     and Switches(SETTINGS.data_dir, {}).on("zones_bot"), row)
+r = web.post("/channels/zones_bot", data={"on": "0"}, auth=AUTH, headers=SAME, follow_redirects=False)
+t.ok("... switched off from the page (same-origin form), kept for the monitor",
+     r.status_code == 303 and not Switches(SETTINGS.data_dir, {}).on("zones_bot") and Switches(SETTINGS.data_dir, {}).on("intraday"))
+
 
 vn_valuation.card = lambda symbol, as_of: (_ for _ in ()).throw(RuntimeError("VCI down"))
 taisan_web._bot_cards.clear()

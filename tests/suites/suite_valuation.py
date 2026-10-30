@@ -317,8 +317,13 @@ t.ok("... VCI posts 30/10: it is kept, and not asked again that day however long
      got["Date"].iloc[-1] == pd.Timestamp("2026-10-30") and got["Close"].iloc[-1] == 31_200 and len(CALLS) == 4, CALLS)
 (CACHE / "valuation" / "FPT-prices.json").unlink()
 FAIL["flows"] = VendorUnavailableError("down")
-t.ok("no cache and VCI down: 'chưa đủ dữ liệu'", vv.price_history("FPT").empty
-     and vv.multiple_line("FPT", "pe", None) == "- P/E hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu")
+try:
+    vv.price_history("FPT")
+    outage = False
+except VendorUnavailableError:
+    outage = True
+t.ok("no cache and VCI down: raised (an outage, not a stock without prices); the report's line 'chưa đủ dữ liệu'",
+     outage and vf._own_history_line("FPT", "pe", None) == "- P/E hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu")
 FAIL["flows"] = None
 money_flows.reset_breaker()
 PRICES["NEW"] = PRICES["FPT"].iloc[0:0]
@@ -388,8 +393,10 @@ readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbo
                  if "vn_valuation" in p.read_text(encoding="utf-8", errors="replace")
                  and p.name not in ("vn_valuation.py", "valuation_config.py"))
 t.ok("only text writers read vn_valuation: the fundamentals report, the card after the engine's report, the Output "
-     "Guard, /nhanh, the /taisan page (no engine, policy, simulator, calibration)",
+     "Guard, /nhanh, the /taisan page, /dinhgia and its pages, the banks' KPIs (no engine, policy, simulator, calibration)",
      readers == ["tradingagents/agents/output_guard.py", "tradingagents/agents/quant_engine.py",
-                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/service.py", "vnbot/taisan_web.py"], readers)
+                 "tradingagents/dataflows/vn_fundamentals.py", "tradingagents/dataflows/vn_peers.py",
+                 "vnbot/dinhgia.py", "vnbot/dinhgia_web.py",
+                 "vnbot/service.py", "vnbot/taisan_web.py"], readers)
 
 t.done()

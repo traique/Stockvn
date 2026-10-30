@@ -749,18 +749,21 @@ def _levels_form(book: ts.Book, levels: dict) -> str:
     return ui.acc("catlo", "Kỷ luật", "Cắt lỗ & mục tiêu", body)
 
 
-BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own (a bank's card): flagged
+BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own card (vnbot.dinhgia): flagged
 
 
 _bot_cards: dict[str, tuple[float, object | None, str]] = {}   # symbol -> (looked at, the bot's card, why none)
 _bot_lock = threading.Lock()
+BOT_LOOKS = 2            # the bot's cards built at once for this page (VCI is slow; its breaker is shared)
+_bot_builds = threading.BoundedSemaphore(BOT_LOOKS)
 
 
 def _bot_card(symbol: str) -> tuple[object | None, str]:
-    """(the bot's own card of a bank, why there is none) as the last look found it. Never looked at
+    """(the bot's own card of the stock, why there is none) as the last look found it. Never looked at
     in the request: a card not kept yet is five VCI calls (more while VCI times out), so a look older
     than ``money_flows.BREAKER_SECONDS`` starts in the background for the next view
-    (``vn_valuation.card`` keeps a card an hour: a look in between costs nothing)."""
+    (``vn_valuation.card`` keeps a card an hour: a look in between costs nothing), ``BOT_LOOKS`` built
+    at once: the first view after the hour does not send one burst of VCI calls per card."""
     from tradingagents.dataflows import money_flows
 
     with _bot_lock:
@@ -777,11 +780,9 @@ def _look_bot_card(symbol: str) -> None:
     from tradingagents.dataflows import vn_valuation as vv
 
     try:
-        if not vv.is_bank(symbol):
-            found, why = None, "chỉ có cho ngân hàng"
-        else:
+        with _bot_builds:
             found = vv.card(symbol, None)
-            why = "" if found else "chưa đủ dữ liệu"
+        why = "" if found else "bot không lập thẻ (lý do: /dinhgia mã)"
     except Exception as exc:  # noqa: BLE001 - the owner's card is shown alone
         logger.warning("Tài sản web: the bot's valuation card of %s: %s", symbol, exc)
         found, why = None, "chưa tính được"
@@ -791,7 +792,7 @@ def _look_bot_card(symbol: str) -> None:
 
 def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
     """The owner's valuation cards (/tsdinhgia): today's zone and MOS, HẾT HẠN / cần cập nhật, the
-    bot's card of a bank beside it with the gap of the two Bases; the form that saves or removes one."""
+    bot's own card beside it with the gap of the two Bases; the form that saves or removes one."""
     cards = account.valuations()
     rows = []
     if cards:
@@ -819,7 +820,8 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
                 gap = (float(card["base"]) / bot.base - 1) * 100 if not status["stale"] else None
                 theirs = (f'<div class="small num">Bear {ui.money(bot.bear)} · Base {ui.money(bot.base)} · Bull {ui.money(bot.bull)}</div>'
                           f'<div class="muted small">BCTC {e(bot.period)} · Ke {f"{bot.assumptions.ke * 100:g}".replace(".", ",")}% '
-                          "đặt tay</div>")
+                          "đặt tay" + (f" · tin cậy {e(bot.reliability)}" if getattr(bot, "reliability", "") else "")
+                          + f' · <a href="/dinhgia/{e(sym)}">chi tiết</a></div>')
                 if gap is None:
                     gap_cell = "—"
                 elif abs(gap) > BOT_GAP_PCT:
@@ -849,10 +851,10 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
                 f'<input type="hidden" name="symbol" value="{e(sym)}"><button class="linkbtn" type="submit" name="action" '
                 f'value="clear" aria-label="Xoá thẻ định giá {e(sym)}">Xoá</button></form></td></tr>')
         table = ui.table([("Mã", ""), ("Thẻ anh nhập", ""), ("Giá", "num"), ("Vùng hôm nay", ""), ("MOS", "num"),
-                          ("Hạn dùng", ""), ("Thẻ của bot (ngân hàng)", ""), ("Lệch Base", ""), ("", "")], rows, "", stack=True)
+                          ("Hạn dùng", ""), ("Thẻ của bot", ""), ("Lệch Base", ""), ("", "")], rows, "", stack=True)
         table = f'<p class="muted small" style="margin:0 0 12px">{e(_price_label(label))}</p>' + table
     else:
-        table = '<p class="muted" style="margin:0">Chưa có thẻ định giá nào.</p>'
+        table = '<p class="muted" style="margin:0">Chưa có thẻ định giá anh nhập nào (không bắt buộc).</p>'
     today = ts.today_vn()
     choices = sorted(set(book.holdings) | set(cards))
     datalist = '<datalist id="ts-vsyms">' + "".join(f'<option value="{e(x)}">' for x in choices) + "</datalist>"
@@ -876,9 +878,10 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
       onclick="return confirm('Xoá thẻ định giá của mã này?')">Xoá thẻ của mã</button>
   </div>
   <p class="muted small" style="margin:12px 0 0">Giá theo đồng: 30164, 30.164 hoặc 30,164 (dấu chấm/phẩy chỉ ngăn hàng nghìn).
-  Cần Bear &lt; Base &lt; Bull. Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. Bot báo trong phiên khi giá vào Rẻ hoặc
-  Đắt, một lần mỗi lần vào; thẻ hết hạn hoặc qua ngày GDKHQ thì ngừng báo. Chỉ để tham khảo: không đổi cắt lỗ, mục tiêu hay
-  quyết định của bot. Trong Telegram/Zoom: /tsdinhgia.</p>
+  Cần Bear &lt; Base &lt; Bull. Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. <b>Không bắt buộc nhập</b>: bot tự
+  tính thẻ (<a href="/dinhgia">Định giá</a>) cho watchlist và mã đang giữ, tự báo khi giá vào Rẻ/Đắt. Thẻ anh nhập thay thẻ
+  của bot cho mã đó, một lần mỗi lần vào vùng; hết hạn hoặc qua ngày GDKHQ thì báo một lần rồi quay về thẻ của bot. Chỉ để
+  tham khảo: không đổi cắt lỗ, mục tiêu hay quyết định của bot. Trong Telegram/Zoom: /tsdinhgia.</p>
 </form>"""
     return ui.acc("dinhgia", "Định giá", "Thẻ định giá anh nhập", table + form, opened=bool(cards))
 
