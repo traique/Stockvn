@@ -749,7 +749,7 @@ def _levels_form(book: ts.Book, levels: dict) -> str:
     return ui.acc("catlo", "Kỷ luật", "Cắt lỗ & mục tiêu", body)
 
 
-BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own (a bank's card): flagged
+BOT_GAP_PCT = 10.0       # the owner's Base this far from the bot's own card (vnbot.dinhgia): flagged
 
 
 _bot_cards: dict[str, tuple[float, object | None, str]] = {}   # symbol -> (looked at, the bot's card, why none)
@@ -757,7 +757,7 @@ _bot_lock = threading.Lock()
 
 
 def _bot_card(symbol: str) -> tuple[object | None, str]:
-    """(the bot's own card of a bank, why there is none) as the last look found it. Never looked at
+    """(the bot's own card of the stock, why there is none) as the last look found it. Never looked at
     in the request: a card not kept yet is five VCI calls (more while VCI times out), so a look older
     than ``money_flows.BREAKER_SECONDS`` starts in the background for the next view
     (``vn_valuation.card`` keeps a card an hour: a look in between costs nothing)."""
@@ -777,11 +777,8 @@ def _look_bot_card(symbol: str) -> None:
     from tradingagents.dataflows import vn_valuation as vv
 
     try:
-        if not vv.is_bank(symbol):
-            found, why = None, "chỉ có cho ngân hàng"
-        else:
-            found = vv.card(symbol, None)
-            why = "" if found else "chưa đủ dữ liệu"
+        found = vv.card(symbol, None)
+        why = "" if found else "bot không lập thẻ (lý do: /dinhgia mã)"
     except Exception as exc:  # noqa: BLE001 - the owner's card is shown alone
         logger.warning("Tài sản web: the bot's valuation card of %s: %s", symbol, exc)
         found, why = None, "chưa tính được"
@@ -791,7 +788,7 @@ def _look_bot_card(symbol: str) -> None:
 
 def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
     """The owner's valuation cards (/tsdinhgia): today's zone and MOS, HẾT HẠN / cần cập nhật, the
-    bot's card of a bank beside it with the gap of the two Bases; the form that saves or removes one."""
+    bot's own card beside it with the gap of the two Bases; the form that saves or removes one."""
     cards = account.valuations()
     rows = []
     if cards:
@@ -819,7 +816,8 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
                 gap = (float(card["base"]) / bot.base - 1) * 100 if not status["stale"] else None
                 theirs = (f'<div class="small num">Bear {ui.money(bot.bear)} · Base {ui.money(bot.base)} · Bull {ui.money(bot.bull)}</div>'
                           f'<div class="muted small">BCTC {e(bot.period)} · Ke {f"{bot.assumptions.ke * 100:g}".replace(".", ",")}% '
-                          "đặt tay</div>")
+                          "đặt tay" + (f" · tin cậy {e(bot.reliability)}" if getattr(bot, "reliability", "") else "")
+                          + f' · <a href="/dinhgia/{e(sym)}">chi tiết</a></div>')
                 if gap is None:
                     gap_cell = "—"
                 elif abs(gap) > BOT_GAP_PCT:
@@ -849,7 +847,7 @@ def _valuations(account: ts.TaiSan, book: ts.Book) -> str:
                 f'<input type="hidden" name="symbol" value="{e(sym)}"><button class="linkbtn" type="submit" name="action" '
                 f'value="clear" aria-label="Xoá thẻ định giá {e(sym)}">Xoá</button></form></td></tr>')
         table = ui.table([("Mã", ""), ("Thẻ anh nhập", ""), ("Giá", "num"), ("Vùng hôm nay", ""), ("MOS", "num"),
-                          ("Hạn dùng", ""), ("Thẻ của bot (ngân hàng)", ""), ("Lệch Base", ""), ("", "")], rows, "", stack=True)
+                          ("Hạn dùng", ""), ("Thẻ của bot", ""), ("Lệch Base", ""), ("", "")], rows, "", stack=True)
         table = f'<p class="muted small" style="margin:0 0 12px">{e(_price_label(label))}</p>' + table
     else:
         table = '<p class="muted" style="margin:0">Chưa có thẻ định giá nào.</p>'

@@ -574,7 +574,7 @@ t.ok("the bot's cards are not looked at in the request: the first view says so",
 looked()
 page = web.get("/taisan", auth=AUTH).text
 t.ok("... they are built in the background, once, for the next view",
-     sorted(built_in) == ["bot-card-BID", "bot-card-CTG", "bot-card-TCB", "bot-card-VCB"], built_in)
+     sorted(built_in) == ["bot-card-BID", "bot-card-CTG", "bot-card-FPT", "bot-card-TCB", "bot-card-VCB"], built_in)
 section = page.split('id="dinhgia"', 1)[-1].split("</details>", 1)[0]
 row = {sym: section.split(f"<b>{sym}</b>", 1)[-1].split("</tr>", 1)[0] for sym in ("CTG", "VCB", "FPT", "TCB", "BID")}
 t.ok("CTG: zone, MOS, expiry, the bot's card beside it, the gap under 10% not flagged",
@@ -583,8 +583,8 @@ t.ok("CTG: zone, MOS, expiry, the bot's card beside it, the gap under 10% not fl
      and "lệch" not in row["CTG"] and "Ke 12% đặt tay" in row["CTG"], row["CTG"])
 t.ok("VCB: Base 15% over the bot's: flagged", "lệch +15,38%" in row["VCB"] and "chip-neg" in row["VCB"]
      and "quá 10%: xem lại giả định" in row["VCB"], row["VCB"])
-t.ok("FPT: not a bank, no bot card; an ex-date since the card: cần cập nhật, no zone or MOS on the old levels",
-     "chỉ có cho ngân hàng" in row["FPT"] and "cần cập nhật · GDKHQ 30/10" in row["FPT"]
+t.ok("FPT: no bot card (v1.17.0: any stock may have one, the stub has none); an ex-date since the card: cần cập nhật, "
+     "no zone or MOS on the old levels", "bot không lập thẻ (lý do: /dinhgia mã)" in row["FPT"] and "cần cập nhật · GDKHQ 30/10" in row["FPT"]
      and "mốc theo giá cũ, cần nhập lại" in row["FPT"] and not re.search(">(Rẻ|Hợp lý|Đắt)<", row["FPT"])
      and 'data-label="MOS" class="num ">—</td>' in row["FPT"], row["FPT"])
 t.ok("BID: stale, so no gap to the bot's re-based card (25% would be flagged)", "Base 40.000" in row["BID"]

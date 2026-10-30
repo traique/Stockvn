@@ -8,6 +8,7 @@ Commands (Vietnamese, like lananh-main's bot):
     /theodoi [MÃ1,MÃ2,...]     show or set the daily watchlist
     /trangthai                 queue and AI provider status
     /danhmuc /lenh /hieuchinh  the trading bot: books, next session's orders, calibration
+    /dinhgia [MÃ]              the bot's own valuation card of a stock, or of every tracked stock (vnbot.dinhgia)
     /khop mua|ban MÃ KL GIÁ [NGÀY]  record a fill in the real book (signal mode)
     /von SỐ_TIỀN               set the real book's cash (signal mode)
     /id                        your Telegram id (to put in TELEGRAM_ALLOWED_IDS)
@@ -105,6 +106,7 @@ HELP = (
     "/phantich FPT 2026-10-01 - phân tích tại một ngày trong quá khứ\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
     "/phanbien FPT - AI phản biện quyết định của hệ thống (1 lượt gọi AI); /phanbien - AI phản biện đúng bao nhiêu\n"
+    "/dinhgia FPT - định giá bot tự tính: vùng, Bear/Base/Bull, có gì đổi · /dinhgia - mã theo dõi (/dg)\n"
     "/theodoi FPT,HPG,VCB - đặt danh sách báo cáo tự động mỗi ngày\n"
     "/theodoi - xem danh sách đang theo dõi\n"
     "/trangthai - hàng đợi và trạng thái các nhà cung cấp AI\n"
@@ -114,8 +116,8 @@ HELP = (
     "/chay - chạy ngay phiên đã đóng gần nhất (không đợi {trade_time})\n"
     "/hieuchinh - ngưỡng đang dùng và kết quả tự hiệu chỉnh gần đây\n"
     "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA, kết quả bóng · /vikhongmua FPT - "
-    "lịch sử một mã · /vikhongmua dunglai 120 - dựng lại 120 phiên đã qua (thêm vn100 cho rổ VN100)\n"
-    "/khop mua FPT 100 56300 - báo đã khớp lệnh thật, lô lẻ cũng được (bán: /khop ban ...; thêm ngày YYYY-MM-DD nếu khớp hôm trước)\n"
+    "một mã · /vikhongmua dunglai 120 - dựng lại 120 phiên (thêm vn100: rổ VN100)\n"
+    "/khop mua FPT 100 56300 - báo đã khớp lệnh thật, cả lô lẻ (bán: /khop ban ...; thêm ngày YYYY-MM-DD nếu khớp hôm trước)\n"
     "/von 500000000 - đặt tiền mặt tài khoản thật\n"
     "/thuong FPT 150 - báo số cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về tài khoản thật\n"
     "\nSiêu tín hiệu (sieutinhieu.vn, bật bằng SIEUTINHIEU=1; danh mục và watchlist riêng):\n"
@@ -123,13 +125,13 @@ HELP = (
     "/stvdanhmuc - sổ ảo so sánh Siêu tín hiệu (danh mục tiền thật: /ts)\n"
     "/stvtheodoi - watchlist riêng (60 mã): bo NVL · them HAG · dat MÃ1,MÃ2,... · macdinh · hoantac\n"
     "/stvquet - quét danh mục Tài sản + watchlist ngay\n"
-    "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã đang theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
+    "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
     "AI thẩm định tín hiệu (Gemini qua 9Router, cần SIEUTINHIEU=1; ghi lại để kiểm chứng, không phải lệnh đặt):\n"
     "/thamdinh - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
-    "/thamdinh chay (hoặc ngay) - chạy ngay với dữ liệu mới nhất: trong phiên là giá khớp hôm nay, sau 15:10 là tín hiệu "
-    "đã chốt · /thamdinh lichsu - các phiên gần đây\n"
+    "/thamdinh chay - chạy ngay (trong phiên: giá khớp hôm nay; sau 15:10: tín hiệu đã chốt) · "
+    "/thamdinh lichsu - các phiên gần đây\n"
     "/thamdinh tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
     "/zoompair JID [tên] · /zoomxoa · /zoomstatus - ghép đôi / gỡ / xem tài khoản Zoom được dùng bot\n{altcoin}\n"
@@ -559,6 +561,8 @@ class TelegramBot:
                 self.send(chat_id, self._zoom_pairing(command, args, from_zoom=user_id == ZOOM_USER))
             elif command == "/nhanh":
                 self.send(chat_id, quick_text(*(args.split()[:2] or [""])))
+            elif command in ("/dinhgia", "/dg"):
+                self._dinhgia(chat_id, args)
             elif command == "/theodoi":
                 self._watch(chat_id, args)
             elif command == "/trangthai":
@@ -622,6 +626,15 @@ class TelegramBot:
         ahead = self.jobs.position(job.id)
         wait = f" (đang có {ahead} lượt chờ trước)" if ahead else ""
         self.send(chat_id, f"⏳ Đã nhận {code} ngày {day}{wait}. Quyết định hệ thống sẽ tới trước, báo cáo đầy đủ của các agent tới sau vài phút.")
+
+    def _dinhgia(self, chat_id, args: str) -> None:
+        """/dinhgia [MÃ]: the bot's own valuation card (vnbot.dinhgia), the owner's beside it."""
+        from vnbot import dinhgia
+
+        self.send(chat_id, dinhgia.command(args, self.settings.data_dir, watchlist=self.watchlist.get(),
+                                           account=self.taisan or getattr(self.trader, "taisan", None),
+                                           public_url=self.settings.public_url,
+                                           progress=lambda text: self.send(chat_id, text)))
 
     def _thamdinh(self, chat_id, args: str) -> None:
         """AI thẩm định tín hiệu: the latest choice and the comparison, a run now, the history."""

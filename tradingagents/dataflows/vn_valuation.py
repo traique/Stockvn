@@ -17,15 +17,19 @@ sessions it has not posted yet come from the engine's bars (``_top_up``).
   newest quarters published by that session, consecutive. VCI's quarterly EPS
   (``isa23``) is not used: it is 0 for banks and for some quarters of others.
 
-The valuation card of a bank (``card``): Bear / eab / Base / Bull from the book
+The valuation card (``card``, ``assess``): Bear / eab / Base / Bull from the book
 per share of the run date and a justified P/B, the margin of safety and the zone
 (Rẻ / Hợp lý / Đắt), every line labelled [FACT dd/mm] or [THỐNG KÊ dd/mm] (with
-the year when it is not the run date's). The assumptions (Ke, λ, g, margin) are
-set by hand in ``valuation_config``.
+the year when it is not the run date's). Every stock gets the same model with the
+assumptions (Ke, λ, g, margin) of its profile, set by hand in ``valuation_config``,
+and a reliability saying how far its book anchors the value; ``assess`` says why
+there is no card (equity ≤ 0, fewer than three annual ROEs, a loss). The engine's
+report, the fundamentals tool and /nhanh carry the card of a bank only (there the
+other stocks' Bull/Bear are the two sides of the debate); /dinhgia shows any stock's.
 
 Nothing in the Quant Engine (engine, policy, simulator, calibration) reads
 this module: it only writes text, for the analysts, after the engine's report
-(the ``quant_engine`` graph node) and in /nhanh.
+(the ``quant_engine`` graph node), in /nhanh and /dinhgia.
 """
 
 from __future__ import annotations
@@ -260,6 +264,17 @@ def rank_of(history: pd.DataFrame, metric: str) -> MultipleRank | None:
     )
 
 
+def cheaper_pct(rank: MultipleRank) -> int:
+    """The share of sessions with a higher multiple, rounded, but never "100%" while a session was
+    cheaper (FPT 29/10/2026: 99,5%, 8 sessions lower), nor "0%" while one was dearer."""
+    shown = round(rank.higher_pct)
+    if rank.low < rank.value:
+        shown = min(shown, 99)
+    if rank.higher_pct > 0:
+        shown = max(shown, 1)
+    return shown
+
+
 def multiple_line(symbol: str, metric: str, as_of_date: str | None) -> str:
     """One line for the fundamentals report: the run date's multiple, from that session's price,
     and the share of sessions since 2018 that were dearer."""
@@ -273,22 +288,15 @@ def multiple_line(symbol: str, metric: str, as_of_date: str | None) -> str:
         return f"- {label} hôm nay so với lịch sử của chính mã: chưa đủ dữ liệu"
     # The run date's session not out yet: before the close, a holiday, or VCI and the bars both behind.
     when = "hôm nay" if rank.day == _as_of_day(as_of_date) else "phiên gần nhất có dữ liệu"
-    # Rounded, but never "100%" while a session was cheaper (FPT 29/10/2026: 99,5%, 8 sessions
-    # lower), nor "0%" while one was dearer.
-    shown = round(rank.higher_pct)
-    if rank.low < rank.value:
-        shown = min(shown, 99)
-    if rank.higher_pct > 0:
-        shown = max(shown, 1)
     return (
         f"- {label} {when} {rfmt.fmt_number(rank.value)} (giá đóng cửa {rank.day:%d/%m/%Y}: {rfmt.fmt_price(rank.close)}; "
-        f"{base} tới {rank.period}, công bố {rank.published:%d/%m/%Y}): rẻ hơn {shown}% "
+        f"{base} tới {rank.period}, công bố {rank.published:%d/%m/%Y}): rẻ hơn {cheaper_pct(rank)}% "
         f"số phiên từ {rank.since:%m/%Y} ({rfmt.fmt_price(rank.sessions)} phiên; thấp nhất {rfmt.fmt_number(rank.low)}, "
         f"cao nhất {rfmt.fmt_number(rank.high)})"
     )
 
 
-# ─── The valuation card (banks) ──────────────────────────────────────────────
+# ─── The valuation card ──────────────────────────────────────────────────────
 
 ROE_YEARS = 5                 # sustainable ROE: median of the newest 5 annual ROEs published
 MIN_ROE_YEARS = 3             # fewer annual ROEs published (VCI's start in 2018): no card
@@ -302,8 +310,9 @@ BANK_ICB = "8300"             # VCI listing's icbCode2 of the banks (28 codes, c
 _PAID_ISSUE_KIND = {"quyền mua": "quyền mua", "riêng lẻ": "riêng lẻ", "cbcnv": "ESOP",
                     "chuyển đổi": "chuyển đổi trái phiếu"}
 _PAID_ISSUE = re.compile("|".join(_PAID_ISSUE_KIND), re.IGNORECASE)
+GROWTH_YEARS = 3              # the book growth of the reliability: the parent equity of the same quarter 3 years before
 _CARD_CACHE_MAX = 256
-_cards: dict[tuple, tuple[float, str, "ValuationCard | None"]] = {}   # key -> (built at, built on day, card)
+_cards: dict[tuple, tuple[float, str, "ValuationCard | NoCard | None"]] = {}   # key -> (built at, built on day, card)
 _cards_lock = threading.Lock()
 
 
@@ -315,13 +324,43 @@ def justified_pb(roe: float, ke: float, lam: float, g: float = 0.0) -> float:
 
 
 def is_bank(symbol: str) -> bool:
-    """The card covers banks only: by the sector map, else by the VCI listing's ICB code (8300). No
-    call of its own: the listing is kept a day and on disk, and the engine has read it for the exchange."""
+    """A bank, whose card the engine's report carries: by the sector map, else by the VCI listing's ICB
+    code (8300). No call of its own: the listing is kept a day and on disk, and the engine has read it
+    for the exchange."""
     sectors = sector.get_symbol_sectors(symbol)
     if sectors:
         return "banking" in sectors
     entry = listing_entry(symbol)
     return bool(entry) and str(entry.get("icbCode2")) == BANK_ICB
+
+
+def card_profile(symbol: str) -> str:
+    """The card's profile (``valuation_config.PROFILES``): by the sector map, else by the VCI listing's
+    ICB code; "default" for any other stock, and while the listing cannot be read."""
+    sectors = sector.get_symbol_sectors(symbol)
+    if sectors:
+        return next((k for k in valuation_config.PROFILE_ORDER if k in sectors), "default")
+    entry = listing_entry(symbol) or {}
+    return valuation_config.ICB_PROFILE.get(str(entry.get("icbCode2")), "default")
+
+
+def _is_tech(symbol: str) -> bool:
+    sectors = sector.get_symbol_sectors(symbol)
+    if sectors:
+        return "technology" in sectors
+    return str((listing_entry(symbol) or {}).get("icbCode2")) == valuation_config.TECH_ICB
+
+
+@dataclass(frozen=True)
+class NoCard:
+    """Why a stock has no card on the run date (falsy, so ``if card`` reads as before)."""
+    symbol: str
+    as_of: date
+    profile: str
+    reason: str                   # Vietnamese, for the owner
+
+    def __bool__(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True)
@@ -353,6 +392,13 @@ class ValuationCard:
     zone: str                     # Rẻ (price ≤ Base) / Hợp lý / Đắt (price ≥ Bull)
     sensitivity: tuple[tuple[float, float], ...]  # (Ke, Base)
     next_ex: date | None          # the next ex-date already announced, within EVENT_LOOKAHEAD_DAYS
+    profile: str = "banking"      # valuation_config.PROFILES key
+    reliability: str = ""         # cao / trung bình / thấp: how far the book anchors the value
+    reliability_why: str = ""
+    profit: float | None = None   # parent shareholders' profit of the four quarters published by ``day``
+    profit_period: str = ""
+    pb_rank: MultipleRank | None = None   # the session's P/B among every session since 2018
+    pe_rank: MultipleRank | None = None   # the same for P/E ("default" profile: P/E is its own multiple)
 
 
 def _shares_before(history: pd.DataFrame, day: date) -> float:
@@ -362,28 +408,73 @@ def _shares_before(history: pd.DataFrame, day: date) -> float:
     return float(before.iloc[-1] if not before.empty else history["TotalShares"].iloc[0])
 
 
-def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
-    """The card of the run date, from data published by then (None: not enough of it).
+def _profit_steps(code: str, day: date) -> pd.DataFrame:
+    """The four quarters' parent profit after each publication up to ``day`` (``_base_steps`` "pe")."""
+    steps = _base_steps(code, "pe")
+    return steps[steps["Published"] <= pd.Timestamp(day)].reset_index(drop=True)
+
+
+def _book_growth(history: pd.DataFrame) -> float | None:
+    """The parent equity's growth a year, from the same quarter ``GROWTH_YEARS`` years before the
+    last session's (a bonus issue moves none of it; a cyclical profit's trough does not inflate it)."""
+    quarter, year = (int(x) for x in str(history["Period"].iloc[-1])[1:].split("/"))
+    then = history.loc[history["Period"] == f"Q{quarter}/{year - GROWTH_YEARS}", "Base"]
+    now = float(history["Base"].iloc[-1])
+    if then.empty or not float(then.iloc[0]) > 0 or not now > 0:
+        return None
+    return (now / float(then.iloc[0])) ** (1 / GROWTH_YEARS) - 1
+
+
+def _reliability(profile: str, code: str, roe_base: float, history: pd.DataFrame) -> tuple[str, str]:
+    """(level, why) of the profile (``valuation_config.RELIABILITY``); the "default" profile drops to
+    "thấp" for a technology company, a sustained ROE far above Ke, or a book growing fast."""
+    level, why = valuation_config.RELIABILITY[profile]
+    if profile != "default":
+        return level, why
+    reasons = []
+    if _is_tech(code):
+        reasons.append("công ty công nghệ, ít tài sản hữu hình: giá trị nằm ở con người và hợp đồng, không ở sổ sách")
+    if roe_base >= valuation_config.HIGH_ROE:
+        reasons.append(f"ROE bền vững {_pct(roe_base)} cao hơn hẳn Ke: lợi thế có thể bền hơn mức phai λ 0,4 nên Base "
+                       "dễ thấp hơn thực")
+    growth = _book_growth(history)
+    if growth is not None and growth >= valuation_config.HIGH_GROWTH:
+        reasons.append(f"vốn chủ sở hữu tăng {_pct(growth)}/năm trong {GROWTH_YEARS} năm: g 0 bỏ qua tăng trưởng")
+    return ("thấp", "; ".join(reasons)) if reasons else (level, why)
+
+
+def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
+    """The card of the run date, from data published by then; a ``NoCard`` saying why there is none.
 
     Book per share = (the newest published quarter's parent equity − the cash dividends gone ex
     after that quarter's end, by the price's session) / the shares outstanding of that session.
     The shares change on a bonus issue's ex-date, so a book published before it is restated
     (CTG: Q3/2025 over 7,77 billion shares from 17/12/2025, the 44,6% bonus); each dividend is
-    paid on the shares of the session before its ex-date.
+    paid on the shares of the session before its ex-date. No card for a negative book, fewer than
+    ``MIN_ROE_YEARS`` annual ROEs, or a loss (the four quarters', or the sustained ROE): the
+    justified P/B needs a positive return on a positive book.
     """
     code = normalize_symbol(symbol)
     as_of = _as_of_day(as_of_date)
-    setup = valuation_config.assumptions("banking")
+    profile = card_profile(code)
+    setup = valuation_config.assumptions(profile)
+
+    def none(reason: str) -> NoCard:
+        return NoCard(symbol=code, as_of=as_of, profile=profile, reason=reason)
+
     rows = [(int(r["yearReport"]), v, public) for r, public in published_annual_ratio_rows(code, as_of_date)
             if (v := _num(r.get("roe"))) is not None]
     if len(rows) < MIN_ROE_YEARS:
-        return None
+        return none(f"mới có {len(rows)} năm ROE đã công bố (cần ít nhất {MIN_ROE_YEARS} năm cho ROE bền vững)")
     annual = sorted((year, v) for year, v, _ in rows)
     annual_published = max(public for _, _, public in rows)
     history = multiple_history(code, "pb", as_of_date)
-    if history.empty or pd.isna(history["Base"].iloc[-1]) or history["Base"].iloc[-1] <= 0:
-        return None
+    if history.empty or pd.isna(history["Base"].iloc[-1]):
+        return none("chưa có giá phiên hoặc BCTC quý đã công bố tới ngày này")
     last = history.iloc[-1]
+    if last["Base"] <= 0:
+        return none(f"vốn chủ sở hữu công ty mẹ {last['Period']} âm ({rfmt.fmt_number(last['Base'] / 1e9, 1)} tỷ): "
+                    "không có sổ sách để neo giá trị")
     day = last["Date"].date()
     quarter, year = (int(x) for x in str(last["Period"])[1:].split("/"))
     period_end = _period_end(year, quarter)
@@ -409,10 +500,18 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     shares = float(last["TotalShares"])
     book = (float(last["Base"]) - paid) / shares
     if book <= 0:
-        return None
+        return none("sổ sách/cp sau cổ tức tiền đã trả ≤ 0: không có sổ sách để neo giá trị")
+    profits = _profit_steps(code, day)
+    profit = float(profits["Base"].iloc[-1]) if not profits.empty and pd.notna(profits["Base"].iloc[-1]) else None
+    profit_period = str(profits["Period"].iloc[-1]) if not profits.empty else ""
+    if profit is not None and profit <= 0:
+        return none(f"đang lỗ: LNST công ty mẹ 4 quý tới {profit_period} là {rfmt.fmt_number(profit / 1e9, 1)} tỷ; "
+                    "P/B hợp lý cần lợi nhuận dương")
 
     values = [v for _, v in annual]
     roe_base = float(np.median(values[-ROE_YEARS:]))
+    if roe_base <= 0:
+        return none(f"ROE bền vững (trung vị {min(len(values), ROE_YEARS)} năm) {_pct(roe_base)} ≤ 0: lỗ kéo dài")
     p20, p80 = (float(v) for v in np.percentile(values, [20, 80]))
     roe_bear, roe_bull = min(p20, roe_base), max(p80, roe_base)   # Bear ≤ Base ≤ Bull, whatever the spread
 
@@ -422,6 +521,8 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     base, close = value(roe_base), float(last["Close"])
     bull = value(roe_bull)
     zone = "Rẻ" if close <= base else "Đắt" if close >= bull else "Hợp lý"
+    reliability, why = _reliability(profile, code, roe_base, history)
+    pe_rank = rank_of(multiple_history(code, "pe", as_of_date), "pe") if profile == "default" else None
     return ValuationCard(
         symbol=code, as_of=as_of, day=day, close=close, period=str(last["Period"]),
         published=last["PeriodPublished"], period_end=period_end, equity=float(last["Base"]), shares=shares,
@@ -429,12 +530,14 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
         roe_base=roe_base, roe_bear=roe_bear, roe_bull=roe_bull, assumptions=setup,
         bear=value(roe_bear), eab=base * (1 - setup.margin), base=base, bull=bull, mos=(base - close) / base,
         zone=zone, sensitivity=tuple((ke, value(roe_base, ke)) for ke in valuation_config.sensitivity_ke(setup.ke)),
-        next_ex=min(upcoming) if upcoming else None,
+        next_ex=min(upcoming) if upcoming else None, profile=profile, reliability=reliability, reliability_why=why,
+        profit=profit, profit_period=profit_period, pb_rank=rank_of(history, "pb"), pe_rank=pe_rank,
     )
 
 
 def _key(symbol: str, as_of_date: str | None) -> tuple:
-    return normalize_symbol(symbol), _as_of_day(as_of_date).isoformat(), valuation_config.assumptions("banking")
+    code = normalize_symbol(symbol)
+    return code, _as_of_day(as_of_date).isoformat(), valuation_config.assumptions(card_profile(code))
 
 
 def _last_session(day: date) -> date:
@@ -443,13 +546,14 @@ def _last_session(day: date) -> date:
     return day
 
 
-def _final(key: tuple, built_on: str, c: ValuationCard | None) -> bool:
+def _final(key: tuple, built_on: str, c: ValuationCard | NoCard | None) -> bool:
     """A past run date's card that cannot change any more: built on a later day, with that date's
-    last session. Any other (today's, one built during the session, None) is rebuilt after an hour."""
-    return c is not None and built_on > key[1] and c.day == _last_session(date.fromisoformat(key[1]))
+    last session. Any other (today's, one built during the session, none) is rebuilt after an hour."""
+    return (isinstance(c, ValuationCard) and built_on > key[1]
+            and c.day == _last_session(date.fromisoformat(key[1])))
 
 
-def _build(symbol: str, as_of_date: str | None) -> ValuationCard | None:
+def _build(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard | None:
     """``build_card`` behind the breaker of the informational VCI calls (``money_flows.VCI_INFO``, not
     the engine's): while VCI is down the card fails at once instead of waiting out each request's
     retries. No data is not an outage."""
@@ -463,21 +567,32 @@ def _build(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     return money_flows._guarded(money_flows.VCI_INFO, build)
 
 
-def card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
+def assess(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
     """``build_card``, kept per (stock, run date, assumptions): the engine node, the fundamentals
-    tool and /nhanh of one run read the same numbers. Rebuilt after an hour
-    (``money_flows.RECHECK_SECONDS``) until it is final (``_final``)."""
+    tool, /nhanh and /dinhgia of one day read the same numbers. Rebuilt after an hour
+    (``money_flows.RECHECK_SECONDS``) until it is final (``_final``). VCI down raises
+    (``VendorError``), a stock without the data is a ``NoCard``."""
     key = _key(symbol, as_of_date)
     with _cards_lock:
         hit = _cards.get(key)
     if hit and (_final(key, hit[1], hit[2]) or time.time() - hit[0] < money_flows.RECHECK_SECONDS):
-        return hit[2]
-    built = _build(symbol, as_of_date)
-    with _cards_lock:
-        if len(_cards) >= _CARD_CACHE_MAX:
-            _cards.pop(min(_cards, key=lambda k: _cards[k][0]), None)
-        _cards[key] = (time.time(), vn_rules.now_vn().date().isoformat(), built)
+        built = hit[2]
+    else:
+        built = _build(symbol, as_of_date)
+        with _cards_lock:
+            if len(_cards) >= _CARD_CACHE_MAX:
+                _cards.pop(min(_cards, key=lambda k: _cards[k][0]), None)
+            _cards[key] = (time.time(), vn_rules.now_vn().date().isoformat(), built)
+    if built is None:
+        return NoCard(symbol=key[0], as_of=date.fromisoformat(key[1]), profile=card_profile(key[0]),
+                      reason="VCI chưa có đủ BCTC hoặc giá của mã này")
     return built
+
+
+def card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
+    """``assess``: the card, None when there is none."""
+    built = assess(symbol, as_of_date)
+    return built if isinstance(built, ValuationCard) else None
 
 
 def cached_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
@@ -485,7 +600,7 @@ def cached_card(symbol: str, as_of_date: str | None) -> ValuationCard | None:
     fundamentals tool may have built it after the engine's node failed to)."""
     with _cards_lock:
         hit = _cards.get(_key(symbol, as_of_date))
-    return hit[2] if hit else None
+    return hit[2] if hit and isinstance(hit[2], ValuationCard) else None
 
 
 def _day(day: date, as_of: date) -> str:

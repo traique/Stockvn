@@ -258,7 +258,9 @@ for bad in ("abc", "50", "2"):
     os.environ["VALUATION_KE_BANK"] = bad
     t.ok(f"VALUATION_KE_BANK={bad!r}: ignored, Ke 12%", valuation_config.assumptions("banking").ke == 0.12)
 del os.environ["VALUATION_KE_BANK"]
-t.ok("no profile for non-banks", valuation_config.assumptions("default") is None)
+t.ok("non-banks (v1.17.0): Ke 13% by default, VALUATION_KE_BANK does not move it",
+     valuation_config.assumptions("default").ke == 0.13 and valuation_config.assumptions("realestate").ke == 0.13
+     and valuation_config.assumptions("nope") is None)
 
 # ───────────── 6. the cache per (stock, run date) ─────────────
 def age(sym: str, day: str) -> None:
@@ -614,9 +616,10 @@ readers = sorted(p.relative_to(repo).as_posix() for d in ("tradingagents", "vnbo
                  if re.search(r"vn_valuation|valuation_config", p.read_text(encoding="utf-8", errors="replace"))
                  and p.name not in ("vn_valuation.py", "valuation_config.py"))
 t.ok("who reads the card: the fundamentals tool, the graph's engine node, the Output Guard, /nhanh, the /taisan "
-     "page beside the owner's cards - not the engine, policy, simulator, calibration or params",
+     "page beside the owner's cards, /dinhgia and its pages - not the engine, policy, simulator, calibration or params",
      readers == ["tradingagents/agents/output_guard.py", "tradingagents/agents/quant_engine.py",
-                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/service.py", "vnbot/taisan_web.py"], readers)
+                 "tradingagents/dataflows/vn_fundamentals.py", "vnbot/dinhgia.py", "vnbot/dinhgia_web.py",
+                 "vnbot/service.py", "vnbot/taisan_web.py"], readers)
 t.ok("engine.analyze is not where the card is made (it runs for every stock of a scan)",
      "vn_valuation" not in Path(engine.__file__).read_text(encoding="utf-8") and analyzed)
 

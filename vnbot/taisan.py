@@ -1857,8 +1857,8 @@ class TaiSan:
         "/tsnhatky - 20 dòng gần nhất · /tshuy - huỷ dòng cuối · /tshuy 27 - huỷ dòng số 27\n"
         "/tsxuat - file Excel (Zoom: link tải) · /tsnhap - gửi file .xlsx kèm lệnh này, rồi /tsnhap xacnhan\n"
         "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)\n"
-        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - thẻ định giá anh nhập (Bear Base "
-        "Bull, mã nào cũng được): bot báo trong phiên khi giá vào vùng Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
+        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - thẻ anh nhập, tuỳ chọn (bot tự tính "
+        "ở /dinhgia): báo khi giá vào Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
     )
 
     # ── recording (the commands and the web page share these) ──

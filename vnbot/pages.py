@@ -179,6 +179,8 @@ COMMANDS = (
     ("phanbien FPT", "AI phản biện quyết định (1 lượt gọi AI)", "AI critique of the decision (one AI request)"),
     ("phanbien", "AI phản đối đúng bao nhiêu (kết quả bóng)", "How often the AI's objections were right"),
     ("phantich FPT", "Phân tích đầy đủ bằng các agent (~25 lượt AI)", "Full multi-agent analysis (~25 AI requests)"),
+    ("dinhgia FPT", "Định giá bot tự tính: vùng Rẻ/Hợp lý/Đắt, Bear/Base/Bull, có gì đổi (dinhgia: bảng các mã theo dõi)",
+     "The bot's own valuation card: zone, Bear/Base/Bull, what changed (dinhgia: every tracked stock)"),
     ("theodoi FPT,HPG", "Đặt / xem watchlist", "Set / show the watchlist"),
     ("danhmuc", "Danh mục các tài khoản", "Portfolios"),
     ("lenh", "Lệnh cho phiên tới", "Orders for the next session"),

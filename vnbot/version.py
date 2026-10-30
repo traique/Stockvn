@@ -25,13 +25,26 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.16.0"
-RELEASED = "2026-10-29"
-RELEASE_BUILD = "fe6516e"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.17.0"
+RELEASED = "2026-10-30"
+RELEASE_BUILD = "1cc503b"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.17.0", "2026-10-30", (
+        "Định giá bot tự tính cho mọi mã, không cần nhập: /dinhgia MÃ (gõ tắt /dg), Zoom gõ dinhgia FPT",
+        "Cùng mô hình P/B hợp lý của thẻ ngân hàng; Ke 12% ngân hàng, 13% mã khác (VALUATION_KE_DEFAULT)",
+        "Mỗi thẻ có độ tin cậy: cao (ngân hàng, bảo hiểm, chứng khoán), thấp (BĐS, công nghệ, ROE rất cao...)",
+        "Không lập thẻ khi vốn chủ âm, chưa đủ 3 năm ROE hoặc đang lỗ, và nói rõ lý do",
+        "Có gì đổi so với lần xem trước: mốc đổi từ 0,3%, đổi vùng, BCTC mới, đổi giả định (lưu data/bot.db)",
+        "Sau 16:00 mỗi phiên bot tự tính thẻ của watchlist, mã đang giữ (Tài sản) và mã có thẻ anh nhập",
+        "/dinhgia: bảng các mã theo dõi xếp theo MOS; trang web /dinhgia và /dinhgia/MÃ theo bố cục hồ sơ PDF",
+        "Trang /dinhgia/MÃ của ngân hàng: chỉ số so với trung vị mọi ngân hàng niêm yết cùng kỳ",
+        "Thẻ anh nhập (/tsdinhgia) thành tuỳ chọn; trên /taisan, thẻ của bot nằm cạnh nó cho mọi mã",
+        "/phienban chỉ in các bản gần nhất cho vừa một tin; đủ lịch sử ở trang /phienban",
+        "Chỉ là thông tin: không đổi quyết định, stop/target hay cổng chặn của Quant",
+    )),
     ("v1.16.0", "2026-10-29", (
         "Định giá tham khảo: P/B (ngân hàng, chứng khoán, bảo hiểm, BĐS) hoặc P/E theo giá đóng cửa gần nhất",
         "So với mọi phiên từ 2018 của chính mã: “rẻ hơn X% số phiên”; sổ sách đúng quý đã công bố tại mỗi phiên",
@@ -252,16 +265,22 @@ def status_line() -> str:
     return f"⚠️ khác bản phát hành {VERSION} ({RELEASE_BUILD}): upload thiếu file hoặc đã sửa code"
 
 
+TEXT_LIMIT = 3800       # /phienban stays one Telegram message (3.900 characters): older releases left to the web page
+
+
 def text(history: int = 3) -> str:
-    """``/phienban`` (Telegram, Zoom): the running version and the last ``history`` releases."""
+    """``/phienban`` (Telegram, Zoom): the running version and up to ``history`` releases, newest first,
+    as many as fit in ``TEXT_LIMIT`` characters (the newest always); the rest are on the web page."""
     lines = [f"🏷️ TradingAgents VN {VERSION} (phát hành {_ddmmyyyy(RELEASED)})",
              f"Bản dựng {build()} · {status_line()}",
              f"Chạy từ {started_text()} ({uptime()}) · Python {platform.python_version()}"]
-    for version, day, notes in NOTES[:history]:
-        lines += ["", f"{'Có gì mới ở ' if version == VERSION else ''}{version} ({_ddmmyyyy(day)}):"]
-        lines += [f"• {n}" for n in notes]
-    lines += ["", "Trên web: trang /phienban"]
-    return "\n".join(lines)
+    tail = ["", "Các bản trước và đủ lịch sử: trang /phienban trên web"]
+    for i, (version, day, notes) in enumerate(NOTES[:history]):
+        block = ["", f"{'Có gì mới ở ' if version == VERSION else ''}{version} ({_ddmmyyyy(day)}):"] + [f"• {n}" for n in notes]
+        if i and len("\n".join(lines + block + tail)) > TEXT_LIMIT:
+            break
+        lines += block
+    return "\n".join(lines + tail)
 
 
 def changes_since(previous: str) -> list[tuple[str, str, tuple[str, ...]]]:

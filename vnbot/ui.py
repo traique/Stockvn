@@ -513,6 +513,7 @@ ICONS = {
     "file": '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
     "eraser": '<path d="m4 15 9-9 6 6-6 6H8z"/><path d="M4 20h16"/>',
     "funnel": '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+    "scale": '<path d="M12 4v16M7 20h10M5 7h14"/><path d="m5 7-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z"/>',
     "db": '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
 }
 
@@ -535,7 +536,8 @@ _ALT_LABEL = {"running": "", "starting": " (đang khởi động)", "waiting": "
 
 # The sidebar: the main screens, then the tools and the system pages (key, path, label, icon).
 NAV = (("home", "/", "Tổng quan", "home"), ("taisan", "/taisan", "Danh mục", "wallet"))
-TOOLS = (("ai", "/ai", "AI & cảnh báo", "bell"), ("thamdinh", "/thamdinh", "AI thẩm định tín hiệu", "spark"),
+TOOLS = (("dinhgia", "/dinhgia", "Định giá", "scale"), ("ai", "/ai", "AI & cảnh báo", "bell"),
+         ("thamdinh", "/thamdinh", "AI thẩm định tín hiệu", "spark"),
          ("tinhieu", "/tinhieu", "Vì sao chưa MUA", "funnel"), ("bot", "/bot", "Bot giao dịch", "bot"))
 SYSTEM = (("caidat", "/caidat", "Cài đặt", "gear"), ("dulieu", "/dulieu", "Dữ liệu & nhật ký", "db"),
           ("zoom", "/zoom", "Cấu hình Zoom", "video"), ("phienban", "/phienban", "Phiên bản", "tag"))

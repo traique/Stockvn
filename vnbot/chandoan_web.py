@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 TABLE_NAMES = {"signals": "Quyết định từng mã", "scans": "Lượt quét", "market": "Thị trường",
-               "equity": "NAV các sổ", "fills": "Lệnh khớp các sổ", "events": "Nhật ký hoạt động"}
+               "equity": "NAV các sổ", "fills": "Lệnh khớp các sổ", "events": "Nhật ký hoạt động",
+               "valuations": "Thẻ định giá của bot"}
 LEVELS = ("", "INFO", "WARNING", "ERROR")
 _e = html.escape
 
