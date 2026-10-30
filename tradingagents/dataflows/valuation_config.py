@@ -46,8 +46,9 @@ TECH_ICB = "9500"           # technology (FPT): little on the books, the "defaul
 PROFILE_LABELS = {"banking": "ngân hàng", "insurance": "bảo hiểm", "securities": "chứng khoán",
                   "realestate": "bất động sản", "default": "doanh nghiệp"}
 
-# How far the book anchors the value, per profile: (level, why). The "default" profile drops to "thấp"
-# on what the data shows (vn_valuation._reliability): technology, a sustained ROE far above Ke, fast growth.
+# How far the book anchors the value, per profile: (level, why). Every profile but the banks drops to "thấp"
+# after a year's ROE under −Ke, the "default" one also for technology, a sustained ROE far above Ke, fast
+# growth (vn_valuation._reliability).
 RELIABILITY = {
     "banking": ("cao", "sổ sách (tài sản tài chính, ghi gần giá thị trường) là neo giá trị của ngân hàng"),
     "insurance": ("cao", "sổ sách chủ yếu là danh mục đầu tư tài chính: neo giá trị của công ty bảo hiểm"),

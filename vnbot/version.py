@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.17.0"
 RELEASED = "2026-10-30"
-RELEASE_BUILD = "da69e7d"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "dabc857"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -35,14 +35,14 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.17.0", "2026-10-30", (
         "Định giá bot tự tính cho mọi mã, không cần nhập: /dinhgia MÃ (gõ tắt /dg); Zoom: dinhgia FPT",
         "Mô hình P/B hợp lý như thẻ ngân hàng; Ke 12% ngân hàng, 13% mã khác (VALUATION_KE_DEFAULT)",
-        "Mỗi thẻ ghi độ tin cậy: cao (ngân hàng, bảo hiểm, chứng khoán), thấp (BĐS; DN công nghệ, ROE ≥ 20%…)",
+        "Mỗi thẻ ghi độ tin cậy: cao (ngân hàng, bảo hiểm, CK), thấp (BĐS; DN công nghệ, ROE ≥ 20%, năm lỗ nặng…)",
         "Không lập thẻ khi vốn chủ âm, chưa đủ 3 năm ROE hoặc đang lỗ, và nói rõ lý do",
         "Có gì đổi so với lần xem trước: mốc đổi từ 0,3%, đổi vùng, BCTC mới, đổi giả định",
         "/dinhgia: mã theo dõi xếp theo MOS; trang web /dinhgia/MÃ theo bố cục hồ sơ PDF",
         "Ngân hàng: NIM, CIR, nợ xấu, bao phủ... so với trung vị các ngân hàng cùng quý, kèm hạng",
         "Sau 16:00 bot tự tính thẻ của watchlist, mã đang giữ và mã có thẻ anh nhập; bị lỡ thì chạy bù",
         "Tự báo trong phiên khi giá vào Rẻ/Đắt theo thẻ của bot; công tắc riêng ở /ai (Kênh thông báo)",
-        "Bull sát Base: báo Đắt từ Base +2%; việc 16:00 xong nhắn các mã đổi vùng",
+        "Bull sát Base: báo Đắt từ Base +2%; việc 16:00 xong nhắn các mã đổi vùng (cùng luật, đệm 0,5%)",
         "Thẻ anh nhập (/tsdinhgia) thành tuỳ chọn: thay thẻ của bot khi báo vùng, hết hạn thì về thẻ của bot",
         "Altcoin tắt: thanh ghi “Altcoin (tắt)”, trang /altcoin/ chỉ cách bật (cùng mật khẩu)",
         "README: bảng lệnh Telegram/Zoom, cách xem trang Altcoin; /phienban chỉ in các bản gần nhất",

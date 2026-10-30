@@ -14,7 +14,7 @@ once a day (``vn_peers.bank_peers``): a bank's KPIs against the median of the ba
 
 The intraday monitor (``vnbot.intraday``) alerts on the kept cards when the price enters Rẻ or Đắt -
 no VCI call there, a card kept after the session before's ``JOB_TIME`` only (``built_for``) - and the
-job's zone moves are sent once it is done for the session (``night_block``).
+job's zone moves are sent once it is done for the session (``night_block``), judged as the alerts judge them.
 
 Informational only: nothing of the Quant Engine reads it. The owner's card (/tsdinhgia) is shown
 beside the bot's, named as his, never as the bot's; in the alerts it overrides the bot's.
@@ -35,7 +35,7 @@ from vnbot.jobs import write_text_atomic
 logger = logging.getLogger(__name__)
 
 STATE_FILE = "valuation_cards.json"   # under data/ while the history store is off: each stock's two newest days
-ZONES_FILE = "valuation_zone_changes.json"   # under data/: the zones the newest job moved, for its message
+ZONES_FILE = "valuation_zone_changes.json"   # under data/: the zones the newest job moved, each stock's evening zone
 MAX_ZONE_LINES = 12                   # zone changes named in the message; the rest counted
 JOB_TIME = "16:00"                    # the evening job, Vietnam time: the session's bars are out (15:05)
 JOB_WORKERS = 2                       # cards built at once (VCI is slow, the host has 2 GB)
@@ -92,6 +92,14 @@ def alert_levels(row: dict) -> dict:
     """The bot's card ``row`` as the intraday alerts read it: Đắt from Bull, or from Base + ``ALERT_BAND``
     when Bull is closer to Base."""
     return {**row, "bull": max(float(row["bull"]), float(row["base"]) * (1 + ALERT_BAND))}
+
+
+def close_zone(row: dict, last: str | None = None) -> str:
+    """The zone of the card ``row``'s close as the intraday alerts judge it: on ``alert_levels``, kept at
+    ``last`` until the close is ``taisan.ZONE_BUFFER_PCT`` back past its level (``taisan.card_zone``)."""
+    from vnbot import taisan
+
+    return taisan.card_zone(alert_levels(row), float(row["close"]), last)
 
 
 def band_note(base: float, bull: float) -> str:
@@ -255,11 +263,25 @@ def tracked(watchlist, account=None) -> list[str]:
     return out
 
 
-def _move(row: dict, prev: dict | None) -> dict | None:
-    """The zone ``row`` moved to from ``prev`` (both with a card), None when it did not."""
-    if not prev or row.get("base") is None or prev.get("base") is None or row.get("zone") == prev.get("zone"):
-        return None
-    return {"from": prev["zone"], "to": row["zone"], "close": row["close"], "base": row["base"], "bull": row["bull"]}
+def _move(row: dict, prev: dict | None, seen: dict | None, session: str) -> tuple[dict | None, dict | None]:
+    """(The zone move of ``row``, None when it did not move; the stock's evening zone to remember, None
+    without a card). Zones as the intraday alerts judge them (``close_zone``: Đắt from Base + 2% at least,
+    the 0,5% buffer) from the zone remembered (``seen``: the evening before's, or the one this session's
+    job started from when it builds the card again), else from ``prev``'s close: a close wavering around
+    Base is not "Hợp lý → Rẻ" one evening and "Rẻ → Hợp lý" the next."""
+    if row.get("base") is None:
+        return None, None
+    if seen:
+        last = seen.get("from") if seen.get("day") == session else seen.get("zone")
+    else:
+        last = close_zone(prev) if prev and prev.get("base") is not None else None
+    zone = close_zone(row, last)
+    keep = {"day": session, "from": last, "zone": zone}
+    if last is None or zone == last:
+        return None, keep
+    dat = alert_levels(row)["bull"]
+    return ({"from": last, "to": zone, "close": row["close"], "base": row["base"], "bull": row["bull"],
+             **({"dat": dat} if dat > float(row["bull"]) else {})}, keep)
 
 
 def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = None,
@@ -278,18 +300,20 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
     cards = Cards(data_dir)
     started = time.monotonic()
     out: dict[str, list[str]] = {k: [] for k in ("done", "behind", "none", "kept", "failed", "peers")}
-    moved: dict[str, dict] = {}
+    seen = _zone_memory(data_dir)
+    moved: dict[str, dict | None] = {}
+    zones: dict[str, dict | None] = {}
 
     def one(symbol: str) -> str:
         try:
             rows = cards.rows(symbol)
             last = rows[0] if rows and rows[0].get("day") == today else {}
             if last and built_for(last, session) and (last.get("price_day") == session or last.get("note")):
-                moved[symbol] = _move(last, rows[1] if len(rows) > 1 else None)
+                moved[symbol], zones[symbol] = _move(last, rows[1] if len(rows) > 1 else None, seen.get(symbol), session)
                 return "kept"
             result = vv.assess(symbol, None)
             row, prev = cards.record(result, today)
-            moved[symbol] = _move(row, prev)
+            moved[symbol], zones[symbol] = _move(row, prev, seen.get(symbol), session)
         except Exception as exc:  # noqa: BLE001 - one stock never stops the others
             logger.warning("Valuation card of %s: %s: %s", symbol, type(exc).__name__, str(exc)[:200])
             return "failed"
@@ -301,7 +325,7 @@ def run_job(symbols: list[str], data_dir, *, session: str, today: str | None = N
         for symbol, outcome in zip(symbols, pool.map(one, symbols)):
             out[outcome].append(symbol)
     try:
-        _keep_zone_changes(data_dir, session, moved)
+        _keep_zone_changes(data_dir, session, moved, zones)
     except OSError as exc:  # the cards are kept; only the zones message is missing
         logger.warning("Valuation cards: zone changes not kept: %s", exc)
     if any(vv.card_profile(s) == "banking" for s in symbols if s not in out["failed"]):
@@ -322,24 +346,42 @@ def _zones_path(data_dir) -> Path:
     return Path(data_dir) / ZONES_FILE
 
 
-def _keep_zone_changes(data_dir, session: str, moved: dict) -> None:
-    """The zones the job of ``session`` moved against each stock's row of an earlier day, its runs
-    together (a stock built again: its newest outcome, None for no move), for ``night_block``."""
+def _read_zones(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _zone_memory(data_dir) -> dict:
+    """Each stock's evening zone (``_move``), kept in ``ZONES_FILE`` across sessions."""
+    with _file_lock:
+        zones = _read_zones(_zones_path(data_dir)).get("zones")
+    return zones if isinstance(zones, dict) else {}
+
+
+def _keep_zone_changes(data_dir, session: str, moved: dict, zones: dict | None = None) -> None:
+    """The zones the job of ``session`` moved, its runs together (a stock built again: its newest outcome,
+    None for no move), for ``night_block``; and each stock's evening zone (``zones``: None for no card)."""
     path = _zones_path(data_dir)
     with _file_lock:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {}
-        if not isinstance(data, dict) or data.get("day") != session:
-            data = {"day": session, "changes": {}, "reported": ""}
-        before = dict(data["changes"])
+        data = _read_zones(path)
+        if data.get("day") != session:
+            data = {"day": session, "changes": {}, "reported": "",
+                    "zones": data.get("zones") if isinstance(data.get("zones"), dict) else {}}
+        before = json.dumps(data, sort_keys=True)
         for symbol, change in moved.items():
             if change:
                 data["changes"][symbol] = change
             else:
                 data["changes"].pop(symbol, None)
-        if data["changes"] != before:
+        for symbol, zone in (zones or {}).items():
+            if zone:
+                data.setdefault("zones", {})[symbol] = zone
+            else:
+                data.setdefault("zones", {}).pop(symbol, None)
+        if json.dumps(data, sort_keys=True) != before:
             write_text_atomic(path, json.dumps(data, ensure_ascii=False))
 
 
@@ -348,17 +390,14 @@ def night_block(data_dir, session: str) -> str:
     the session (``service.DailyScheduler``); "" when none moved, or said already (kept as reported)."""
     path = _zones_path(data_dir)
     with _file_lock:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return ""
-        if not isinstance(data, dict) or not data.get("changes") or data.get("day") != session or data.get("reported"):
+        data = _read_zones(path)
+        if not data.get("changes") or data.get("day") != session or data.get("reported"):
             return ""
         data["reported"] = today_vn()
         write_text_atomic(path, json.dumps(data, ensure_ascii=False))
     items = sorted(data["changes"].items(), key=lambda kv: (kv[1]["to"] != "Rẻ", kv[1]["to"] != "Đắt", kv[0]))
-    parts = [f"{code} {c['from']} → {c['to']} (giá {price(c['close'])}, Base {price(c['base'])}, Bull {price(c['bull'])})"
-             for code, c in items[:MAX_ZONE_LINES]]
+    parts = [f"{code} {c['from']} → {c['to']} (giá {price(c['close'])}, Base {price(c['base'])}, Bull {price(c['bull'])}"
+             + (f", Đắt từ {price(c['dat'])})" if c.get("dat") else ")") for code, c in items[:MAX_ZONE_LINES]]
     more = f" · và {len(items) - MAX_ZONE_LINES} mã khác" if len(items) > MAX_ZONE_LINES else ""
     return (f"📐 Thẻ định giá của bot đổi vùng (tính sau phiên {ddmm(data['day'])}, theo giá đóng cửa): "
             + " · ".join(parts) + more + ". Chi tiết: /dinhgia MÃ (tham khảo, không vào quyết định).")

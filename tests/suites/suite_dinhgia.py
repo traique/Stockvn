@@ -82,13 +82,21 @@ def a_loss(fx):
             r["isa22"] = -1e12
 
 
+def heavy_losses(fx):
+    """DLG on 30/10/2026: annual ROE −30,5%, −77%, −86,6% among small profits; the median of 5 years stays positive."""
+    for r in fx["annual_ratios"]:
+        r["roe"] = {2018: -0.80, 2019: -0.866}.get(r["yearReport"], r["roe"])
+
+
 variant("NEGEQ", negative_equity)
 variant("LOSSY", a_loss)
+variant("SWING", heavy_losses)
 variant("YOUNG", lambda fx: fx.update(annual_ratios=fx["annual_ratios"][-2:]))
 variant("OUTG", lambda fx: None)        # HPG's data, its price history never fetched: VCI down for it
 PRICES = {s: fixture_prices(fx) for s, fx in FX.items()}
 LISTING = [{"symbol": s, "type": "STOCK", "board": "HSX", "organName": f"Công ty {s}", "icbCode2": icb}
-           for s, icb in (("NEGEQ", "1700"), ("LOSSY", "1700"), ("YOUNG", "1700"), ("OUTG", "1700"), ("XYZBDS", "8600"),
+           for s, icb in (("NEGEQ", "1700"), ("LOSSY", "1700"), ("SWING", "1700"), ("YOUNG", "1700"), ("OUTG", "1700"),
+                          ("XYZBDS", "8600"),
                           ("PGB", "8300"), ("FPT", "9500"), ("HPG", "1700"), ("VHM", "8600"), ("CTG", "8300"))]
 LISTING[1]["organName"] = "Công ty Cổ phần Tập đoàn Hòa Phát"
 LISTING_DOWN = {"on": False, "nodata": False}
@@ -221,6 +229,23 @@ t.ok("ROE ≥ 20% and a fast-growing book drop only the doanh nghiệp profile: 
      all(vv._reliability(k, "ACB", 0.239, fast) == valuation_config.RELIABILITY[k]
          for k in ("banking", "insurance", "securities"))
      and vv._reliability("default", "HPG", 0.239, fast)[0] == "thấp")
+swing = vv.assess("SWING", None)
+t.ok("a heavy loss year (DLG-like: ROE 2018 −80%, 2019 −86,6%): ROE p20 −44,4% gives a negative P/B, Bear kept at 0 "
+     "and said why; reliability THẤP with the year, so /dinhgia lists the card after the others",
+     isinstance(swing, vv.ValuationCard) and swing.bear == 0.0 and swing.bear <= swing.eab < swing.base < swing.bull
+     and swing.roe_bear < -0.4 and swing.reliability == "thấp"
+     and "có năm lỗ nặng (ROE 2019 -86,60%, dưới −Ke 13%)" in swing.reliability_why
+     and "cho P/B âm nên Bear giữ 0" in swing.reliability_why
+     and [r["symbol"] for r in dg.list_order([dg.row_of(swing, "2026-10-30"), dg.row_of(hpg, "2026-10-30")])]
+     == ["HPG", "SWING"], (swing.bear, swing.roe_bear, swing.reliability_why))
+steady = pd.DataFrame({"Period": ["Q3/2026"], "Base": [1.0]})
+t.ok("... any profile but the banks: a broker or an insurer drops to THẤP, real estate keeps its own why first; a bank "
+     "stays CAO; a loss year above −Ke (HAG 2020 −11,5%) drops nothing",
+     all(vv._reliability(k, "XYZ", 0.1, steady, ((2020, -0.2), (2021, 0.1)), 0.13)[0] == "thấp"
+         for k in ("securities", "insurance", "default"))
+     and vv._reliability("realestate", "XYZ", 0.1, steady, ((2020, -0.2),), 0.13)[1].startswith("quỹ đất")
+     and vv._reliability("banking", "XYZ", 0.1, steady, ((2020, -0.2),), 0.12)[0] == "cao"
+     and vv._reliability("securities", "XYZ", 0.1, steady, ((2020, -0.115),), 0.13)[0] == "cao")
 growth = vv._book_growth(pd.DataFrame({"Period": ["Q3/2023", "Q4/2025", "Q3/2026"], "Base": [100.0, 150.0, 200.0]}))
 t.ok("book growth: the same quarter three years before (100 → 200: 25,99%/year); none without it",
      abs(growth - (2 ** (1 / 3) - 1)) < 1e-12
@@ -794,21 +819,46 @@ dg.run_job = real_run
 # the zones the evening job moved: one block of the next watchlist report, said once
 ZJ = ROOT / "zonejob"
 ZJ.mkdir()
-for sym, zone in (("ZA", "Hợp lý"), ("ZB", "Đắt"), ("ZC", "Hợp lý")):
-    dg.Cards(ZJ).save(dict(dg.row_of(hpg, "2026-10-29"), symbol=sym, zone=zone))
-ZONES = {"ZA": "Rẻ", "ZB": "Hợp lý", "ZC": "Hợp lý"}
-vv.assess = lambda symbol, as_of: replace(hpg, symbol=symbol, zone=ZONES[symbol])
+# HPG's card: Base 16.983, Bull 21.440; the zones come from the close (the card's own zone field is not read)
+for sym, close in (("ZA", 19_000.0), ("ZB", 21_500.0), ("ZC", 19_000.0)):
+    dg.Cards(ZJ).save(dict(dg.row_of(replace(hpg, close=close), "2026-10-29"), symbol=sym))
+CLOSES = {"ZA": 16_900.0, "ZB": 21_200.0, "ZC": 19_000.0}
+vv.assess = lambda symbol, as_of: replace(hpg, symbol=symbol, close=CLOSES[symbol])
 dg.run_job(["ZA", "ZB", "ZC"], ZJ, session="2026-10-30", today="2026-10-30")
 moved = json.loads((ZJ / dg.ZONES_FILE).read_text(encoding="utf-8"))
-t.ok("the evening job keeps the zones it moved against each stock's row of an earlier day (ZC did not move)",
+t.ok("the evening job keeps the zones it moved against each stock's row of an earlier day (ZC did not move), and "
+     "each stock's evening zone",
      moved["day"] == "2026-10-30" and moved["changes"] == {
-         "ZA": {"from": "Hợp lý", "to": "Rẻ", "close": hpg.close, "base": hpg.base, "bull": hpg.bull},
-         "ZB": {"from": "Đắt", "to": "Hợp lý", "close": hpg.close, "base": hpg.base, "bull": hpg.bull}}, moved)
-ZONES["ZA"] = "Hợp lý"
+         "ZA": {"from": "Hợp lý", "to": "Rẻ", "close": 16_900.0, "base": hpg.base, "bull": hpg.bull},
+         "ZB": {"from": "Đắt", "to": "Hợp lý", "close": 21_200.0, "base": hpg.base, "bull": hpg.bull}}
+     and moved["zones"]["ZA"] == {"day": "2026-10-30", "from": "Hợp lý", "zone": "Rẻ"}
+     and moved["zones"]["ZC"]["zone"] == "Hợp lý", moved)
+CLOSES["ZA"] = 19_000.0
 dg.run_job(["ZA"], ZJ, session="2026-10-30", today="2026-10-30")
-t.ok("... a later run of the day that finds ZA back where it was: no move kept for it",
+t.ok("... a later run of the day that finds ZA back where it was: no move kept for it (judged from the zone the "
+     "session started from, not from its own first run)",
      set(json.loads((ZJ / dg.ZONES_FILE).read_text(encoding="utf-8"))["changes"]) == {"ZB"})
+
+# the alerts' rule in the evening too: Đắt from Base + 2% when Bull is a tick above Base, the 0,5% buffer, remembered
+ZM = ROOT / "zonemove"
+ZM.mkdir()
+TICK = replace(hpg, symbol="ZM", bull=hpg.base * 1.0037)     # MBB 30/10/2026: Bull +0,37% above Base
+said = {}
+for session, close in (("2026-10-29", 16_950.0), ("2026-10-30", 17_050.0), ("2026-11-02", 16_950.0),
+                       ("2026-11-03", 16_960.0), ("2026-11-04", 17_100.0), ("2026-11-05", 17_400.0)):
+    vv.assess = lambda symbol, as_of, close=close: replace(TICK, close=close)
+    dg.run_job(["ZM"], ZM, session=session, today=session)
+    said[session] = dg.night_block(ZM, session)
 vv.assess = real_assess
+t.ok("a close a tick past Bull (17.050 > 17.046) stays Rẻ: the alerts' Đắt is Base + 2% (17.323) and Rẻ is left only "
+     "0,5% past Base (17.068); back under Base, and just under it again: nothing (no 'Rẻ → Đắt', no 'Đắt → Rẻ')",
+     [said[d] for d in ("2026-10-29", "2026-10-30", "2026-11-02", "2026-11-03")] == ["", "", "", ""], said)
+t.ok("... 17.100 is past the buffer: Rẻ → Hợp lý once; 17.400 Hợp lý → Đắt, with where the alerts' Đắt starts",
+     "ZM Rẻ → Hợp lý (giá 17.100, Base 16.983, Bull 17.046, Đắt từ 17.323)" in said["2026-11-04"]
+     and "ZM Hợp lý → Đắt (giá 17.400, Base 16.983, Bull 17.046, Đắt từ 17.323)" in said["2026-11-05"], said)
+t.ok("... the close's zone on the alerts' levels: Base Rẻ, a tick past Bull Hợp lý, Base + 2% Đắt",
+     [dg.close_zone(dg.row_of(replace(TICK, close=c), "2026-11-05")) for c in (TICK.base, 17_050.0, TICK.base * 1.02)]
+     == ["Rẻ", "Hợp lý", "Đắt"])
 block = dg.night_block(ZJ, "2026-10-30")
 t.ok("the job of 30/10 done: one message, the move at the close with its levels",
      block == "📐 Thẻ định giá của bot đổi vùng (tính sau phiên 30/10, theo giá đóng cửa): ZB Đắt → Hợp lý (giá 21.200, "
@@ -831,11 +881,11 @@ NOW["t"] = datetime(2026, 10, 29, 16, 10, tzinfo=vn_rules.VN_TZ)
 for sym in ("VW", "VK"):
     dg.Cards(VJ).record(replace(hpg, symbol=sym, zone="Hợp lý"), "2026-10-29")             # the job of 29/10
 NOW["t"] = datetime(2026, 10, 30, 15, 35, tzinfo=vn_rules.VN_TZ)
-dg.Cards(VJ).record(replace(hpg, symbol="VW", zone="Rẻ", day=date(2026, 10, 30)), "2026-10-30")   # /dinhgia VW, 15:35
+dg.Cards(VJ).record(replace(hpg, symbol="VW", close=16_900.0, day=date(2026, 10, 30)), "2026-10-30")   # /dinhgia VW, 15:35
 NOW["t"] = datetime(2026, 10, 30, 16, 0, 30, tzinfo=vn_rules.VN_TZ)
-dg.Cards(VJ).record(replace(hpg, symbol="VK", zone="Rẻ", day=date(2026, 10, 30)), "2026-10-30")   # /dinhgia VK, 16:00
+dg.Cards(VJ).record(replace(hpg, symbol="VK", close=16_900.0, day=date(2026, 10, 30)), "2026-10-30")   # /dinhgia VK, 16:00
 NOW["t"] = datetime(2026, 10, 30, 16, 5, tzinfo=vn_rules.VN_TZ)
-vv.assess = lambda symbol, as_of: replace(hpg, symbol=symbol, zone="Rẻ", day=date(2026, 10, 30))
+vv.assess = lambda symbol, as_of: replace(hpg, symbol=symbol, close=16_900.0, day=date(2026, 10, 30))
 viewed = dg.run_job(["VW", "VK"], VJ, session="2026-10-30")
 vv.assess = real_assess
 t.ok("the job: a view at 15:35 (the session's close, before 16:00) built again, one after 16:00 kept",

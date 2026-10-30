@@ -253,7 +253,8 @@ def _thirty_seconds(c) -> str:
              f'chi phí vốn chủ (Ke) {_e(vv._rate(a.ke))} đặt tay · lợi thế lợi nhuận phai dần λ {_num(a.lam, 1)} · không tăng '
              f'trưởng dài hạn (g = {_e(vv._rate(a.g))}) ⟹ Base = <b>{_num(c.base / c.book)} lần sổ sách</b>. {model}</p>'
              f'<p class="muted small">P/B hợp lý = 1 + (ROE − Ke) / (1 + Ke − (1 − λ)(1 + g)). Bear theo ROE p20 '
-             f'{_e(vv._pct(c.roe_bear))}, Bull {_e(vv.bull_basis(c))}, ROE của {len(c.roes)} năm '
+             f'{_e(vv._pct(c.roe_bear))}{" (P/B âm: giữ 0)" if c.bear <= 0 else ""}, Bull {_e(vv.bull_basis(c))}, '
+             f'ROE của {len(c.roes)} năm '
              f'{c.roes[0][0]}-{c.roes[-1][0]}'
              + (f'; mã không phải ngân hàng: Bull không thấp hơn Base với Ke trừ {cfg.SENSITIVITY_STEP * 100:g} điểm, để '
                 'vùng Hợp lý không biến mất' if c.bull_ke is not None else '')

@@ -223,7 +223,7 @@ Mở `/altcoin/` sẽ thấy, tuỳ trạng thái (chữ cạnh "Altcoin" trên 
 Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch:
 
 ```bash
-python tests/run_all.py                              # phải ra 28/28 bộ đạt
+python tests/run_all.py                              # phải kết thúc bằng "tất cả đều đạt"
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
 python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.2.1.zip
 ```

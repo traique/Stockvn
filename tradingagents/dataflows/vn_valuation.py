@@ -429,22 +429,32 @@ def _book_growth(history: pd.DataFrame) -> float | None:
     return (now / float(then.iloc[0])) ** (1 / GROWTH_YEARS) - 1
 
 
-def _reliability(profile: str, code: str, roe_base: float, history: pd.DataFrame) -> tuple[str, str]:
-    """(level, why) of the profile (``valuation_config.RELIABILITY``); the "default" profile drops to
-    "thấp" for a technology company, a sustained ROE far above Ke, or a book growing fast."""
+def _reliability(profile: str, code: str, roe_base: float, history: pd.DataFrame,
+                 roes: tuple = (), ke: float = 0.0) -> tuple[str, str]:
+    """(level, why) of the profile (``valuation_config.RELIABILITY``). Not a bank, it drops to "thấp" after a
+    year's ROE under −Ke (``roes``: (year, ROE)): a heavy loss makes Base and Bear by the years' ROE say little
+    (DLG 30/10/2026: −86,6% in 2023, ROE p20 −58%); the "default" profile also for a technology company, a
+    sustained ROE far above Ke, or a book growing fast."""
     level, why = valuation_config.RELIABILITY[profile]
-    if profile != "default":
+    if profile == "banking":
         return level, why
     reasons = []
-    if _is_tech(code):
-        reasons.append("công ty công nghệ, ít tài sản hữu hình: giá trị nằm ở con người và hợp đồng, không ở sổ sách")
-    if roe_base >= valuation_config.HIGH_ROE:
-        reasons.append(f"ROE bền vững {_pct(roe_base)} cao hơn hẳn Ke: lợi thế có thể bền hơn mức phai λ 0,4 nên Base "
-                       "dễ thấp hơn thực")
-    growth = _book_growth(history)
-    if growth is not None and growth >= valuation_config.HIGH_GROWTH:
-        reasons.append(f"vốn chủ sở hữu tăng {_pct(growth)}/năm trong {GROWTH_YEARS} năm: g 0 bỏ qua tăng trưởng")
-    return ("thấp", "; ".join(reasons)) if reasons else (level, why)
+    year, worst = min(roes, key=lambda r: r[1], default=(0, 0.0))
+    if worst < -ke:
+        reasons.append(f"có năm lỗ nặng (ROE {year} {_pct(worst)}, dưới −Ke {_rate(ke)}): Base và Bear theo ROE các "
+                       "năm ít ý nghĩa")
+    if profile == "default":
+        if _is_tech(code):
+            reasons.append("công ty công nghệ, ít tài sản hữu hình: giá trị nằm ở con người và hợp đồng, không ở sổ sách")
+        if roe_base >= valuation_config.HIGH_ROE:
+            reasons.append(f"ROE bền vững {_pct(roe_base)} cao hơn hẳn Ke: lợi thế có thể bền hơn mức phai λ 0,4 nên "
+                           "Base dễ thấp hơn thực")
+        growth = _book_growth(history)
+        if growth is not None and growth >= valuation_config.HIGH_GROWTH:
+            reasons.append(f"vốn chủ sở hữu tăng {_pct(growth)}/năm trong {GROWTH_YEARS} năm: g 0 bỏ qua tăng trưởng")
+    if not reasons:
+        return level, why
+    return "thấp", "; ".join(([why] if level == "thấp" else []) + reasons)   # real estate keeps its own why first
 
 
 def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
@@ -533,14 +543,19 @@ def build_card(symbol: str, as_of_date: str | None) -> ValuationCard | NoCard:
     if profile != "banking" and value(roe_base, floor_ke) > bull:
         bull, bull_ke = value(roe_base, floor_ke), floor_ke
     zone = "Rẻ" if close <= base else "Đắt" if close >= bull else "Hợp lý"
-    reliability, why = _reliability(profile, code, roe_base, history)
+    reliability, why = _reliability(profile, code, roe_base, history, tuple(annual), setup.ke)
+    # ROE p20 under Ke − (1 + Ke − (1 − λ)(1 + g)) (−40% at g 0) gives a negative P/B; a share is worth no
+    # less than nothing. Only after a heavy loss year, which made the card "thấp" above (not a bank).
+    bear_pb = justified_pb(roe_bear, setup.ke, setup.lam, setup.g)
+    if bear_pb < 0:
+        why += f"; ROE p20 {_pct(roe_bear)} cho P/B âm nên Bear giữ 0"
     pe_rank = rank_of(multiple_history(code, "pe", as_of_date), "pe") if profile == "default" else None
     return ValuationCard(
         symbol=code, as_of=as_of, day=day, close=close, period=str(last["Period"]),
         published=last["PeriodPublished"], period_end=period_end, equity=float(last["Base"]), shares=shares,
         dividends=tuple(dividends), issues=tuple(issues), paid=paid, book=book, roes=tuple(annual), annual_published=annual_published,
         roe_base=roe_base, roe_bear=roe_bear, roe_bull=roe_bull, assumptions=setup,
-        bear=value(roe_bear), eab=base * (1 - setup.margin), base=base, bull=bull, mos=(base - close) / base,
+        bear=book * max(bear_pb, 0.0), eab=base * (1 - setup.margin), base=base, bull=bull, mos=(base - close) / base,
         zone=zone, sensitivity=tuple((ke, value(roe_base, ke)) for ke in valuation_config.sensitivity_ke(setup.ke)),
         next_ex=min(upcoming) if upcoming else None, profile=profile, reliability=reliability, reliability_why=why,
         profit=profit, profit_period=profit_period, pb_rank=rank_of(history, "pb"), pe_rank=pe_rank, bull_ke=bull_ke,
