@@ -338,7 +338,7 @@ td.num,th.num{text-align:right;white-space:nowrap}
 th:first-child,td:first-child{padding-left:var(--pad)}th:last-child,td:last-child{padding-right:var(--pad)}
 .card-b:not(.flush) th:first-child,.card-b:not(.flush) td:first-child{padding-left:0}
 .card-b:not(.flush) th:last-child,.card-b:not(.flush) td:last-child{padding-right:0}
-code,td code{font:.75rem/1.4 var(--mono);background:var(--raised);padding:var(--space-3xs) var(--space-xs);border-radius:4px}
+code,td code{font:.75rem/1.4 var(--mono);background:var(--raised);padding:var(--space-3xs) var(--space-xs);border-radius:4px;overflow-wrap:break-word}
 td.empty{color:var(--muted);text-align:center;padding:var(--space-lg)}
 .sym{font-weight:600}
 a.sym:hover{text-decoration:underline}

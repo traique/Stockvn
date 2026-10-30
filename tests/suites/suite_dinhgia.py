@@ -657,7 +657,8 @@ os.environ["VALUATION_KE_BANK"] = "10"
 ke10 = dinhgia_web._book_card(vv.assess("CTG", "2026-10-28"))
 del os.environ["VALUATION_KE_BANK"]
 t.ok("the Ke note follows VALUATION_KE_BANK (10%): 'ngân hàng 10%', the row in use 10%",
-     "ngân hàng 10%, mã khác 13%" in ke10 and "10% (đang dùng)" in ke10 and "ngân hàng 12%" not in ke10)
+     "ngân hàng 10%, mã khác 13%" in ke10 and "ngân hàng 12%" not in ke10
+     and '>10%<br><span class="muted small">(đang dùng)</span></td>' in ke10)   # the label under the rate: fits a phone
 
 
 # the card built off the request: "đang tính" and a reload, and a cap on the pages' builds

@@ -291,7 +291,8 @@ def _book_card(c) -> str:
                      f"{_label('FACT', c.published, c.as_of)}</li>")
     roes = "".join(f'<tr><td class="num">{y}</td><td class="num">{_e(vv._pct(v))}</td></tr>' for y, v in reversed(c.roes))
     table = ui.table([("Năm", "num"), ("ROE", "num")], [roes], "")
-    sens = "".join(f'<tr><td class="num">{_e(vv._rate(ke))}{" (đang dùng)" if abs(ke - c.assumptions.ke) < 1e-9 else ""}</td>'
+    used = '<br><span class="muted small">(đang dùng)</span>'      # under the rate: the table fits a phone
+    sens = "".join(f'<tr><td class="num">{_e(vv._rate(ke))}{used if abs(ke - c.assumptions.ke) < 1e-9 else ""}</td>'
                    f'<td class="num">{ui.money(v)}</td><td class="num {ui.tone((v / c.close - 1) * 100)}">'
                    f'{_e(dg.signed_pct(v / c.close - 1))}</td></tr>' for ke, v in c.sensitivity)
     sens_table = ui.table([("Ke", "num"), ("Base", "num"), ("So giá hôm nay", "num")], [sens], "")
