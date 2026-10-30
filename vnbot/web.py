@@ -16,6 +16,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -387,6 +388,39 @@ def _bot_page(trader, msg: str = "") -> str:
     return "".join(parts)
 
 
+def _altcoin_off_body(alt_dir: Path, custom: bool) -> str:
+    """/altcoin/ while the altcoin is uploaded but off (ALTCOIN_ENABLED not 1): how to turn it on.
+    ``alt_dir``: where the child will look for its SQLite bot.db (``altcoin_host.alt_data_dir``), shown
+    from the app's folder; ``custom``: ALT_DATA_DIR set on the panel."""
+    from vnbot import altcoin_host
+
+    try:
+        shown = (alt_dir / "bot.db").relative_to(altcoin_host.ROOT).as_posix()
+    except ValueError:
+        shown = (alt_dir / "bot.db").as_posix()
+    where = f"<code>{html.escape(shown)}</code>" + (" (thư mục <code>ALT_DATA_DIR</code> trên panel)" if custom else "")
+    steps = (
+        "<ol><li>Trên panel Botkeep của server này (khung <code>.env</code>), đặt <code>ALTCOIN_ENABLED=1</code>.</li>"
+        "<li>Dữ liệu Altcoin (DB riêng, không bao giờ dùng DB của Cổ phiếu):<ul>"
+        "<li>Chạy mới, ảo (paper), DB trống: thêm <code>ALTCOIN_FRESH_START=1</code> cho lần chạy đầu, "
+        "rồi xoá dòng này.</li>"
+        "<li>Đã có bot Altcoin cũ: chuyển DB cũ sang trước (<code>ALT_DATABASE_URL</code> là chuỗi Supabase cũ, hoặc "
+        f"file SQLite cũ thành {where}) theo mục 9 của <code>docs/ALTCOIN_TRONG_STOCKVN.md</code> "
+        "(trong repo, không có trong gói upload); "
+        "không đặt <code>ALTCOIN_FRESH_START</code>.</li></ul></li>"
+        "<li>Khởi động lại server.</li>"
+        '<li>Mở lại <a href="/altcoin/">/altcoin/</a> với cùng mật khẩu trang web. Thanh Cổ phiếu / Altcoin báo '
+        "“(đang khởi động)” rồi “Altcoin” khi đã chạy; nếu không chạy được, trang này nói lý do và các dòng log cuối.</li>"
+        "</ol>")
+    notes = ("<ul><li>Mặc định chạy ảo (paper). Chạy live cần <code>ALT_MODE=live</code> và đủ điều kiện ở mục 10 "
+             "của tài liệu.</li><li>Lệnh: <code>/alt status</code> trên Telegram, <code>alt status</code> trên Zoom "
+             "(kênh: <code>/vnbot alt status</code>).</li>"
+             "<li>Các biến <code>ALT_…</code> khác (khoá AI riêng, thư mục dữ liệu…): mục 4 của tài liệu.</li></ul>")
+    return (ui.title("Altcoin đang tắt", "Bot Altcoin (OKX) có trong gói upload nhưng chưa chạy: "
+                     "ALTCOIN_ENABLED trên panel Botkeep khác 1. Bot Cổ phiếu chạy bình thường, không phụ thuộc Altcoin.")
+            + '<div class="grid g2">' + ui.card("Cách bật", steps) + ui.card("Cần biết", notes) + "</div>")
+
+
 def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=None, zoom=None,
                switches=None, throttle: LoginThrottle | None = None) -> FastAPI:
     """``throttle``: the wrong-password counter, shared with the Hub (/altcoin/) when given."""
@@ -555,6 +589,24 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     chandoan_web.register(app, settings.data_dir, guard=guard, post_guard=post_guard,
                           show_bot=lambda: trader is not None and settings.trade_mode != "off",
                           watchlist=watchlist.get, notify=getattr(trader, "notify", None))
+
+    from vnbot import dinhgia_web
+
+    dinhgia_web.register(app, settings.data_dir, guard=guard, watchlist=watchlist.get, account=app.state.taisan,
+                         show_bot=lambda: trader is not None and settings.trade_mode != "off")
+
+    from vnbot import altcoin_host
+
+    if altcoin_host.off_but_uploaded():     # on, the Hub answers everything under /altcoin before this app
+        off_body = _altcoin_off_body(altcoin_host.alt_data_dir(settings.data_dir),
+                                     bool((os.environ.get("ALT_DATA_DIR") or "").strip()))
+
+        def altcoin_off() -> HTMLResponse:
+            return HTMLResponse(ui.page("Altcoin đang tắt", off_body, section="altcoin",
+                                        show_bot=trader is not None and settings.trade_mode != "off"))
+
+        for path in ("/altcoin", "/altcoin/"):      # nothing else under /altcoin/: the stock's 404
+            app.add_api_route(path, altcoin_off, methods=["GET"], dependencies=[Depends(guard)])
 
     critic_llm: list = []        # the provider chain, built on the first web /critic
 
@@ -729,6 +781,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
             ("zoom_commands", "Zoom · nhận lệnh", bool(zoom and zoom.commands_on), "Lệnh gõ trong Zoom (/webhook/zoom)"),
             ("intraday", "Cảnh báo trong phiên", trader is not None and settings.trade_mode != "off",
              f"Mỗi {settings.intraday_interval_min} phút trong giờ khớp lệnh · không dùng AI"),
+            ("zones_bot", "Vùng Rẻ/Đắt theo thẻ của bot", trader is not None and settings.trade_mode != "off",
+             ("Trong cảnh báo trong phiên: giá vào vùng Rẻ/Đắt theo thẻ định giá bot tự tính (watchlist, mã đang giữ); "
+              "mã có thẻ anh nhập (/tsdinhgia) luôn báo theo thẻ của anh")),
             ("altcoin", "Altcoin · thông báo", (os.environ.get("ALTCOIN_ENABLED") or "").strip() == "1",
              "Tin của bot Altcoin, mở đầu “🪙 Altcoin ›”, qua Telegram và Zoom ở trên; lệnh: /alt"),
         ]

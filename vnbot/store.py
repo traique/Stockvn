@@ -16,6 +16,8 @@ from one day to the next:
 - ``equity``, ``fills``: each book's NAV per session and its fills (a book file keeps
   only its last 500 fills).
 - ``events``: the activity log (INFO and up), secrets masked (vnbot.eventlog).
+- ``valuations``: the bot's own valuation card of a stock, one row a (day, stock): its levels,
+  zone and assumptions, or why there is none (vnbot.dinhgia: "what changed since the last view").
 - ``kv``: loose values.
 
 The store never stops the bot: the recording paths call it through ``safe`` and a
@@ -37,7 +39,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DB_FILE = "bot.db"
-KEEP_DAYS = 730            # signals, scans, market, equity: two years (STORE_KEEP_DAYS)
+KEEP_DAYS = 730            # signals, scans, market, equity, valuations: two years (STORE_KEEP_DAYS)
 EVENTS_DAYS = 14           # the activity log (EVENTS_KEEP_DAYS)
 
 # table -> (columns as (name, kind), unique key). kind: id | text | real | int.
@@ -77,10 +79,18 @@ SCHEMA: dict[str, tuple[tuple[tuple[str, str], ...], tuple[str, ...]]] = {
         ("price", "real"), ("cost", "real"), ("pnl", "real"), ("reason", "text"), ("ts", "real"),
     ), ("book", "day", "symbol", "side", "qty", "price")),
     "events": ((("id", "id"), ("ts", "real"), ("level", "text"), ("src", "text"), ("msg", "text")), ()),
+    # vnbot.dinhgia: the day's last card of a stock (price_day: its price's session; note: why no card)
+    "valuations": ((
+        ("day", "text"), ("symbol", "text"), ("ts", "real"), ("price_day", "text"), ("close", "real"),
+        ("period", "text"), ("bvps", "real"), ("roe", "real"), ("ke", "real"), ("lam", "real"), ("bear", "real"),
+        ("eab", "real"), ("base", "real"), ("bull", "real"), ("zone", "text"), ("mos", "real"), ("pb_pct", "real"),
+        ("expires", "text"), ("profile", "text"), ("reliability", "text"), ("note", "text"),
+    ), ("day", "symbol")),
 }
 INDEXES = (
     ("ix_signals_day", "signals", "day"), ("ix_signals_status", "signals", "status"),
     ("ix_signals_symbol", "signals", "symbol"), ("ix_events_ts", "events", "ts"), ("ix_scans_day", "scans", "day"),
+    ("ix_valuations_symbol", "valuations", "symbol"),
 )
 # What the web page offers as CSV / JSON (vnbot.chandoan_web), oldest first.
 EXPORTS = {
@@ -90,6 +100,7 @@ EXPORTS = {
     "equity": "SELECT * FROM equity ORDER BY day, book",
     "fills": "SELECT * FROM fills ORDER BY day, id",
     "events": "SELECT * FROM events ORDER BY ts",
+    "valuations": "SELECT * FROM valuations ORDER BY day, symbol",
 }
 _NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
 
@@ -409,6 +420,17 @@ class Store:
     def add_fills(self, rows: list[dict]) -> None:
         self.insert_new("fills", [{**r, "ts": time.time()} for r in rows])
 
+    # ── valuations (vnbot.dinhgia) ──
+    def valuation_rows(self, symbol: str, limit: int = 2) -> list[dict]:
+        """A stock's rows, newest day first."""
+        return self.db.run("SELECT * FROM valuations WHERE symbol = ? ORDER BY day DESC LIMIT ?", (symbol, int(limit)),
+                           fetch=True)
+
+    def latest_valuations(self) -> list[dict]:
+        """The newest row of every stock."""
+        return self.db.run("SELECT v.* FROM valuations v JOIN (SELECT symbol, MAX(day) AS day FROM valuations "
+                           "GROUP BY symbol) m ON v.symbol = m.symbol AND v.day = m.day", fetch=True)
+
     # ── events ──
     def add_events(self, rows: list[tuple]) -> None:
         self.db.many("INSERT INTO events (ts, level, src, msg) VALUES (?, ?, ?, ?)", rows)
@@ -433,7 +455,7 @@ class Store:
         now = time.time()
         cutoff = ((date.fromisoformat(today) if today else date.today()) - timedelta(days=keep_days())).isoformat()
         done = {"events": self.db.run("DELETE FROM events WHERE ts < ?", (now - events_days() * 86400,))}
-        for table in ("signals", "scans", "market", "equity"):
+        for table in ("signals", "scans", "market", "equity", "valuations"):
             done[table] = self.db.run(f"DELETE FROM {table} WHERE day < ?", (cutoff,))
         return done
 

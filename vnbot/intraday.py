@@ -13,14 +13,21 @@ of:
 - the Quant Engine paper book: its holdings (same checks) and its limit buy
   orders for today (the price is in the buy zone, or already under the planned stop);
 - VNINDEX down ``intraday_vni_drop_pct`` % (and twice that) from the last close;
-- the valuation cards the owner entered (``/tsdinhgia``, any stock, held or not): the
-  price entering the Rẻ zone (≤ Base) or the Đắt zone (≥ Bull). Once per entry, not
-  once a day: the last zone of each card is kept in ``valuation_zones.json`` (across
-  days and restarts) and is left only ``taisan.ZONE_BUFFER_PCT`` back past its level; at
-  most one Rẻ and one Đắt per card a session. A card past its date, or past an ex-date
-  since it was entered (its levels are on the old basis), is silenced, said once. These go
-  out after the other alerts, in a message of their own: a card's ex-dates are read from
-  VCI and a price per card from DNSE, which must not hold back a stop.
+- the valuation cards: the price entering the Rẻ zone (≤ Base) or the Đắt zone (≥ Bull) of
+  the bot's own card (``vnbot.dinhgia``, kept by the evening job) of every tracked stock -
+  watchlist, Tài sản holdings - or, for a stock the owner entered a card of (``/tsdinhgia``,
+  held or not), of his card instead: it overrides the bot's while it is valid; the alert names
+  the card it followed. Once per entry, not once a day: the last zone of each card is kept in
+  ``valuation_zones.json`` (across days and restarts) and is left only
+  ``taisan.ZONE_BUFFER_PCT`` back past its level; at most one Rẻ and one Đắt per card a session.
+  The owner's card past its date, or past an ex-date since it was entered (its levels are on
+  the old basis), is silenced, said once, and the bot's card takes over. The bot's card is used
+  only when built on the previous session's data or later (the 16:00 job, or a view today) and
+  before its next ex-date; the job builds it again each evening (a new statement, an ex-date).
+  No VCI call for the bot's cards here: the stored card and the live price. The "zones_bot"
+  switch on /ai turns the bot's cards' alerts off. These go out after the other alerts, in a
+  message of their own: an owner's card's ex-dates are read from VCI once a day and a price
+  per card from DNSE, which must not hold back a stop.
 
 On an ex-date (cash or stock dividend, bonus shares) the stop and targets of a
 book are on yesterday's price basis: when the source's history already shows
@@ -125,14 +132,16 @@ FOOTER = "Bot im lặng = không có việc cần làm. Bot không tự đặt l
 class IntradayMonitor:
     def __init__(self, settings, trader, notify: Callable[[str], None], *,
                  price=live_price, index_change=vnindex_change, exchange_of=exchange, switches=None,
-                 closes=history_close):
+                 closes=history_close, watchlist=list):
         self.settings, self.trader, self.notify = settings, trader, notify
-        self.switches = switches            # vnbot.channels.Switches: "intraday" on the web page
+        self.switches = switches            # vnbot.channels.Switches: "intraday", "zones_bot" on the web page
+        self.watchlist = watchlist          # () -> the watchlist: with the holdings, the bot's cards alerted on
         self.price, self.index_change, self.exchange_of = price, index_change, exchange_of
         self.closes = closes                # (code, session, day) -> that session's close as the source gives it now
         self.path = Path(settings.data_dir) / "intraday_alerts.json"
         self.zones_path = Path(settings.data_dir) / "valuation_zones.json"     # the last zone of each card
         self._last_check = 0.0
+        self._stale_said = ""               # the day the bot's cards not rebuilt were logged
         self._thread = threading.Thread(target=self._loop, name="intraday", daemon=True)
 
     def start(self) -> None:
@@ -321,18 +330,51 @@ class IntradayMonitor:
         self._remember(day, keys, texts, at)
         self.notify(f"🔔 Cảnh báo trong phiên {at} (không gọi AI)\n" + "\n".join(texts) + "\n" + FOOTER)
 
+    def _bot_cards(self, day: str, tracked: list[str], latest: dict[str, dict] | None = None) -> dict[str, dict]:
+        """The bot's cards of the tracked stocks usable today: built today or after the previous session's
+        evening job (``dinhgia.built_for``, the job's own rule), before their next ex-date - one on the old
+        share basis until rebuilt after it. ``latest``: ``dinhgia.Cards.latest()``. The stored rows only, no
+        VCI call."""
+        from tradingagents.market import vn_rules
+        from vnbot import dinhgia
+
+        before = vn_rules.prev_session(day)
+        latest = dinhgia.Cards(self.settings.data_dir).latest() if latest is None else latest
+        out, stale = {}, []
+        for symbol in tracked:
+            row = latest.get(symbol)
+            if not row or row.get("base") is None or row.get("bull") is None:
+                continue                      # not built yet, or no card (the row says why)
+            if row.get("day") != day and not dinhgia.built_for(row, before):
+                stale.append(symbol)
+                continue
+            if row.get("expires") and row["expires"] <= day:
+                continue                      # an ex-date: its per-share levels are on the old basis until tonight
+            out[symbol] = row
+        if stale and self._stale_said != day:
+            self._stale_said = day
+            logger.warning("Intraday: the bot's cards of %s not rebuilt after the %s evening job: no zone alert on "
+                           "them until they are", ", ".join(stale), before)
+        return out
+
     def _zone_alerts(self, day: str, price_of) -> list[str]:
-        """🟢 a card's Rẻ zone entered (price ≤ Base), 🔺 its Đắt zone (price ≥ Bull), for every
-        valuation card of the Tài sản portfolio (``vnbot.taisan``). Kept in its shadow results
-        ("re", "dat"; no AI call), and said only when kept there first: at most one of each per card a
-        session. The memory is the last zone per card; a card entered again starts from the zone its
-        save showed. An expired or stale card is said once and then left out; one whose ex-dates could
-        not be read today is skipped for now (a price on a new basis must not read as Rẻ)."""
+        """🟢 a card's Rẻ zone entered (price ≤ Base), 🔺 its Đắt zone (price ≥ Bull): the owner's card
+        (``vnbot.taisan``) of a stock he entered one for, else the bot's (``_bot_cards``; "zones_bot" on).
+        Kept in the Tài sản shadow results ("re", "dat", with the card's source; no AI call), and said
+        only when kept there first: at most one of each per card a session. The memory is the last zone
+        per card (the owner's under the stock's code, the bot's under "<code>@bot"); a card entered or
+        rebuilt with other levels starts from the zone it showed then. An owner's card expired or stale
+        is said once, then left out - the bot's card takes over; one whose ex-dates could not be read
+        today is skipped for now (a price on a new basis must not read as Rẻ)."""
+        from vnbot import dinhgia
+
         account = getattr(self.trader, "taisan", None)
-        if account is None:
-            return []
-        cards = account.valuations()
-        if not cards and not self.zones_path.exists():
+        manual = account.valuations() if account is not None else {}
+        bot_on = self.switches is None or self.switches.on("zones_bot")
+        tracked = dinhgia.tracked(self.watchlist(), account) if bot_on else []
+        latest = dinhgia.Cards(self.settings.data_dir).latest() if bot_on else {}
+        bot = self._bot_cards(day, tracked, latest) if bot_on else {}
+        if not manual and not bot and not self.zones_path.exists():
             return []
         try:
             memory = json.loads(self.zones_path.read_text(encoding="utf-8"))
@@ -340,58 +382,124 @@ class IntradayMonitor:
             memory = {}
         memory = memory if isinstance(memory, dict) else {}
         out, kept = [], {}
-        for symbol, card in sorted(cards.items()):
-            ident = "|".join(str(card.get(k)) for k in ("at", "bear", "base", "bull"))
-            seen = memory.get(symbol) if isinstance(memory.get(symbol), dict) else {}
-            seen = dict(seen) if seen.get("card") == ident else {"card": ident, "zone": card.get("zone")}
-            kept[symbol] = seen
-            if seen.get("muted"):
-                continue
+
+        def remembered(key: str, ident: str, zone) -> dict:
+            seen = memory.get(key) if isinstance(memory.get(key), dict) else {}
+            kept[key] = dict(seen) if seen.get("card") == ident else {"card": ident, "zone": zone}
+            return kept[key]
+
+        for symbol in sorted(set(manual) | set(bot)):
+            row = bot.get(symbol)
+            card = manual.get(symbol)
             try:
-                line = self._zone_line(account, symbol, card, seen, day, price_of)
+                if card is not None:
+                    seen = remembered(symbol, "|".join(str(card.get(k)) for k in ("at", "bear", "base", "bull")),
+                                      card.get("zone"))
+                    if not seen.get("muted"):
+                        later = symbol in tracked and (latest.get(symbol) or {}).get("base") is not None
+                        line = self._zone_line(account, symbol, card, seen, day, price_of,
+                                               bot_next="now" if row is not None else "later" if later else "")
+                        if line:
+                            out.append(line)
+                    if not seen.get("muted"):
+                        continue              # the owner's card stands: the bot's is not looked at
+                if row is not None:
+                    ident = "bot|" + "|".join([str(row.get("period"))] + [f"{float(row[k]):.0f}" for k in ("bear", "base", "bull")])
+                    # from the zone at the close, on the alerts' levels (a close between Bull and Base + 2% is Hợp lý)
+                    start = row.get("zone")
+                    if start == "Đắt" and float(row.get("close") or 0) < dinhgia.alert_levels(row)["bull"]:
+                        start = "Hợp lý"
+                    line = self._bot_zone_line(account, symbol, row, remembered(f"{symbol}@bot", ident, start),
+                                               day, price_of)
+                    if line:
+                        out.append(line)
             except Exception as exc:  # noqa: BLE001 - judged at the next check; the other cards go on
                 logger.warning("Intraday: valuation card of %s: %s", symbol, exc)
-                continue
-            if line:
-                out.append(line)
+        # the bot's memory of a stock not looked at now - the switch off, the owner's card standing, its card not
+        # rebuilt last night or past an ex-date today - is kept while the stock is tracked
+        for key, seen in memory.items():
+            if key.endswith("@bot") and key not in kept and (not bot_on or key[:-4] in manual or key[:-4] in tracked):
+                kept[key] = seen
         if kept != memory:
             write_text_atomic(self.zones_path, json.dumps(kept, ensure_ascii=False))
         return out
 
     @staticmethod
-    def _zone_line(account, symbol: str, card: dict, seen: dict, day: str, price_of) -> str | None:
-        """The alert of one card, if any; ``seen`` (its memory) updated in place."""
+    def _entered(account, symbol: str, card: dict, seen: dict, day: str, p: float, src: str) -> str | None:
+        """The zone ``p`` enters on ``card`` (``seen``, its memory, updated in place), when it enters Rẻ or
+        Đắt and is kept in the shadow results first (once per session and card source)."""
         from vnbot import taisan as ts
 
-        status = account.valuation_status(symbol, card, day)
-        again = f"nhập lại: /tsdinhgia {symbol} BEAR BASE BULL"
-        if status["expired"]:
-            seen["muted"] = "expired"
-            return f"⌛ {symbol}: thẻ định giá hết hạn {ts.ddmmyyyy(card['expires'])} → bot ngừng báo vùng Rẻ/Đắt; {again}"
-        if status["stale"]:
-            seen["muted"] = "stale"
-            return (f"⚠️ {symbol}: thẻ định giá cần cập nhật - GDKHQ {ts.ddmmyyyy(status['stale']['ex'])} "
-                    f"({status['stale']['what']}) sau ngày anh nhập {ts.ddmmyyyy(card['day'])}, các mốc còn theo giá "
-                    f"cũ → bot ngừng báo vùng Rẻ/Đắt; {again}")
-        if not status["checked"]:
-            return None
-        p = price_of(symbol)
-        if not p:
-            return None
         zone = ts.card_zone(card, p, seen.get("zone"))
         entered = zone != seen.get("zone") and zone in ("Rẻ", "Đắt")
         seen["zone"] = zone
         if not entered:
             return None
-        try:
-            if not account.record_alert("re" if zone == "Rẻ" else "dat", symbol, p, day, hook=False):
-                return None                      # said already this session
-        except Exception as exc:  # noqa: BLE001 - the alert is sent anyway
-            logger.warning("Tài sản: zone alert of %s not kept: %s", symbol, exc)
-        what = (f"🟢 {symbol} vào vùng Rẻ: giá {_fmt(p)} ≤ Base {_fmt(card['base'])}" if zone == "Rẻ"
+        if account is not None:
+            try:
+                if not account.record_alert("re" if zone == "Rẻ" else "dat", symbol, p, day, hook=False, src=src):
+                    return None                  # said already this session
+            except Exception as exc:  # noqa: BLE001 - the alert is sent anyway
+                logger.warning("Tài sản: zone alert of %s not kept: %s", symbol, exc)
+        return zone
+
+    @staticmethod
+    def _what(symbol: str, zone: str, card: dict, p: float) -> str:
+        return (f"🟢 {symbol} vào vùng Rẻ: giá {_fmt(p)} ≤ Base {_fmt(card['base'])}" if zone == "Rẻ"
                 else f"🔺 {symbol} vào vùng Đắt: giá {_fmt(p)} ≥ Bull {_fmt(card['bull'])}")
-        return (f"{what}, {ts.mos_text(card, p)} (thẻ anh nhập {ts.ddmm(card['day'])}: {ts.card_levels(card)}; "
-                "tham khảo, không phải lệnh)")
+
+    @classmethod
+    def _zone_line(cls, account, symbol: str, card: dict, seen: dict, day: str, price_of, *, bot_next: str = "") -> str | None:
+        """The alert of one card the owner entered, if any; ``seen`` (its memory) updated in place.
+        ``bot_next``: the bot's card of the stock takes over once this one is silenced - "now", or "later"
+        (not usable today: an ex-date today, or not rebuilt yet), "" none (no card, the switch off)."""
+        from vnbot import dinhgia
+        from vnbot import taisan as ts
+
+        status = account.valuation_status(symbol, card, day)
+        again = f"nhập lại: /tsdinhgia {symbol} BEAR BASE BULL"
+        when = f" khi bot tính lại thẻ (sau {dinhgia.JOB_TIME})" if bot_next == "later" else ""
+        after = (f"bot báo vùng Rẻ/Đắt theo thẻ của bot{when}; muốn dùng thẻ của anh thì " + again if bot_next
+                 else "bot ngừng báo vùng Rẻ/Đắt; " + again)
+        if status["expired"]:
+            seen["muted"] = "expired"
+            return f"⌛ {symbol}: thẻ định giá anh nhập hết hạn {ts.ddmmyyyy(card['expires'])} → {after}"
+        if status["stale"]:
+            seen["muted"] = "stale"
+            return (f"⚠️ {symbol}: thẻ định giá anh nhập cần cập nhật - GDKHQ {ts.ddmmyyyy(status['stale']['ex'])} "
+                    f"({status['stale']['what']}) sau ngày anh nhập {ts.ddmmyyyy(card['day'])}, các mốc còn theo giá "
+                    f"cũ → {after}")
+        if not status["checked"]:
+            return None
+        p = price_of(symbol)
+        if not p:
+            return None
+        zone = cls._entered(account, symbol, card, seen, day, p, "tay")
+        if zone is None:
+            return None
+        return (f"{cls._what(symbol, zone, card, p)}, {ts.mos_text(card, p)} (thẻ anh nhập {ts.ddmm(card['day'])}: "
+                f"{ts.card_levels(card)}; tham khảo, không phải lệnh)")
+
+    @classmethod
+    def _bot_zone_line(cls, account, symbol: str, row: dict, seen: dict, day: str, price_of) -> str | None:
+        """The alert of the bot's card of one stock (a ``dinhgia`` row), if any; ``seen`` updated in place."""
+        from vnbot import dinhgia
+        from vnbot import taisan as ts
+
+        p = price_of(symbol)
+        if not p:
+            return None
+        levels = dinhgia.alert_levels(row)
+        zone = cls._entered(account, symbol, levels, seen, day, p, "bot")
+        if zone is None:
+            return None
+        weak = ", tin cậy THẤP" if row.get("reliability") == "thấp" else ""
+        what = (f"🔺 {symbol} vào vùng Đắt: giá {_fmt(p)} ≥ Base {dinhgia.signed_pct(dinhgia.ALERT_BAND, 0)} "
+                f"{_fmt(levels['bull'])} (Bull {_fmt(row['bull'])} sát Base)"
+                if zone == "Đắt" and levels["bull"] > float(row["bull"]) else cls._what(symbol, zone, row, p))
+        return (f"{what}, {ts.mos_text(row, p)} (thẻ của bot{weak}, BCTC {row.get('period')}, "
+                f"tính sau phiên {dinhgia.ddmm(row.get('price_day') or '')}: {ts.card_levels(row)}; tham khảo, không phải "
+                f"lệnh; /dinhgia {symbol})")
 
     def _ticket_reminders(self, day: str, now) -> list[tuple[str, str]]:
         """The reminder of an exit ticket due today (``kyluat.ticket_reminders``), [] outside

@@ -12,7 +12,8 @@ close at TRADE_TIME (never before 15:05, when the day's bar is final). With
 ALTCOIN_ENABLED=1 it also runs the altcoin bot (altcoin/) as a child process, started
 once the stock is up and stopped with it (vnbot.altcoin_host), its pages under /altcoin/
 behind the same password (vnbot.hub), its commands (/alt) and notifications through this
-process's Telegram bot and Zoom app (vnbot.altcoin_bridge).
+process's Telegram bot and Zoom app (vnbot.altcoin_bridge). Off but uploaded, /altcoin/ is one
+page of the stock's saying how to turn it on.
 """
 
 import logging
@@ -67,11 +68,13 @@ def main() -> None:
     altcoin = altcoin_host.Supervisor(SETTINGS.data_dir, SETTINGS.public_url)
     bridge = altcoin_bridge.Bridge(altcoin)     # always: /alt then says why the altcoin is off
     app = web
+    from vnbot import ui
+
+    ui.SECTIONS = altcoin.sections()        # the switch on every private page; off: "Altcoin (tắt)" (vnbot.web)
     if altcoin.enabled:
-        from vnbot import hub, ui
+        from vnbot import hub
 
         boot.health_extra = altcoin.health
-        ui.SECTIONS = altcoin.state         # the section switch on every private page
         app = hub.Hub(web, altcoin, SETTINGS, throttle)
         _stop_on_signal(altcoin.stop)
     logging.info("Web: listening on 0.0.0.0:%d (SERVER_PORT=%s, PORT=%s, APP_PORT=%s). If the host says the app is "
@@ -171,7 +174,7 @@ def _start(throttle=None, bridge=None):
     DailyScheduler(SETTINGS, jobs, watchlist, bot=trader, notify=bot.broadcast, zoom_notify=bot.zoom_first).start()
     # Always running, whatever TRADE_MODE: the switch on /ai (default INTRADAY_ALERTS) turns the price
     # alerts on and off; the 14:20 reminder of a Tài sản exit ticket goes out from here regardless.
-    IntradayMonitor(SETTINGS, trader, bot.broadcast, switches=switches).start()
+    IntradayMonitor(SETTINGS, trader, bot.broadcast, switches=switches, watchlist=watchlist.get).start()
     logging.info("Intraday alerts: %s, every %d min during the session (no AI); exit-ticket reminders always",
                  "on" if switches.on("intraday") else "off", SETTINGS.intraday_interval_min)
     logging.info("Trading bot: mode %s, calibration %s, runs daily at %s (Vietnam time); watchlist report at %s",

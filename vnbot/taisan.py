@@ -18,7 +18,8 @@ values it, charts it, reports it every session and warns when to sell.
   owner), the marks used to see an ex-date (``Ledger.mark_to_history``), the alerts sent
   and their shadow results, the allocation thresholds, the corporate events, and the
   valuation cards the owner enters (``/tsdinhgia``: Bear/Base/Bull of any stock, held or
-  not; only for the zone alerts in the session, never a level of the portfolio).
+  not, optional - the bot computes its own, ``vnbot.dinhgia``; his card overrides the bot's in
+  the zone alerts of the session, never a level of the portfolio).
 - ``prices.json``: unadjusted closes per symbol and day (and VNINDEX), which the asset
   chart is computed from. ``pending.json``: the value of the rights waiting to arrive.
 """
@@ -51,12 +52,14 @@ ALERT_LEVELS = {
     "sell": ("🔴", "Mạnh", "trang đã chốt BÁN"),
     "early": ("🟠", "Sớm", "đổi chiều sang BÁN trong phiên (chưa chốt)"),
     "target": ("🎯", "Chốt lời", "chạm mục tiêu"),
-    "re": ("🟢", "Vào vùng Rẻ", "giá ≤ Base của thẻ định giá anh nhập"),
-    "dat": ("🔺", "Vào vùng Đắt", "giá ≥ Bull của thẻ định giá anh nhập"),
+    "re": ("🟢", "Vào vùng Rẻ", "giá ≤ Base của thẻ định giá (thẻ của bot, hoặc thẻ anh nhập khi có)"),
+    "dat": ("🔺", "Vào vùng Đắt", "giá ≥ Bull của thẻ định giá (thẻ của bot, hoặc thẻ anh nhập khi có)"),
 }
 UP_IS_RIGHT = ("re",)        # right when the price is higher 10 sessions later; every other level when lower
 ZONE_LEVELS = ("re", "dat")  # the valuation cards' zones (stocks often not held), kept apart from the holdings' alerts
-SHADOW_ROWS = 500            # shadow rows kept, the newest, for the holdings' alerts and for the zones each
+# whose card a zone alert followed: the owner's (/tsdinhgia; also every row before v1.17.0) or the bot's
+ZONE_SOURCES = {"tay": "thẻ anh nhập", "bot": "thẻ của bot"}
+SHADOW_ROWS = 500            # shadow rows kept, the newest: the holdings' alerts, and the zones of each card source
 SHADOW_SESSIONS = (5, 10)
 MAX_VALUATIONS = 30          # valuation cards kept: each one is a price read at every intraday check
 ZONE_BUFFER_PCT = 0.5        # a zone alerted is left only this far back past its level: no alert ping-pong
@@ -457,8 +460,15 @@ def _ratio(value: float) -> str:
 
 # ─── valuation cards entered by hand ──────────────────────────────────────────
 
+def _zone_source(row: dict) -> str:
+    """The card a zone alert's shadow row followed: "bot", else the owner's ("tay": every row before v1.17.0)."""
+    return "bot" if row.get("src") == "bot" else "tay"
+
+
 VALUATION_USAGE = ("Dùng: /tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - Bear Base Bull "
                    "theo đồng · /tsdinhgia CTG xoa · /tsdinhgia - xem các thẻ")
+VALUATION_OPTIONAL = ("Không bắt buộc nhập: bot tự tính thẻ định giá (/dinhgia) cho watchlist và mã đang giữ, tự báo khi "
+                      "giá vào Rẻ/Đắt. Thẻ anh nhập thay thẻ của bot cho mã đó.")
 
 
 def card_zone(card: dict, price: float, last: str | None = None) -> str:
@@ -1139,25 +1149,33 @@ class TaiSan:
         return {s: sig for s in symbols if (sig := store.state(s, day))}
 
     # ── alerts and their shadow results ──
-    def record_alert(self, level: str, symbol: str, price: float | None, day: str, at: str = "", *, hook: bool = True) -> bool:
+    def record_alert(self, level: str, symbol: str, price: float | None, day: str, at: str = "", *, hook: bool = True,
+                     src: str = "") -> bool:
         """Keep an alert sent for a holding (or a valuation card's zone), once per (day, symbol,
-        level), to judge later how the price went after it (``settle_shadow``). True when it is new.
-        ``hook``: also tell ``on_alert`` (the AI's look at the news); off for an alert the evening
-        report repeats and for the zone alerts."""
+        level, card source), to judge later how the price went after it (``settle_shadow``). True when
+        it is new. ``hook``: also tell ``on_alert`` (the AI's look at the news); off for an alert the
+        evening report repeats and for the zone alerts. ``src``: a zone alert's card, "tay" (the
+        owner's, the default) or "bot" (``ZONE_SOURCES``), so their results can be told apart."""
         if level not in ALERT_LEVELS:
             return False
+        src = (src or "tay") if level in ZONE_LEVELS else ""
         added = []
+
+        def group(r: dict) -> str:
+            """The rows trimmed together: the holdings' alerts, and the zones of each card source, so
+            up to 60 zone rows a day never push out the stop/sell rows _tag_sell reads, nor the bot's
+            cards the owner's."""
+            return _zone_source(r) if r.get("level") in ZONE_LEVELS else ""
 
         def change(s):
             rows = s["shadow"]
-            if any(r.get("day") == day and r.get("symbol") == symbol and r.get("level") == level for r in rows):
+            if any(r.get("day") == day and r.get("symbol") == symbol and r.get("level") == level
+                   and (group(r) == src) for r in rows):
                 return
             rows.append({"day": day, "at": at or now_vn().strftime("%H:%M"), "symbol": symbol, "level": level,
-                         "price": float(price) if price else None})
-            # trimmed per kind: up to 60 zone rows a day must not push out the stop/sell rows _tag_sell reads
-            zone = level in ZONE_LEVELS
-            if sum(1 for r in rows if (r.get("level") in ZONE_LEVELS) == zone) > SHADOW_ROWS:
-                rows.remove(next(r for r in rows if (r.get("level") in ZONE_LEVELS) == zone))
+                         "price": float(price) if price else None, **({"src": src} if src else {})})
+            if sum(1 for r in rows if group(r) == src) > SHADOW_ROWS:
+                rows.remove(next(r for r in rows if group(r) == src))
             added.append(True)
         self._update_state(change)
         if added and hook and self.on_alert is not None:
@@ -1193,13 +1211,13 @@ class TaiSan:
                     if i + n < len(days):
                         out[f"r{n}"] = round((series[days[i + n]] / base - 1) * 100, 2)
                 if out:
-                    results[(r["day"], r["symbol"], r["level"])] = out
+                    results[(r["day"], r["symbol"], r["level"], r.get("src"))] = out
         if not results:
             return 0
 
         def change(s):
             for r in s["shadow"]:
-                got = results.get((r.get("day"), r.get("symbol"), r.get("level")))
+                got = results.get((r.get("day"), r.get("symbol"), r.get("level"), r.get("src")))
                 if got:
                     r.update(got)
         self._update_state(change)
@@ -1254,21 +1272,29 @@ class TaiSan:
         return (r.get("day"), r.get("symbol"), r.get("old"), r.get("new"))
 
     def shadow_stats(self) -> list[dict]:
-        """Per alert level: how many settled, the mean move 5 and 10 sessions later, and how
-        often the alert was right 10 sessions later: the price lower (selling on it was right),
-        higher for "re" (``UP_IS_RIGHT``: the Rẻ zone said the price was low)."""
+        """Per alert level - a zone's per card source as well ("src": the owner's or the bot's card,
+        to compare them) - how many settled, the mean move 5 and 10 sessions later, and how often the
+        alert was right 10 sessions later: the price lower (selling on it was right), higher for "re"
+        (``UP_IS_RIGHT``: the Rẻ zone said the price was low)."""
         out = []
         rows = self.state()["shadow"]
         for level, (icon, name, _) in ALERT_LEVELS.items():
-            done = [r for r in rows if r.get("level") == level and r.get("r5") is not None]
-            ten = [r for r in done if r.get("r10") is not None]
-            up = level in UP_IS_RIGHT
-            out.append({"level": level, "icon": icon, "name": name, "alerts": len([r for r in rows if r.get("level") == level]),
-                        "settled": len(done), "up": up,
-                        "r5": sum(r["r5"] for r in done) / len(done) if done else None,
-                        "r10": sum(r["r10"] for r in ten) / len(ten) if ten else None,
-                        "right": sum(1 for r in ten if (r["r10"] > 0 if up else r["r10"] < 0)) / len(ten) * 100 if ten else None})
+            mine = [r for r in rows if r.get("level") == level]
+            sources = sorted({_zone_source(r) for r in mine}, key=list(ZONE_SOURCES).index) if level in ZONE_LEVELS else []
+            for src in sources or [None]:
+                picked = [r for r in mine if src is None or _zone_source(r) == src]
+                out.append(self._shadow_stat(level, icon, name + (f" · {ZONE_SOURCES[src]}" if src else ""), picked, src))
         return out
+
+    @staticmethod
+    def _shadow_stat(level: str, icon: str, name: str, rows: list[dict], src: str | None) -> dict:
+        done = [r for r in rows if r.get("r5") is not None]
+        ten = [r for r in done if r.get("r10") is not None]
+        up = level in UP_IS_RIGHT
+        return {"level": level, "src": src, "icon": icon, "name": name, "alerts": len(rows), "settled": len(done), "up": up,
+                "r5": sum(r["r5"] for r in done) / len(done) if done else None,
+                "r10": sum(r["r10"] for r in ten) / len(ten) if ten else None,
+                "right": sum(1 for r in ten if (r["r10"] > 0 if up else r["r10"] < 0)) / len(ten) * 100 if ten else None}
 
     # ── valuation cards entered by hand (/tsdinhgia, the page): informational, no level of the portfolio ──
     def valuations(self) -> dict[str, dict]:
@@ -1371,13 +1397,14 @@ class TaiSan:
                 return f"Chưa có thẻ định giá {', '.join(missing)}. {VALUATION_USAGE}"
             cards = {s: cards[s] for s in symbols}
         if not cards:
-            return f"Chưa có thẻ định giá nào. {VALUATION_USAGE}"
+            return f"Chưa có thẻ định giá anh nhập nào. {VALUATION_OPTIONAL} {VALUATION_USAGE}"
         prices, label = self.current_prices(sorted(cards))
         day = today_vn()
         lines = [f"📐 THẺ ĐỊNH GIÁ ANH NHẬP · {label} (tham khảo; không đổi cắt lỗ, mục tiêu hay quyết định của bot)"]
         lines += [self.valuation_line(s, c, prices.get(s), self.valuation_status(s, c, day)) for s, c in sorted(cards.items())]
         lines.append("Rẻ: giá ≤ Base · Đắt: giá ≥ Bull · MOS = (Base − giá)/Base. Bot báo trong phiên khi giá vào Rẻ "
-                     "hoặc Đắt; thẻ hết hạn hoặc qua ngày GDKHQ thì ngừng báo. " + VALUATION_USAGE)
+                     "hoặc Đắt theo thẻ anh nhập, thay thẻ bot tự tính của mã đó; thẻ hết hạn hoặc qua ngày GDKHQ thì báo "
+                     "một lần rồi bot quay về thẻ của bot. " + VALUATION_USAGE)
         return "\n".join(lines)
 
     def valuation_set_text(self, symbol: str, card: dict) -> str:
@@ -1388,8 +1415,9 @@ class TaiSan:
         return (f"✅ Thẻ định giá {symbol} (anh nhập, chỉ để tham khảo; không đổi cắt lỗ, mục tiêu hay quyết định của bot):\n"
                 + card_levels(card) + (f" · hạn {ddmmyyyy(card['expires'])}" if card.get("expires") else "")
                 + (f" · nguồn: {card['note']}" if card.get("note") else "") + f"\n{now}\n"
-                "Bot báo trong phiên khi giá vào vùng Rẻ hoặc Đắt (một lần mỗi lần vào vùng); thẻ ngừng báo khi hết hạn "
-                "hoặc qua ngày GDKHQ (cổ tức, thưởng, quyền mua): khi đó nhập lại thẻ.")
+                "Bot báo trong phiên khi giá vào vùng Rẻ hoặc Đắt theo thẻ này, thay thẻ bot tự tính của mã này (một lần "
+                "mỗi lần vào vùng); hết hạn hoặc qua ngày GDKHQ (cổ tức, thưởng, quyền mua) thì bot báo một lần rồi quay về "
+                f"thẻ của bot. /tsdinhgia {symbol} xoa: dùng lại thẻ của bot.")
 
     # ── allocation and risk ──
     def allocation(self, summary: dict) -> dict:
@@ -1857,8 +1885,8 @@ class TaiSan:
         "/tsnhatky - 20 dòng gần nhất · /tshuy - huỷ dòng cuối · /tshuy 27 - huỷ dòng số 27\n"
         "/tsxuat - file Excel (Zoom: link tải) · /tsnhap - gửi file .xlsx kèm lệnh này, rồi /tsnhap xacnhan\n"
         "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)\n"
-        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - thẻ định giá anh nhập (Bear Base "
-        "Bull, mã nào cũng được): bot báo trong phiên khi giá vào vùng Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
+        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - tuỳ chọn: thẻ anh nhập thay thẻ "
+        "bot tự tính khi báo Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
     )
 
     # ── recording (the commands and the web page share these) ──
