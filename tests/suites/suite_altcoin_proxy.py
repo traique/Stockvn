@@ -13,9 +13,11 @@ real localhost port (offline):
   own address or this site, a bare "/x"); a 5 MB answer streamed; security headers;
 - a 503 page while the child is not running; the stock's pages served meanwhile, and while
   the stock is still starting; the server's shutdown stops the child;
-- the altcoin off but uploaded (no Hub): GET /altcoin and /altcoin/ behind the same password are
-  the stock's page "Altcoin đang tắt" (how to turn it on), the switch says "(tắt)", everything
-  else under /altcoin/ is the stock's 404, /health unchanged.
+- the altcoin off but uploaded (no Hub): Supervisor.sections() (main_botkeep's switch: on, off
+  and uploaded, off and not uploaded); GET /altcoin and /altcoin/ behind the same password are
+  the stock's page "Altcoin đang tắt" (how to turn it on, the old bot.db at the server's own
+  ALT_DATA_DIR or <DATA_DIR>/altcoin), the switch says "(tắt)" in the sidebar and the phone bar,
+  everything else under /altcoin/ is the stock's 404, /health unchanged.
 """
 import base64
 import dataclasses
@@ -437,18 +439,30 @@ import os  # noqa: E402
 import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from vnbot import altcoin_host, ui  # noqa: E402
+from vnbot import altcoin_host, ui, web  # noqa: E402
 
 t.ok("off_but_uploaded: off (unset, 0, ' 0 ') with altcoin/hosted.py there; never when on or not uploaded",
      altcoin_host.off_but_uploaded({}) and altcoin_host.off_but_uploaded({"ALTCOIN_ENABLED": " 0 "})
      and not altcoin_host.off_but_uploaded({"ALTCOIN_ENABLED": "1"})
      and not altcoin_host.off_but_uploaded({}, hosted=Path(_common.ROOT / "no-such" / "hosted.py")))
+no_code = Path(_common.ROOT / "no-such" / "hosted.py")
+on_sup = Supervisor(SETTINGS.data_dir, environ={"ALTCOIN_ENABLED": "1"}, hosted=no_code)
+off_sup = Supervisor(SETTINGS.data_dir, environ={})
+t.ok("Supervisor.sections() (what main_botkeep gives ui.SECTIONS): on -> its state (uploaded or not); off with "
+     "altcoin/hosted.py -> its state ('Altcoin (tắt)'); off without the altcoin's code -> None, no switch",
+     on_sup.sections() == on_sup.state and off_sup.sections() == off_sup.state and off_sup.sections()()["state"] == "off"
+     and Supervisor(SETTINGS.data_dir, environ={"ALTCOIN_ENABLED": "0"}, hosted=no_code).sections() is None)
+t.ok("altcoin_host.alt_data_dir: ALT_DATA_DIR (relative to the working folder), else <DATA_DIR>/altcoin; the Supervisor's",
+     altcoin_host.alt_data_dir(SETTINGS.data_dir, {}) == Path(SETTINGS.data_dir).resolve() / "altcoin" == off_sup.data_dir
+     and altcoin_host.alt_data_dir(SETTINGS.data_dir, {"ALT_DATA_DIR": " data/altcoin-canary "})
+     == Path("data/altcoin-canary").resolve()
+     == Supervisor(SETTINGS.data_dir, environ={"ALT_DATA_DIR": "data/altcoin-canary"}).data_dir)
 off_throttle = webguard.LoginThrottle()
 off_late = boot.LateApp()
 off_late.ready(create_app(SETTINGS, JobQueue(SETTINGS), Watchlist(SETTINGS), switches=Switches(SETTINGS.data_dir, {}),
                           zoom=ZoomChannel(state_path=SETTINGS.data_dir / "zoom_off.json", start=False),
                           throttle=off_throttle))
-ui.SECTIONS = Supervisor(SETTINGS.data_dir, environ={}).state       # what main_botkeep sets when off
+ui.SECTIONS = off_sup.sections()        # what main_botkeep sets when off
 OFF_PORT, off_server = serve(off_late)
 st, hd, _ = call("GET", "/altcoin/", auth=None, port=OFF_PORT)
 t.ok("off: /altcoin/ asks for the password (401 Basic)", st == 401 and hd.get("www-authenticate") == "Basic", (st, hd))
@@ -460,16 +474,35 @@ t.ok("off: GET /altcoin/ and /altcoin -> 200, the same stock-styled page 'Altcoi
      and '<nav aria-label="Điều hướng chính">' in text, {k: v[0] for k, v in pages.items()})
 t.ok("off: how to turn it on: ALTCOIN_ENABLED=1, ALTCOIN_FRESH_START=1 or the old DB (§9), restart, same password",
      all(w in text for w in ("ALTCOIN_ENABLED=1", "ALTCOIN_FRESH_START=1", "mục 9", "ALTCOIN_TRONG_STOCKVN.md",
-                             "data/altcoin/bot.db", "Khởi động lại server", "cùng mật khẩu", 'href="/altcoin/"')))
+                             "Khởi động lại server", "cùng mật khẩu", 'href="/altcoin/"')))
+t.ok("off: the old SQLite file goes where the child will look: <DATA_DIR>/altcoin/bot.db (not a fixed data/altcoin)",
+     f"file SQLite cũ thành <code>{(Path(SETTINGS.data_dir).resolve() / 'altcoin' / 'bot.db').as_posix()}</code>)" in text
+     and "data/altcoin/bot.db" not in text, re.findall(r"file SQLite cũ thành <code>[^<]*</code>[^)]*", text))
+alt_root = altcoin_host.ROOT
+t.ok("... shown from the app's folder; ALT_DATA_DIR set: that folder, and the page says it is ALT_DATA_DIR's",
+     "thành <code>data/altcoin/bot.db</code>) theo" in web._altcoin_off_body(alt_root / "data" / "altcoin", False)
+     and "thành <code>data/altcoin-canary/bot.db</code> (thư mục <code>ALT_DATA_DIR</code> trên panel)) theo"
+     in web._altcoin_off_body(alt_root / "data" / "altcoin-canary", True)
+     and "thành <code>/srv/alt/bot.db</code> (thư mục" in web._altcoin_off_body(Path("/srv/alt"), True))
+os.environ["ALT_DATA_DIR"] = "data/altcoin-canary"
+try:
+    canary_app = create_app(SETTINGS, JobQueue(SETTINGS), Watchlist(SETTINGS), switches=Switches(SETTINGS.data_dir, {}),
+                            zoom=ZoomChannel(state_path=SETTINGS.data_dir / "zoom_canary.json", start=False))
+finally:
+    del os.environ["ALT_DATA_DIR"]
+CANARY_PORT, canary_server = serve(canary_app)
+canary = call("GET", "/altcoin/", port=CANARY_PORT)[2].decode()
+t.ok("... the server's own ALT_DATA_DIR (the canary's data/altcoin-canary) on its page",
+     f"<code>{(Path('data/altcoin-canary').resolve() / 'bot.db').as_posix()}</code> (thư mục <code>ALT_DATA_DIR</code>"
+     in canary, re.findall(r"file SQLite cũ thành <code>[^<]*</code>[^)]*", canary))
 switches = re.findall(r'<nav class="seg sections".*?</nav>', text)
-t.ok("off: the switch (sidebar and phone bar) marks Altcoin, labelled (tắt)", switches == [
+t.ok("off: the switch (sidebar and phone bar) marks Altcoin, labelled (tắt) in both", switches == [
     '<nav class="seg sections" aria-label="Khu vực"><a href="/">Cổ phiếu</a>'
-    '<a href="/altcoin/" class="on" aria-current="true">Altcoin (tắt)</a></nav>',
-    '<nav class="seg sections" aria-label="Khu vực"><a href="/">Cổ phiếu</a>'
-    '<a href="/altcoin/" class="on" aria-current="true">Altcoin</a></nav>'], switches)
+    '<a href="/altcoin/" class="on" aria-current="true">Altcoin (tắt)</a></nav>'] * 2, switches)
 st, _, body = call("GET", "/ai", port=OFF_PORT)
-t.ok("off: the stock's pages carry the switch, Cổ phiếu current, 'Altcoin (tắt)'", st == 200
-     and '<a href="/" class="on" aria-current="true">Cổ phiếu</a><a href="/altcoin/">Altcoin (tắt)</a>' in body.decode())
+t.ok("off: the stock's pages carry the switch, Cổ phiếu current, 'Altcoin (tắt)' (sidebar and phone bar)", st == 200
+     and body.decode().count('<a href="/" class="on" aria-current="true">Cổ phiếu</a><a href="/altcoin/">Altcoin (tắt)</a>')
+     == 2)
 others = [("GET", "/altcoin/_hub"), ("GET", "/altcoin/_hub/"), ("POST", "/altcoin/_hub/command"),
           ("GET", "/altcoin/hub.json"), ("GET", "/altcoin/health"), ("GET", "/altcoin/caidat"), ("GET", "/altcoin/ai"),
           ("GET", "/altcoin/api/state"), ("GET", "/altcoin/zoom"), ("GET", "/altcoin/docs"),
@@ -499,6 +532,6 @@ ON_PORT, on_server = serve(on_app)
 t.ok("on: the stock's app has no /altcoin page (the Hub answers there)", code("GET", "/altcoin/", port=ON_PORT) == 404
      and code("GET", "/altcoin", port=ON_PORT) == 404)
 ui.SECTIONS = None
-off_server.should_exit = on_server.should_exit = True
+off_server.should_exit = on_server.should_exit = canary_server.should_exit = True
 
 t.done()

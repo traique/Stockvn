@@ -16,6 +16,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -387,15 +388,24 @@ def _bot_page(trader, msg: str = "") -> str:
     return "".join(parts)
 
 
-def _altcoin_off_body() -> str:
-    """/altcoin/ while the altcoin is uploaded but off (ALTCOIN_ENABLED not 1): how to turn it on."""
+def _altcoin_off_body(alt_dir: Path, custom: bool) -> str:
+    """/altcoin/ while the altcoin is uploaded but off (ALTCOIN_ENABLED not 1): how to turn it on.
+    ``alt_dir``: where the child will look for its SQLite bot.db (``altcoin_host.alt_data_dir``), shown
+    from the app's folder; ``custom``: ALT_DATA_DIR set on the panel."""
+    from vnbot import altcoin_host
+
+    try:
+        shown = (alt_dir / "bot.db").relative_to(altcoin_host.ROOT).as_posix()
+    except ValueError:
+        shown = (alt_dir / "bot.db").as_posix()
+    where = f"<code>{html.escape(shown)}</code>" + (" (thư mục <code>ALT_DATA_DIR</code> trên panel)" if custom else "")
     steps = (
         "<ol><li>Trên panel Botkeep của server này (khung <code>.env</code>), đặt <code>ALTCOIN_ENABLED=1</code>.</li>"
         "<li>Dữ liệu Altcoin (DB riêng, không bao giờ dùng DB của Cổ phiếu):<ul>"
         "<li>Chạy mới, ảo (paper), DB trống: thêm <code>ALTCOIN_FRESH_START=1</code> cho lần chạy đầu, "
         "rồi xoá dòng này.</li>"
         "<li>Đã có bot Altcoin cũ: chuyển DB cũ sang trước (<code>ALT_DATABASE_URL</code> là chuỗi Supabase cũ, hoặc "
-        "file SQLite cũ thành <code>data/altcoin/bot.db</code>) theo mục 9 của <code>docs/ALTCOIN_TRONG_STOCKVN.md</code> "
+        f"file SQLite cũ thành {where}) theo mục 9 của <code>docs/ALTCOIN_TRONG_STOCKVN.md</code> "
         "(trong repo, không có trong gói upload); "
         "không đặt <code>ALTCOIN_FRESH_START</code>.</li></ul></li>"
         "<li>Khởi động lại server.</li>"
@@ -588,8 +598,11 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
     from vnbot import altcoin_host
 
     if altcoin_host.off_but_uploaded():     # on, the Hub answers everything under /altcoin before this app
+        off_body = _altcoin_off_body(altcoin_host.alt_data_dir(settings.data_dir),
+                                     bool((os.environ.get("ALT_DATA_DIR") or "").strip()))
+
         def altcoin_off() -> HTMLResponse:
-            return HTMLResponse(ui.page("Altcoin đang tắt", _altcoin_off_body(), section="altcoin",
+            return HTMLResponse(ui.page("Altcoin đang tắt", off_body, section="altcoin",
                                         show_bot=trader is not None and settings.trade_mode != "off"))
 
         for path in ("/altcoin", "/altcoin/"):      # nothing else under /altcoin/: the stock's 404

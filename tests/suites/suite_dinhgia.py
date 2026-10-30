@@ -215,6 +215,12 @@ ctg = vv.assess("CTG", "2026-10-28")
 t.ok("CTG keeps v1.16.0's card: Ke 12%, Base 27.643, Bull 28.066 by ROE p80 (under Base at Ke 10%, 28.749: no floor "
      "for a bank), reliability CAO", ctg.profile == "banking" and round(ctg.base) == 27_643 and round(ctg.bull) == 28_066
      and ctg.bull_ke is None and ctg.reliability == "cao" and vv.render_card(ctg).splitlines()[0].endswith("- ngân hàng ---"))
+fast = pd.DataFrame({"Period": ["Q3/2023", "Q3/2026"], "Base": [100.0, 300.0]})     # 44%/year
+t.ok("ROE ≥ 20% and a fast-growing book drop only the doanh nghiệp profile: a bank (ACB's 5-year median ROE 23,9%), "
+     "an insurer, a broker stay CAO (README, NOTES)",
+     all(vv._reliability(k, "ACB", 0.239, fast) == valuation_config.RELIABILITY[k]
+         for k in ("banking", "insurance", "securities"))
+     and vv._reliability("default", "HPG", 0.239, fast)[0] == "thấp")
 growth = vv._book_growth(pd.DataFrame({"Period": ["Q3/2023", "Q4/2025", "Q3/2026"], "Base": [100.0, 150.0, 200.0]}))
 t.ok("book growth: the same quarter three years before (100 → 200: 25,99%/year); none without it",
      abs(growth - (2 ** (1 / 3) - 1)) < 1e-12

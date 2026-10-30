@@ -309,8 +309,12 @@ input.switch:checked::after{transform:translateX(12px);box-shadow:none}
   cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .seg button.on,.seg button[aria-selected=true],.seg a.on,.seg button[aria-pressed=true]{background:var(--surface);color:var(--text);box-shadow:var(--edge-stock)}
 .seg a:hover{text-decoration:none;color:var(--text)}
-/* the two sections of the site (with the altcoin on): in the sidebar, compact in the phone bar */
-.sidebar .sections{margin:0 var(--space-xs) var(--space-sm)}
+/* the two sections of the site (the altcoin uploaded): one row in the sidebar (a long state wraps inside
+   its own segment), compact in the phone bar */
+.sections{flex-wrap:nowrap}.sections a{white-space:nowrap}
+.sidebar .sections{display:flex;margin:0 var(--space-xs) var(--space-sm)}
+.sidebar .sections a{flex:1 0 auto;padding:var(--space-3xs) var(--space-xs)}
+.sidebar .sections a+a{flex-shrink:1;min-width:0;white-space:normal;text-align:center}
 .topbar .sections{display:inline-flex;width:auto;flex:none}.topbar .sections a{flex:none;min-height:28px;padding:0 var(--space-xs)}
 .tabs{display:flex;gap:var(--space-lg);border-bottom:1px solid var(--border);margin-bottom:var(--gap);overflow-x:auto}
 .tabs button{position:relative;min-height:36px;padding:var(--space-xs) 0;border:0;background:none;color:var(--muted);cursor:pointer;white-space:nowrap}
@@ -529,10 +533,11 @@ MOON = icon("moon", "i-moon")
 e = html.escape
 NONE = "chưa có"   # a figure that is missing (a zero is a zero)
 
-# Set by main_botkeep when the altcoin's code is uploaded (on, or off: "Altcoin (tắt)"): a callable
-# giving its state (vnbot.altcoin_host.Supervisor.state). Unset, the pages are the stock's alone.
+# Set by main_botkeep (vnbot.altcoin_host.Supervisor.sections()) when the altcoin's code is uploaded (on,
+# or off: "Altcoin (tắt)"): a callable giving its state. Unset, the pages are the stock's alone.
 SECTIONS = None
 _ALT_LABEL = {"running": "", "starting": " (đang khởi động)", "waiting": " (chờ instance khác)", "backoff": " (lỗi)"}
+_ALT_SHORT = {"running": "", "starting": " (chờ)", "waiting": " (chờ)", "backoff": " (lỗi)"}    # the phone bar's
 
 # The sidebar: the main screens, then the tools and the system pages (key, path, label, icon).
 NAV = (("home", "/", "Tổng quan", "home"), ("taisan", "/taisan", "Danh mục", "wallet"))
@@ -581,21 +586,21 @@ def sidebar_nav(active: str, show_bot: bool) -> str:
 def sections(compact: bool = False, current: str = "stock") -> str:
     """The switch between the two sections, Cổ phiếu (/) and Altcoin (/altcoin/, its state
     beside its name); the altcoin's pages carry the same (altcoin/hosted.py). Empty unless
-    SECTIONS is set. ``compact``: the phone bar's, names only; ``current``: "altcoin" on the
-    stock's own /altcoin/ page (the altcoin off, vnbot.web)."""
+    SECTIONS is set. ``compact``: the phone bar's, the state in a word ("Altcoin (tắt)");
+    ``current``: "altcoin" on the stock's own /altcoin/ page (the altcoin off, vnbot.web)."""
     if SECTIONS is None:
         return ""
     try:
         snap = SECTIONS()
-        state = _ALT_LABEL.get(snap.get("state"), " (tắt)")
+        state = (_ALT_SHORT if compact else _ALT_LABEL).get(snap.get("state"), " (tắt)")
         if snap.get("state") == "running" and snap.get("seam_ok") is False:
-            state = " (lỗi kênh)"
+            state = " (lỗi)" if compact else " (lỗi kênh)"
     except Exception:  # noqa: BLE001 - a page never fails on it
         state = ""
     on = ' class="on" aria-current="true"'
     alt = current == "altcoin"
     return (f'<nav class="seg sections" aria-label="Khu vực"><a href="/"{"" if alt else on}>Cổ phiếu</a>'
-            f'<a href="/altcoin/"{on if alt else ""}>Altcoin{"" if compact else e(state)}</a></nav>')
+            f'<a href="/altcoin/"{on if alt else ""}>Altcoin{e(state)}</a></nav>')
 
 
 def theme_button() -> str:

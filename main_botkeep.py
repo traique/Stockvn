@@ -68,17 +68,15 @@ def main() -> None:
     altcoin = altcoin_host.Supervisor(SETTINGS.data_dir, SETTINGS.public_url)
     bridge = altcoin_bridge.Bridge(altcoin)     # always: /alt then says why the altcoin is off
     app = web
+    from vnbot import ui
+
+    ui.SECTIONS = altcoin.sections()        # the switch on every private page; off: "Altcoin (tắt)" (vnbot.web)
     if altcoin.enabled:
-        from vnbot import hub, ui
+        from vnbot import hub
 
         boot.health_extra = altcoin.health
-        ui.SECTIONS = altcoin.state         # the section switch on every private page
         app = hub.Hub(web, altcoin, SETTINGS, throttle)
         _stop_on_signal(altcoin.stop)
-    elif altcoin_host.off_but_uploaded():
-        from vnbot import ui
-
-        ui.SECTIONS = altcoin.state         # "Altcoin (tắt)"; /altcoin/ says how to turn it on (vnbot.web)
     logging.info("Web: listening on 0.0.0.0:%d (SERVER_PORT=%s, PORT=%s, APP_PORT=%s). If the host says the app is "
                  "not responding, its assigned port must match: set SERVER_PORT to it.", SETTINGS.port,
                  os.environ.get("SERVER_PORT", "-"), os.environ.get("PORT", "-"), os.environ.get("APP_PORT", "-"))

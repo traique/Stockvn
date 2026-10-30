@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.17.0"
 RELEASED = "2026-10-30"
-RELEASE_BUILD = "aeea8c5"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "6a8c680"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -35,7 +35,7 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.17.0", "2026-10-30", (
         "Định giá bot tự tính cho mọi mã, không cần nhập: /dinhgia MÃ (gõ tắt /dg); Zoom: dinhgia FPT",
         "Mô hình P/B hợp lý như thẻ ngân hàng; Ke 12% ngân hàng, 13% mã khác (VALUATION_KE_DEFAULT)",
-        "Mỗi thẻ ghi độ tin cậy: cao (ngân hàng, bảo hiểm, chứng khoán), thấp (BĐS, công nghệ, ROE rất cao...)",
+        "Mỗi thẻ ghi độ tin cậy: cao (ngân hàng, bảo hiểm, chứng khoán), thấp (BĐS; DN công nghệ, ROE ≥ 20%…)",
         "Không lập thẻ khi vốn chủ âm, chưa đủ 3 năm ROE hoặc đang lỗ, và nói rõ lý do",
         "Có gì đổi so với lần xem trước: mốc đổi từ 0,3%, đổi vùng, BCTC mới, đổi giả định",
         "/dinhgia: mã theo dõi xếp theo MOS; trang web /dinhgia/MÃ theo bố cục hồ sơ PDF",

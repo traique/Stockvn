@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.15.0** và **Altcoin 3.2.1** (bản dựng `e737954`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.2.1** (bản dựng `e737954`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -180,7 +180,7 @@ Altcoin còn đọc `altcoin/.env` và `altcoin/bot.env` trên server (tên bi�
 
 ### 5.1 Xem trang Altcoin
 
-Mở **`<PUBLIC_URL>/altcoin/`** (ví dụ `https://vn.bot-keep.xyz/altcoin/`), hoặc bấm **Altcoin** trên thanh "Cổ phiếu | Altcoin" của mọi trang Cổ phiếu (thanh bên, dưới logo; trên điện thoại ở thanh trên cùng). Trình duyệt hỏi đăng nhập: tên gì cũng được, mật khẩu là `WEB_PASSWORD` của Cổ phiếu (đã đăng nhập Cổ phiếu thì không hỏi lại). Bấm **Cổ phiếu** để về `/`. Gói upload không có thư mục `altcoin/` thì không có thanh này và `/altcoin/` là 404.
+Mở **`<PUBLIC_URL>/altcoin/`** (ví dụ `https://vn.bot-keep.xyz/altcoin/`), hoặc bấm **Altcoin** trên thanh "Cổ phiếu | Altcoin" của mọi trang Cổ phiếu (thanh bên, dưới logo; trên điện thoại ở thanh trên cùng, trạng thái gọn một chữ: `(chờ)`, `(lỗi)`, `(tắt)`). Trình duyệt hỏi đăng nhập: tên gì cũng được, mật khẩu là `WEB_PASSWORD` của Cổ phiếu (đã đăng nhập Cổ phiếu thì không hỏi lại). Bấm **Cổ phiếu** để về `/`. Gói upload không có thư mục `altcoin/` thì không có thanh này và `/altcoin/` là 404.
 
 Mở `/altcoin/` sẽ thấy, tuỳ trạng thái (chữ cạnh "Altcoin" trên thanh):
 
@@ -189,13 +189,13 @@ Mở `/altcoin/` sẽ thấy, tuỳ trạng thái (chữ cạnh "Altcoin" trên 
 | `Altcoin` | Các trang của bot Altcoin (tổng quan, AI, cài đặt, phiên bản), mọi link nằm dưới `/altcoin/` trừ 3 link sang Cổ phiếu (`/`, `/ai#kenh`, `/zoom`) |
 | `(đang khởi động)`, `(chờ instance khác)`, `(lỗi)` | Trang 503 "Altcoin đang khởi động" nêu lý do, 50 dòng log cuối, tự tải lại |
 | `(tắt)`, `ALTCOIN_ENABLED=1` | Trang 503 "Altcoin đang tắt" nêu lý do bị từ chối (mục 12) và log cuối: sửa rồi khởi động lại |
-| `(tắt)`, `ALTCOIN_ENABLED` khác `1` | Trang **"Altcoin đang tắt"** của Cổ phiếu (từ v1.17.0, cùng mật khẩu, cùng giao diện Cổ phiếu) với cách bật: (1) đặt `ALTCOIN_ENABLED=1` trên panel Botkeep; (2) chạy mới, ảo: thêm `ALTCOIN_FRESH_START=1` cho lần chạy đầu rồi xoá; đã có bot Altcoin cũ: chuyển DB cũ sang theo mục 9, không đặt `ALTCOIN_FRESH_START`; (3) khởi động lại server; (4) mở lại `/altcoin/` với cùng mật khẩu. Không có gì được chuyển tới Altcoin: `/altcoin/hub.json`, `/altcoin/_hub…` và mọi đường khác dưới `/altcoin/` là 404 |
+| `(tắt)`, `ALTCOIN_ENABLED` khác `1` | Trang **"Altcoin đang tắt"** của Cổ phiếu (từ v1.17.0, cùng mật khẩu, cùng giao diện Cổ phiếu) với cách bật: (1) đặt `ALTCOIN_ENABLED=1` trên panel Botkeep; (2) chạy mới, ảo: thêm `ALTCOIN_FRESH_START=1` cho lần chạy đầu rồi xoá; đã có bot Altcoin cũ: chuyển DB cũ sang theo mục 9, không đặt `ALTCOIN_FRESH_START` (trang ghi đúng chỗ đặt `bot.db` cũ: `<ALT_DATA_DIR>/bot.db` của server, mặc định `data/altcoin/bot.db`); (3) khởi động lại server; (4) mở lại `/altcoin/` với cùng mật khẩu. Không có gì được chuyển tới Altcoin: `/altcoin/hub.json`, `/altcoin/_hub…` và mọi đường khác dưới `/altcoin/` là 404 |
 
 ### 5.2 Trạng thái
 
 | Nơi xem | Cho thấy |
 |---|---|
-| Thanh "Cổ phiếu / Altcoin" trên mọi trang | `Altcoin` (đang chạy), `(đang khởi động)`, `(chờ instance khác)`, `(lỗi)`, `(lỗi kênh)` hoặc `(tắt)` |
+| Thanh "Cổ phiếu / Altcoin" trên mọi trang | `Altcoin` (đang chạy), `(đang khởi động)`, `(chờ instance khác)`, `(lỗi)`, `(lỗi kênh)` hoặc `(tắt)`; trên điện thoại gọn một chữ: `(chờ)`, `(lỗi)`, `(tắt)` |
 | `/alt status` | Trả lời của Altcoin, hoặc vì sao Altcoin chưa trả lời |
 | `/health` (công khai) | Chỉ thêm `"altcoin": {"state": …}`. Mã HTTP chỉ phụ thuộc Cổ phiếu |
 | `/altcoin/hub.json` (cần mật khẩu) | Đầy đủ: `state`, `reason`, `pid`, `restarts`, `last_exit`, `version`, `build`, `leader`, `mode`, `live_error`, `seam_ok`, `bridge` (bộ đếm thông báo, lệnh cuối), `ignored_keys`, `dropped_secrets`, `rss_mb` (RAM của Cổ phiếu và Altcoin) |
@@ -225,10 +225,10 @@ Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch
 ```bash
 python tests/run_all.py                              # phải ra 28/28 bộ đạt
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
-python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.15.0-alt3.2.1.zip
+python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.2.1.zip
 ```
 
-Builder in hai dòng `Stock v1.15.0: bản dựng … = bản phát hành` và `Altcoin 3.2.1: bản dựng e737954 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.2.1: bản dựng e737954 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -279,7 +279,7 @@ Làm trước mọi việc khác, khi cả hai server cũ còn chạy.
 
 Mục đích: thử trên đúng server Botkeep những điểm không thử được trên máy tính (tiến trình con, múi giờ, cài ccxt, RAM), khi server altcoin cũ **vẫn chạy**. Canary chạy paper trên một DB tạm riêng, nên không đụng DB thật và không thấy instance cũ.
 
-1. Upload gói mới (mục 6) với `ALTCOIN_ENABLED` chưa đặt. Kiểm tra: `/health` 200, `/phienban` báo v1.15.0 "đúng bản phát hành", `/alt status` trả "🪙 Altcoin đang tắt (ALTCOIN_ENABLED khác 1).", thanh ghi "Altcoin (tắt)" và `/altcoin/` là trang "Altcoin đang tắt" (mục 5.1).
+1. Upload gói mới (mục 6) với `ALTCOIN_ENABLED` chưa đặt. Kiểm tra: `/health` 200, `/phienban` báo đúng bản vừa upload (ví dụ v1.17.0) "đúng bản phát hành", `/alt status` trả "🪙 Altcoin đang tắt (ALTCOIN_ENABLED khác 1).", thanh ghi "Altcoin (tắt)" và `/altcoin/` là trang "Altcoin đang tắt" (mục 5.1).
 2. Thêm trên panel rồi khởi động lại:
 
    ```env

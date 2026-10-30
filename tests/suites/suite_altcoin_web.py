@@ -16,8 +16,9 @@ the real bot/dashboard.build_app with a stub bot, after altcoin/hosted.py adapt(
   vnbot/altcoin_bridge.py over a real localhost port: a close that timed out, then a second one,
   is refused as busy and close_all runs once;
 - the stock's switch (vnbot/ui.py sections()): only when SECTIONS is set, the altcoin's state
-  beside its name, one <h1> and the main navigation unchanged, none on the error pages; the
-  same markup on both sides, and on the stock's own /altcoin/ page while the altcoin is off.
+  beside its name (in a word in the phone bar), one row, one <h1> and the main navigation
+  unchanged, none on the error pages; the same markup on both sides, and on the stock's own
+  /altcoin/ page while the altcoin is off.
 """
 import logging
 import re
@@ -185,7 +186,22 @@ t.ok("the Altcoin label shows its state", labels == {
     "running": "Altcoin", "running/seam": "Altcoin (lỗi kênh)", "starting": "Altcoin (đang khởi động)",
     "waiting": "Altcoin (chờ instance khác)", "backoff": "Altcoin (lỗi)", "disabled": "Altcoin (tắt)",
     "stopped": "Altcoin (tắt)", "off": "Altcoin (tắt)"}, labels)
-t.ok("the phone bar's switch: names only", ">Altcoin</a>" in ui.sections(compact=True))
+short = {}
+for snap in ({"state": "running", "seam_ok": True}, {"state": "running", "seam_ok": False}, {"state": "starting"},
+             {"state": "waiting"}, {"state": "backoff"}, {"state": "disabled"}, {"state": "off"}):
+    state = snap
+    short[snap["state"] + ("/seam" if snap.get("seam_ok") is False else "")] = re.search(
+        r'<a href="/altcoin/">([^<]*)</a>', ui.sections(compact=True)).group(1)
+t.ok("the phone bar's switch: the state in a word (off is never shown as plain 'Altcoin', i.e. running)", short == {
+    "running": "Altcoin", "running/seam": "Altcoin (lỗi)", "starting": "Altcoin (chờ)", "waiting": "Altcoin (chờ)",
+    "backoff": "Altcoin (lỗi)", "disabled": "Altcoin (tắt)", "off": "Altcoin (tắt)"}, short)
+css = ui.STYLE
+t.ok("the switch keeps one row (no wrap; in the sidebar Cổ phiếu never shrinks, a long state wraps inside its own "
+     "segment; the phone bar's labels never wrap)",
+     ".sections{flex-wrap:nowrap}.sections a{white-space:nowrap}" in css
+     and ".sidebar .sections a{flex:1 0 auto;" in css
+     and ".sidebar .sections a+a{flex-shrink:1;min-width:0;white-space:normal;" in css
+     and ".topbar .sections a{flex:none;" in css)
 ui.SECTIONS = lambda: 1 / 0
 t.ok("a failing state never breaks a page", "Altcoin</a>" in ui.page("Tổng quan", ui.title("Tổng quan")))
 ui.SECTIONS = lambda: {"state": "running"}
@@ -200,8 +216,8 @@ t.ok("the same switch on both sides, each marking its own section",
      and 'href="/altcoin/" class="on"' in alt_nav, (stock_nav, alt_nav))
 ui.SECTIONS = lambda: {"state": "off"}
 t.ok("the stock's own /altcoin/ page (altcoin off): its switch is the altcoin's, the state beside the name",
-     ui.sections(compact=True, current="altcoin") == alt_nav
-     and ui.sections(current="altcoin") == alt_nav.replace(">Altcoin</a>", ">Altcoin (tắt)</a>")
+     ui.sections(compact=True, current="altcoin") == ui.sections(current="altcoin")
+     == alt_nav.replace(">Altcoin</a>", ">Altcoin (tắt)</a>")
      and ui.page("Altcoin đang tắt", ui.title("Altcoin đang tắt"), section="altcoin").count(
          '<a href="/altcoin/" class="on" aria-current="true">') == 2, ui.sections(current="altcoin"))
 ui.SECTIONS = None
