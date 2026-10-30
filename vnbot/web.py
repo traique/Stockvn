@@ -387,6 +387,30 @@ def _bot_page(trader, msg: str = "") -> str:
     return "".join(parts)
 
 
+def _altcoin_off_body() -> str:
+    """/altcoin/ while the altcoin is uploaded but off (ALTCOIN_ENABLED not 1): how to turn it on."""
+    steps = (
+        "<ol><li>Trên panel Botkeep của server này (khung <code>.env</code>), đặt <code>ALTCOIN_ENABLED=1</code>.</li>"
+        "<li>Dữ liệu Altcoin (DB riêng, không bao giờ dùng DB của Cổ phiếu):<ul>"
+        "<li>Chạy mới, ảo (paper), DB trống: thêm <code>ALTCOIN_FRESH_START=1</code> cho lần chạy đầu, "
+        "rồi xoá dòng này.</li>"
+        "<li>Đã có bot Altcoin cũ: chuyển DB cũ sang trước (<code>ALT_DATABASE_URL</code> là chuỗi Supabase cũ, hoặc "
+        "file SQLite cũ thành <code>data/altcoin/bot.db</code>) theo mục 9 của <code>docs/ALTCOIN_TRONG_STOCKVN.md</code> "
+        "(trong repo, không có trong gói upload); "
+        "không đặt <code>ALTCOIN_FRESH_START</code>.</li></ul></li>"
+        "<li>Khởi động lại server.</li>"
+        '<li>Mở lại <a href="/altcoin/">/altcoin/</a> với cùng mật khẩu trang web. Thanh Cổ phiếu / Altcoin báo '
+        "“(đang khởi động)” rồi “Altcoin” khi đã chạy; nếu không chạy được, trang này nói lý do và các dòng log cuối.</li>"
+        "</ol>")
+    notes = ("<ul><li>Mặc định chạy ảo (paper). Chạy live cần <code>ALT_MODE=live</code> và đủ điều kiện ở mục 10 "
+             "của tài liệu.</li><li>Lệnh: <code>/alt status</code> trên Telegram, <code>alt status</code> trên Zoom "
+             "(kênh: <code>/vnbot alt status</code>).</li>"
+             "<li>Các biến <code>ALT_…</code> khác (khoá AI riêng, thư mục dữ liệu…): mục 4 của tài liệu.</li></ul>")
+    return (ui.title("Altcoin đang tắt", "Bot Altcoin (OKX) có trong gói upload nhưng chưa chạy: "
+                     "ALTCOIN_ENABLED trên panel Botkeep khác 1. Bot Cổ phiếu chạy bình thường, không phụ thuộc Altcoin.")
+            + '<div class="grid g2">' + ui.card("Cách bật", steps) + ui.card("Cần biết", notes) + "</div>")
+
+
 def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=None, zoom=None,
                switches=None, throttle: LoginThrottle | None = None) -> FastAPI:
     """``throttle``: the wrong-password counter, shared with the Hub (/altcoin/) when given."""
@@ -560,6 +584,16 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
 
     dinhgia_web.register(app, settings.data_dir, guard=guard, watchlist=watchlist.get, account=app.state.taisan,
                          show_bot=lambda: trader is not None and settings.trade_mode != "off")
+
+    from vnbot import altcoin_host
+
+    if altcoin_host.off_but_uploaded():     # on, the Hub answers everything under /altcoin before this app
+        def altcoin_off() -> HTMLResponse:
+            return HTMLResponse(ui.page("Altcoin đang tắt", _altcoin_off_body(), section="altcoin",
+                                        show_bot=trader is not None and settings.trade_mode != "off"))
+
+        for path in ("/altcoin", "/altcoin/"):      # nothing else under /altcoin/: the stock's 404
+            app.add_api_route(path, altcoin_off, methods=["GET"], dependencies=[Depends(guard)])
 
     critic_llm: list = []        # the provider chain, built on the first web /critic
 

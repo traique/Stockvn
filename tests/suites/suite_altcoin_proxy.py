@@ -12,7 +12,10 @@ real localhost port (offline):
   prefix; a body up to 64 KB, at most 8 at a time; Location rewritten (any scheme, the child's
   own address or this site, a bare "/x"); a 5 MB answer streamed; security headers;
 - a 503 page while the child is not running; the stock's pages served meanwhile, and while
-  the stock is still starting; the server's shutdown stops the child.
+  the stock is still starting; the server's shutdown stops the child;
+- the altcoin off but uploaded (no Hub): GET /altcoin and /altcoin/ behind the same password are
+  the stock's page "Altcoin đang tắt" (how to turn it on), the switch says "(tắt)", everything
+  else under /altcoin/ is the stock's 404, /health unchanged.
 """
 import base64
 import dataclasses
@@ -428,5 +431,74 @@ end = time.monotonic() + 10
 while sup.stops == 0 and time.monotonic() < end:
     time.sleep(0.05)
 t.ok("the server's shutdown (lifespan) stops the child", sup.stops >= 1, sup.stops)
+
+# ── 9. the altcoin off but uploaded: no Hub (as main_botkeep), the stock's own /altcoin/ page ──
+import os  # noqa: E402
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from vnbot import altcoin_host, ui  # noqa: E402
+
+t.ok("off_but_uploaded: off (unset, 0, ' 0 ') with altcoin/hosted.py there; never when on or not uploaded",
+     altcoin_host.off_but_uploaded({}) and altcoin_host.off_but_uploaded({"ALTCOIN_ENABLED": " 0 "})
+     and not altcoin_host.off_but_uploaded({"ALTCOIN_ENABLED": "1"})
+     and not altcoin_host.off_but_uploaded({}, hosted=Path(_common.ROOT / "no-such" / "hosted.py")))
+off_throttle = webguard.LoginThrottle()
+off_late = boot.LateApp()
+off_late.ready(create_app(SETTINGS, JobQueue(SETTINGS), Watchlist(SETTINGS), switches=Switches(SETTINGS.data_dir, {}),
+                          zoom=ZoomChannel(state_path=SETTINGS.data_dir / "zoom_off.json", start=False),
+                          throttle=off_throttle))
+ui.SECTIONS = Supervisor(SETTINGS.data_dir, environ={}).state       # what main_botkeep sets when off
+OFF_PORT, off_server = serve(off_late)
+st, hd, _ = call("GET", "/altcoin/", auth=None, port=OFF_PORT)
+t.ok("off: /altcoin/ asks for the password (401 Basic)", st == 401 and hd.get("www-authenticate") == "Basic", (st, hd))
+pages = {path: call("GET", path, port=OFF_PORT) for path in ("/altcoin/", "/altcoin")}
+text = pages["/altcoin/"][2].decode()
+t.ok("off: GET /altcoin/ and /altcoin -> 200, the same stock-styled page 'Altcoin đang tắt'",
+     all(r[0] == 200 for r in pages.values()) and pages["/altcoin"][2] == pages["/altcoin/"][2]
+     and "<title>Altcoin đang tắt · TradingAgents VN</title>" in text and text.count("<h1") == 1
+     and '<nav aria-label="Điều hướng chính">' in text, {k: v[0] for k, v in pages.items()})
+t.ok("off: how to turn it on: ALTCOIN_ENABLED=1, ALTCOIN_FRESH_START=1 or the old DB (§9), restart, same password",
+     all(w in text for w in ("ALTCOIN_ENABLED=1", "ALTCOIN_FRESH_START=1", "mục 9", "ALTCOIN_TRONG_STOCKVN.md",
+                             "data/altcoin/bot.db", "Khởi động lại server", "cùng mật khẩu", 'href="/altcoin/"')))
+switches = re.findall(r'<nav class="seg sections".*?</nav>', text)
+t.ok("off: the switch (sidebar and phone bar) marks Altcoin, labelled (tắt)", switches == [
+    '<nav class="seg sections" aria-label="Khu vực"><a href="/">Cổ phiếu</a>'
+    '<a href="/altcoin/" class="on" aria-current="true">Altcoin (tắt)</a></nav>',
+    '<nav class="seg sections" aria-label="Khu vực"><a href="/">Cổ phiếu</a>'
+    '<a href="/altcoin/" class="on" aria-current="true">Altcoin</a></nav>'], switches)
+st, _, body = call("GET", "/ai", port=OFF_PORT)
+t.ok("off: the stock's pages carry the switch, Cổ phiếu current, 'Altcoin (tắt)'", st == 200
+     and '<a href="/" class="on" aria-current="true">Cổ phiếu</a><a href="/altcoin/">Altcoin (tắt)</a>' in body.decode())
+others = [("GET", "/altcoin/_hub"), ("GET", "/altcoin/_hub/"), ("POST", "/altcoin/_hub/command"),
+          ("GET", "/altcoin/hub.json"), ("GET", "/altcoin/health"), ("GET", "/altcoin/caidat"), ("GET", "/altcoin/ai"),
+          ("GET", "/altcoin/api/state"), ("GET", "/altcoin/zoom"), ("GET", "/altcoin/docs"),
+          ("POST", "/altcoin/webhook/zoom"), ("GET", "/altcoin/x/"), ("GET", "/altcoin/%5Fhub")]
+for auth in (None, PASSWORD):
+    codes = {f"{m} {p}": code(m, p, auth=auth, headers=SAME, port=OFF_PORT) for m, p in others}
+    t.ok(f"off: everything else under /altcoin/ is the stock's 404 ({'with' if auth else 'without'} the password)",
+         set(codes.values()) == {404}, codes)
+st, hd, _ = call("GET", "/altcoin//", port=OFF_PORT)
+t.ok("off: /altcoin// -> the stock's usual trailing-slash redirect, to the page itself", st == 307
+     and hd.get("location", "").endswith("/altcoin"), (st, hd.get("location")))
+t.ok("off: POST /altcoin/ -> 405, the page only answers GET", code("POST", "/altcoin/", headers=SAME, port=OFF_PORT) == 405)
+for i in range(8):
+    call("GET", "/altcoin/", auth=f"bad{i}", client="10.4.0.1", port=OFF_PORT)
+st, hd, _ = call("GET", "/ai", client="10.4.0.1", port=OFF_PORT)
+t.ok("off: wrong passwords at /altcoin/ count with the stock's (429 on /ai)", st == 429 and hd.get("retry-after"), st)
+st, _, body = call("GET", "/health", auth=None, port=OFF_PORT)
+t.ok("off: /health unchanged (no altcoin field, no password)", st == 200
+     and set(json.loads(body)) == {"ok", "time", "version"}, body)
+os.environ["ALTCOIN_ENABLED"] = "1"
+try:
+    on_app = create_app(SETTINGS, JobQueue(SETTINGS), Watchlist(SETTINGS), switches=Switches(SETTINGS.data_dir, {}),
+                        zoom=ZoomChannel(state_path=SETTINGS.data_dir / "zoom_on.json", start=False))
+finally:
+    del os.environ["ALTCOIN_ENABLED"]
+ON_PORT, on_server = serve(on_app)
+t.ok("on: the stock's app has no /altcoin page (the Hub answers there)", code("GET", "/altcoin/", port=ON_PORT) == 404
+     and code("GET", "/altcoin", port=ON_PORT) == 404)
+ui.SECTIONS = None
+off_server.should_exit = on_server.should_exit = True
 
 t.done()

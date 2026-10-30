@@ -17,7 +17,7 @@ the real bot/dashboard.build_app with a stub bot, after altcoin/hosted.py adapt(
   is refused as busy and close_all runs once;
 - the stock's switch (vnbot/ui.py sections()): only when SECTIONS is set, the altcoin's state
   beside its name, one <h1> and the main navigation unchanged, none on the error pages; the
-  same markup on both sides.
+  same markup on both sides, and on the stock's own /altcoin/ page while the altcoin is off.
 """
 import logging
 import re
@@ -198,6 +198,12 @@ strip = re.compile(r' class="on" aria-current="true"')
 t.ok("the same switch on both sides, each marking its own section",
      strip.sub("", stock_nav) == strip.sub("", alt_nav) and 'href="/" class="on"' in stock_nav
      and 'href="/altcoin/" class="on"' in alt_nav, (stock_nav, alt_nav))
+ui.SECTIONS = lambda: {"state": "off"}
+t.ok("the stock's own /altcoin/ page (altcoin off): its switch is the altcoin's, the state beside the name",
+     ui.sections(compact=True, current="altcoin") == alt_nav
+     and ui.sections(current="altcoin") == alt_nav.replace(">Altcoin</a>", ">Altcoin (tắt)</a>")
+     and ui.page("Altcoin đang tắt", ui.title("Altcoin đang tắt"), section="altcoin").count(
+         '<a href="/altcoin/" class="on" aria-current="true">') == 2, ui.sections(current="altcoin"))
 ui.SECTIONS = None
 
 # ── 4. POST /_hub/command ──

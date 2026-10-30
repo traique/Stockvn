@@ -85,6 +85,14 @@ SECRET_NAME = re.compile(r"TOKEN|SECRET|KEY|PASS|DATABASE_URL")
 CHILD_FIELDS = ("leader", "mode", "version", "build", "seam_ok")
 
 
+def off_but_uploaded(environ=None, hosted: Path | None = None) -> bool:
+    """ALTCOIN_ENABLED is not 1 but the altcoin's code is uploaded: the section switch then says
+    "Altcoin (tắt)" and the stock's own /altcoin/ page says how to turn it on (vnbot.web);
+    nothing else answers under /altcoin/ (no Hub: nothing proxied, no _hub)."""
+    env = os.environ if environ is None else environ
+    return (env.get("ALTCOIN_ENABLED") or "").strip() != "1" and Path(hosted or HOSTED).is_file()
+
+
 def _set_value(value) -> str:
     """A real value: not blank, not a <...> placeholder, not Botkeep's mask."""
     value = (value or "").strip()

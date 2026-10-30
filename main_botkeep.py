@@ -12,7 +12,8 @@ close at TRADE_TIME (never before 15:05, when the day's bar is final). With
 ALTCOIN_ENABLED=1 it also runs the altcoin bot (altcoin/) as a child process, started
 once the stock is up and stopped with it (vnbot.altcoin_host), its pages under /altcoin/
 behind the same password (vnbot.hub), its commands (/alt) and notifications through this
-process's Telegram bot and Zoom app (vnbot.altcoin_bridge).
+process's Telegram bot and Zoom app (vnbot.altcoin_bridge). Off but uploaded, /altcoin/ is one
+page of the stock's saying how to turn it on.
 """
 
 import logging
@@ -74,6 +75,10 @@ def main() -> None:
         ui.SECTIONS = altcoin.state         # the section switch on every private page
         app = hub.Hub(web, altcoin, SETTINGS, throttle)
         _stop_on_signal(altcoin.stop)
+    elif altcoin_host.off_but_uploaded():
+        from vnbot import ui
+
+        ui.SECTIONS = altcoin.state         # "Altcoin (tắt)"; /altcoin/ says how to turn it on (vnbot.web)
     logging.info("Web: listening on 0.0.0.0:%d (SERVER_PORT=%s, PORT=%s, APP_PORT=%s). If the host says the app is "
                  "not responding, its assigned port must match: set SERVER_PORT to it.", SETTINGS.port,
                  os.environ.get("SERVER_PORT", "-"), os.environ.get("PORT", "-"), os.environ.get("APP_PORT", "-"))

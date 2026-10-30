@@ -529,8 +529,8 @@ MOON = icon("moon", "i-moon")
 e = html.escape
 NONE = "chưa có"   # a figure that is missing (a zero is a zero)
 
-# Set by main_botkeep when the altcoin runs beside the stock: a callable giving its state
-# (vnbot.altcoin_host.Supervisor.state). Unset, the pages are the stock's alone, as before.
+# Set by main_botkeep when the altcoin's code is uploaded (on, or off: "Altcoin (tắt)"): a callable
+# giving its state (vnbot.altcoin_host.Supervisor.state). Unset, the pages are the stock's alone.
 SECTIONS = None
 _ALT_LABEL = {"running": "", "starting": " (đang khởi động)", "waiting": " (chờ instance khác)", "backoff": " (lỗi)"}
 
@@ -578,10 +578,11 @@ def sidebar_nav(active: str, show_bot: bool) -> str:
             f'<div class="group-label">Hệ thống</div>{system}</nav>')
 
 
-def sections(compact: bool = False) -> str:
+def sections(compact: bool = False, current: str = "stock") -> str:
     """The switch between the two sections, Cổ phiếu (/) and Altcoin (/altcoin/, its state
     beside its name); the altcoin's pages carry the same (altcoin/hosted.py). Empty unless
-    SECTIONS is set. ``compact``: the phone bar's, names only."""
+    SECTIONS is set. ``compact``: the phone bar's, names only; ``current``: "altcoin" on the
+    stock's own /altcoin/ page (the altcoin off, vnbot.web)."""
     if SECTIONS is None:
         return ""
     try:
@@ -591,8 +592,10 @@ def sections(compact: bool = False) -> str:
             state = " (lỗi kênh)"
     except Exception:  # noqa: BLE001 - a page never fails on it
         state = ""
-    return ('<nav class="seg sections" aria-label="Khu vực"><a href="/" class="on" aria-current="true">Cổ phiếu</a>'
-            f'<a href="/altcoin/">Altcoin{"" if compact else e(state)}</a></nav>')
+    on = ' class="on" aria-current="true"'
+    alt = current == "altcoin"
+    return (f'<nav class="seg sections" aria-label="Khu vực"><a href="/"{"" if alt else on}>Cổ phiếu</a>'
+            f'<a href="/altcoin/"{on if alt else ""}>Altcoin{"" if compact else e(state)}</a></nav>')
 
 
 def theme_button() -> str:
@@ -628,9 +631,10 @@ def shell(title: str, body: str, *, nav: str, bottom: str = "", foot: str = "", 
 
 
 def page(title: str, body: str, *, active: str = "", refresh: int | None = None, show_bot: bool = True,
-         show_version: bool = True) -> str:
+         show_version: bool = True, section: str = "stock") -> str:
     """A private page. ``show_version``: the version in the sidebar and the footer (off on
-    the error pages, which a visitor without the password can see)."""
+    the error pages, which a visitor without the password can see); ``section``: the one
+    marked in the section switch."""
     from vnbot import version as ver
 
     pill, foot = "", ""
@@ -645,8 +649,8 @@ def page(title: str, body: str, *, active: str = "", refresh: int | None = None,
             "<span>Bot không đặt lệnh tới công ty chứng khoán.</span>" + foot)
     # The section switch shows the altcoin's state: not on the error pages, seen without the password
     return shell(title, body, nav=sidebar_nav(active, show_bot), bottom=bottom, foot=foot, refresh=refresh,
-                 sections=sections() if show_version else "",
-                 sections_compact=sections(compact=True) if show_version else "")
+                 sections=sections(current=section) if show_version else "",
+                 sections_compact=sections(compact=True, current=section) if show_version else "")
 
 
 def title(text: str, lead: str = "", right: str = "") -> str:
