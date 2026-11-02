@@ -18,17 +18,20 @@ from pathlib import Path
 
 VERSION = "3.3.0"
 RELEASED = "2026-11-02"
-RELEASE_BUILD = "8fa0794"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "b97ec07"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
     ("3.3.0", "2026-11-02", (
-        "Chạy ảo vào lệnh ở giá last lúc quyết định (+ trượt giá), không ở giá đóng nến 15m cũ vài phút; giá đã chạy quá xa thì bỏ, ghi lý do",
-        "Chạy thật: khối lượng tính theo giá mới; khớp xong rủi ro thật vượt kế hoạch 20% thì cắt bớt hợp đồng hoặc đóng và báo",
+        "Chạy ảo vào lệnh ở giá last lúc quyết định (+ trượt giá), không ở giá đóng nến 15m cũ vài phút; chỉ bỏ khi giá khớp đã vượt SL (range: vượt TP)",
+        "Cổng xét lại ở giá mới (ngược 0,5R, SL > 3 ATR, R:R range) là đổi chiến lược nên tắt sẵn – muốn dùng thì đặt FILL_RECHECK=true",
+        "Chạy thật: khối lượng theo giá mới; khớp xong rủi ro vượt kế hoạch 20% (hoặc 2× với lot tối thiểu) thì cắt bớt hợp đồng, dưới 1 lot giữ 1 lot, không được thì đóng",
         "SL/TP1/trailing xét mọi nến 1 phút giá last đã đóng từ lần kiểm tra trước – không còn sót râu chạm SL; chạy thật cũng theo giá last thay giá mark",
-        "Chốt TP1 làm tròn theo lot của sàn (1 hợp đồng thì giữ cả); cột phí ghi đủ hai chiều; risk_mult là rủi ro thật",
-        "Tín hiệu bóng và bộ tự học dùng cùng giá vào và phí 0,20% với lệnh chạy ảo (trước: giá đóng nến cũ, phí 0,15%)",
+        "Sau lúc bot tắt / mất quyền giao dịch: nến cũ chỉ khớp SL/TP đang đặt như sàn, không chốt TP1 hay đóng theo giá cũ – chạy ảo và chạy thật như nhau",
+        "Chạy thật: SL mới mà sàn chưa nhận thì bot tự giữ và đặt lại mỗi lượt; lỗi đọc vị thế hay lệnh đóng lỗi không còn ghi đóng nhầm; đóng lệnh huỷ cả SL/TP loại oco",
+        "Chốt TP1 làm tròn theo lot của sàn (1 hợp đồng thì giữ cả), báo giá khớp thật; cột phí ghi đủ hai chiều; risk_mult là rủi ro thật",
+        "Tín hiệu bóng và bộ tự học dùng cùng giá vào, phí 0,20% và cách bỏ phút vào lệnh như lệnh chạy ảo; kết quả bóng bản cũ không dùng để học",
     )),
     ("3.2.1", "2026-10-29", (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",

@@ -146,6 +146,7 @@ function renderLearn(L){
   const KIND={block:'Chặn',unblock:'Bỏ chặn',trigger_w:'Trọng số',min_score:'Ngưỡng điểm',exit_mode:'Cách thoát lệnh',ai_veto_conf:'Ngưỡng phủ quyết AI',tp1_r:'Mức TP1',reset:'Khôi phục'};
   let h=`<div class="note">
     ${tot<L.min_samples?`Bot đang thu thập kết quả của mọi tín hiệu (kể cả tín hiệu không vào lệnh). Cần ít nhất <b>${L.min_samples}</b> kết quả cho mỗi nhóm trước khi tự điều chỉnh – hiện có <b>${tot}</b>.<br>`:''}
+    ${st.legacy_excluded?`Không tính <b>${st.legacy_excluded}</b> kết quả của bản trước 3.3 (giá vào và phí khác – xem Phiên bản).<br>`:''}
     Tín hiệu kỹ thuật: <b>${tech.n||0}</b> kết quả · thắng <b>${tech.winrate||0}%</b> · kỳ vọng <b class="${(tech.exp_r||0)>=0?'up':'dn'}">${(tech.exp_r||0)>=0?'+':''}${f(tech.exp_r||0,2)}R</b>/tín hiệu
     ${av.veto_accuracy!=null?`<br>AI chặn đúng <b>${av.veto_accuracy}%</b> (${av.rejected.n} lần chặn, những lệnh đó nếu vào sẽ có kỳ vọng ${f(av.rejected.exp_r,2)}R)`:''}
     ${av.veto_conf!=null?`<br>Ngưỡng phủ quyết AI: <b>${av.veto_conf}%</b> – AI phản đối dưới mức này thì tín hiệu điểm ≥ ${(L.params||{}).ai_override_min_score??6.5} vẫn vào${av.override&&av.override.n?` (đã vào ${av.override.n} lệnh như vậy, kỳ vọng ${f(av.override.exp_r,2)}R)`:''}`:''}

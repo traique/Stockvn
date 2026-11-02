@@ -125,6 +125,7 @@ class Learner:
         self.last_stats = store.get("learn_stats")
         self.last_resolve = 0
         self.last_learn = 0
+        self._first = {}        # sid → nến 1m của khung 5m chứa lúc vào (không đổi nữa sau khi khung đóng)
 
     LEARNED_SCHEMA = 2
 
@@ -169,26 +170,48 @@ class Learner:
                 log.debug("shadow %s: %s", sym, e)
                 continue
             for it in items:
-                res = self._simulate_all(it, candles, cost_frac)
+                first = self._entry_bars(sym, it)
+                if first is False:
+                    continue            # chưa đọc được nến 1m lúc vào – để lượt sau, không mô phỏng lẫn giá trước lúc vào
+                res = self._simulate_all(it, candles, cost_frac, first)
                 if res:
                     outcome, r, rf, rh, rt, rv = res
                     self.store.set_outcome(it["sid"], outcome, r, rf, rh, rt, rv)
+                    self._first.pop(it["sid"], None)
                     done += 1
         if done:
             log.info("Tự học: cập nhật kết quả %d tín hiệu", done)
         return done
 
+    def _entry_bars(self, sym, it):
+        """Nến 1m của khung 5m chứa lúc vào tín hiệu (để mô phỏng bóng bỏ phút chứa lúc vào như lệnh paper – v3.3).
+        None: sàn không trả nến 1m nào (dùng cả nến 5m như cũ); False: lỗi mạng, để lượt sau."""
+        sid = it["sid"]
+        if sid in self._first:
+            return self._first[sid]
+        b0 = int(float(it["ts"]) // 300) * 300
+        try:
+            rows = self.okx.ex.fetch_ohlcv(sym, "1m", since=b0 * 1000, limit=6)
+        except Exception as e:
+            log.debug("shadow 1m %s: %s", sym, e)
+            return False
+        rows = [r for r in rows or [] if b0 * 1000 <= r[0] < (b0 + 300) * 1000] or None
+        self._first[sid] = rows
+        return rows
+
     @staticmethod
-    def _simulate_all(it, candles, cost_frac):
+    def _simulate_all(it, candles, cost_frac, first=None):
         """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1. Kết quả chính (outcome/R) theo cách bot đang dùng.
         Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ thoát kiểu fixed.
         v3.3 – cùng giá & phí với lệnh paper: vào ở it["entry"] (giá last lúc quyết định) trượt SLIPPAGE, 1R/TP1 tính
-        từ giá khớp đó, trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper."""
+        từ giá khớp đó, trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper.
+        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate)."""
         side, sl = it["side"], it["sl"]
         if not it["entry"] or not sl:
             return "NODATA", 0.0, None, None, None, None
+        sign = 1 if side == "long" else -1
         entry = costs.entry_fill(side, it["entry"])
-        if (entry - sl) * (1 if side == "long" else -1) <= 0:        # giá khớp đã vượt SL – không vào được
+        if (entry - sl) * sign <= 0:        # giá khớp đã vượt SL – không vào được (engine.fill_check)
             return "NODATA", 0.0, None, None, None, None
         try:
             f = json.loads(it.get("features") or "{}")
@@ -199,6 +222,8 @@ class Learner:
             atr = abs(entry - sl) / cfg.ATR_SL_MULT
         is_range = f.get("setup") == "range"
         tp_fixed = it.get("tp") if is_range else None
+        if is_range and tp_fixed and ((tp_fixed - entry) * sign <= 0 or (tp_fixed - it["entry"]) * sign <= 0):
+            return "NODATA", 0.0, None, None, None, None    # giá đã vượt TP cố định – paper cũng không vào
         jobs = {m: dict(mode=("fixed" if is_range else m), tp_fixed=tp_fixed) for m in exits.MODES}
         if not is_range:
             for v in exits.TP1_CANDIDATES:
@@ -206,7 +231,7 @@ class Learner:
         res = {}
         for k, j in jobs.items():
             res[k] = exits.simulate(side, entry, sl, atr, j["mode"], it["ts"], candles, cost_frac,
-                                    tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"))
+                                    tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"), first=first)
         # hết dữ liệu mà chưa kết thúc → sau RUNNER_MAX_HOLD_HOURS + 1h thì đóng theo giá cuối
         age = time.time() - it["ts"]
         unfinished = [k for k in res if res[k][0] is None]
@@ -226,10 +251,17 @@ class Learner:
 
     # ================================================================ 2. thống kê
     def compute_stats(self):
+        """Thống kê (và đề xuất của learn) chỉ trên tín hiệu có kết quả theo mô hình giá & phí hiện hành (v3.3+: features
+        có entry_ref). Tín hiệu bản cũ (vào ở giá đóng nến 15m cũ, phí 0.15%) lệch ~-0.065R/tín hiệu so với mô hình mới –
+        trộn vào làm sai các ngưỡng R cố định, nên bị bỏ (số lượng ghi ở legacy_excluded). Sau khi nâng cấp, bộ tự học
+        chờ tới khi đủ LEARN_MIN_SAMPLES tín hiệu mới mới đề xuất."""
         since = time.time() - cfg.LEARN_WINDOW_DAYS * 86400
         rows = self.store.resolved_signals(since)
+        cur = [r for r in rows if "entry_ref" in _feat(r)]
+        legacy, rows = len(rows) - len(cur), cur
         tech = [r for r in rows if r["source"] in TECH_SOURCES]
-        st = {"ts": time.time(), "window_days": cfg.LEARN_WINDOW_DAYS, "total": _agg(rows), "tech": _agg(tech),
+        st = {"ts": time.time(), "window_days": cfg.LEARN_WINDOW_DAYS, "legacy_excluded": legacy,
+              "total": _agg(rows), "tech": _agg(tech),
               "pending": len(self.store.pending_signals(500)), "by_source": {}, "by_side": {},
               "by_trigger": {}, "by_rule": {}, "by_score": {}, "by_session": {}}
         for src in list(TECH_SOURCES) + ["below_score"]:

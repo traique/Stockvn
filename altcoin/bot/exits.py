@@ -59,6 +59,18 @@ def trail_stop(side, entry, peak, atr, risk, r_now):
     return peak - dist if side == "long" else peak + dist
 
 
+def held_hit(side, sl, tp, hi, lo, op=None):
+    """Nến lúc bot KHÔNG theo dõi (tắt, mất leader): chỉ lệnh SL/TP đang nằm trên sàn có thể khớp – sàn tự khớp, bot
+    không chốt TP1 / dời SL / thoát vì sóng đuối được. SL trước (thận trọng); nến mở vượt SL khớp ở giá mở."""
+    long = side == "long"
+    if (lo <= sl) if long else (hi >= sl):
+        gap = op is not None and (op < sl if long else op > sl)
+        return [("SL", op if gap else sl)]
+    if (hi >= tp) if long else (lo <= tp):
+        return [("TP", tp)]
+    return []
+
+
 class ExitState:
     """Trạng thái 1 vị thế trong quá trình quản lý (dùng cho engine & mô phỏng)."""
     __slots__ = ("side", "entry", "sl", "tp", "tp1", "atr", "mode", "peak", "peak_ts", "tp1_done", "frac", "opened_at")
@@ -128,9 +140,14 @@ class ExitState:
         return ev
 
 
-def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=None, tp1_r=None, tp_fixed=None):
+def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=None, tp1_r=None, tp_fixed=None,
+             first=None):
     """Mô phỏng 1 tín hiệu trên nến 5m (list [ts_ms,o,h,l,c,v]) theo cách thoát `mode`.
     entry: GIÁ KHỚP VÀO (đã trượt – costs.entry_fill); cost_frac: chi phí còn lại sau khi vào (costs.after_fill_cost).
+    first: nến 1m của khung 5m chứa lúc vào (t0). Có thì khung đó được xét bằng các nến 1m mở SAU phút chứa lúc vào – y
+    như lệnh paper (engine._track bỏ nến 1m chứa lúc vào) – rồi mới tới các nến 5m từ khung sau: râu TRƯỚC lúc vào không bị
+    tính, phần sau lúc vào không bị bỏ (OKX trả nến từ `since` = lúc vào, nên nến 5m chứa lúc vào thường không có).
+    Không có (None) thì như cũ: nến 5m chứa lúc vào nếu có được dùng cả (gồm giá trước lúc vào).
     Trả về (outcome, R) – R đã trừ phí+trượt giá; None nếu chưa kết thúc."""
     risk = abs(entry - sl)
     if risk <= 0:
@@ -144,15 +161,25 @@ def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=
     def r_of(price):
         return ((price - entry) if side == "long" else (entry - price)) / risk
 
-    last_close = None
-    for c in candles:
-        ts = c[0] / 1000
-        if ts + 300 <= t0:
-            continue
-        hi, lo, cl = float(c[2]), float(c[3]), float(c[4])
-        last_close = cl
-        op = float(c[1]) if ts >= t0 else None          # nến chứa lúc vào: giá mở là trước khi vào
-        for kind, price in st.step(ts + 300, hi, lo, cl, risk, op=op):
+    def bars():
+        """(giờ đóng, o|None, h, l, c) theo thứ tự thời gian."""
+        b_end = None
+        if first is not None:
+            b_end = int(t0 // 300) * 300 + 300
+            m1 = int(t0 // 60) * 60 + 60            # nến 1m đầu tiên mở sau phút chứa lúc vào
+            for b in first:
+                bts = b[0] / 1000
+                if m1 <= bts < b_end:
+                    yield bts + 60, float(b[1]), float(b[2]), float(b[3]), float(b[4])
+        for c in candles:
+            ts = c[0] / 1000
+            if ts + 300 <= t0 or (b_end is not None and ts < b_end):
+                continue
+            op = float(c[1]) if ts >= t0 else None      # nến chứa lúc vào: giá mở là trước khi vào
+            yield ts + 300, op, float(c[2]), float(c[3]), float(c[4])
+
+    for end, op, hi, lo, cl in bars():
+        for kind, price in st.step(end, hi, lo, cl, risk, op=op):
             if kind == "TP1":
                 realized += r_of(price) * cfg.TP1_FRACTION
                 frac = 1 - cfg.TP1_FRACTION

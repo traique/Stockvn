@@ -122,7 +122,11 @@ class Store:
                                   ("sl0", real), ("risk_mult", real), ("tp1_ts", real),
                                   # v3.3: rủi ro thật / dự tính, giá đóng nến tín hiệu, giá last lúc vào, nến 1m đã xét
                                   ("risk_usdt", real), ("risk_plan", real), ("mult_plan", real), ("sig_price", real),
-                                  ("ref_price", real), ("bar_ts", real)])
+                                  ("ref_price", real), ("bar_ts", real),
+                                  # SL bot muốn (cột sl) khác SL đang nằm trên sàn (sl_exch) khi sàn chưa nhận lệnh dời;
+                                  # bar_sl = SL lúc xét tới nến bar_ts (khác cột sl → bản khác đã dời SL); own_orders = mã
+                                  # lệnh bot tự đóng một phần; close_req = bot đã muốn đóng mà lệnh đóng lỗi → thử lại
+                                  ("sl_exch", real), ("bar_sl", real), ("own_orders", "TEXT"), ("close_req", "TEXT")])
         for idx in ("CREATE INDEX IF NOT EXISTS ix_events_ts ON events(ts)",
                     "CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts)",
                     "CREATE INDEX IF NOT EXISTS ix_scans_ts ON scans(ts)"):

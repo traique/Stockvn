@@ -203,8 +203,8 @@ class Bot:
         with critical():        # cả lượt là một vùng: tắt bot thì chờ đóng hết, không chỉ lệnh đang đóng
             for t in self.store.open_trades():
                 try:
-                    self.engine.close(t, self.okx.price(t["symbol"]), reason)
-                    n += 1
+                    if self.engine.close(t, self.okx.price(t["symbol"]), reason) is not False:
+                        n += 1      # live: lệnh đóng lỗi → lệnh vẫn mở, bot thử lại ở lượt kiểm tra sau và đã báo
                 except Exception as e:
                     log.error("close_all %s: %s", t["symbol"], e)
         return n

@@ -158,36 +158,60 @@ class OKX:
         return order["id"], fill
 
     def close_position(self, symbol, side, contracts):
+        """Đóng vị thế bằng lệnh market reduceOnly rồi huỷ MỌI lệnh SL/TP còn treo của mã (v3.3: cả loại oco – SL/TP gắn
+        kèm lệnh mở và lệnh dời SL đều là oco, bản cũ chỉ huỷ conditional nên để lại lệnh reduce-only mồ côi có thể đóng
+        nhầm vị thế mới cùng mã). Lệnh đóng lỗi → ném lỗi, KHÔNG huỷ SL (vị thế còn mở vẫn được bảo vệ)."""
         order_side = "sell" if side == "long" else "buy"
         params = {"tdMode": "isolated", "posSide": "net", "reduceOnly": True}
         o = self.ex.create_order(symbol, "market", order_side, contracts, params=params)
-        # huỷ các lệnh algo (SL/TP) còn treo
         try:
-            algos = self.ex.fetch_open_orders(symbol, params={"ordType": "conditional"})
-            for a in algos:
+            algos = algo_orders(self.ex, symbol)
+        except Exception as e:
+            log.warning("đọc SL/TP còn treo %s: %s", symbol, e)
+            algos = []
+        for a in algos:
+            try:
                 self.ex.cancel_order(a["id"], symbol, params={"stop": True})
-        except Exception:
-            pass
+            except Exception as e:
+                log.warning("huỷ SL/TP %s %s: %s", symbol, a.get("id"), e)
         return o
 
-    def close_fill_price(self, symbol, since_ts, side):
+    def close_fill_price(self, symbol, since_ts, side, exclude=()):
         """Giá khớp trung bình của các lệnh ĐÓNG vị thế (sell với long, buy với short) kể từ since_ts.
-        Dùng khi sàn tự khớp SL/TP để ghi PnL thật thay vì ước lượng. None nếu không lấy được."""
+        Dùng khi sàn tự khớp SL/TP để ghi PnL thật thay vì ước lượng. None nếu không lấy được.
+        exclude: mã lệnh bot tự đóng một phần (cắt bớt sau khi khớp, chốt TP1) – PnL các phần đó đã ghi ở realized,
+        không được tính lẫn vào giá đóng phần còn lại."""
         try:
             rows = self.ex.fetch_my_trades(symbol, since=int(since_ts * 1000), limit=50)
         except Exception as e:
             log.warning("fetch_my_trades %s: %s", symbol, e)
             return None
         want = "sell" if side == "long" else "buy"
-        fills = [(float(x.get("price") or 0), float(x.get("amount") or 0)) for x in rows if x.get("side") == want]
+        skip = {str(x) for x in exclude or ()}
+        fills = [(float(x.get("price") or 0), float(x.get("amount") or 0)) for x in rows
+                 if x.get("side") == want and str(x.get("order") or "") not in skip]
         fills = [(p, a) for p, a in fills if p > 0 and a > 0]
         qty = sum(a for _, a in fills)
         return sum(p * a for p, a in fills) / qty if qty else None
 
     def fetch_positions(self):
+        """Vị thế đang mở. v3.3: lỗi mạng/API → NÉM lỗi (bản cũ trả [] – bot tưởng sàn đã đóng mọi lệnh, ghi đóng
+        bằng giá ước lượng rồi thôi quản lý vị thế thật và mở thêm lệnh vượt trần rủi ro)."""
         try:
             pos = self.ex.fetch_positions(params={"instType": "SWAP"})
-            return [p for p in pos if float(p.get("contracts") or 0) > 0]
         except Exception as e:
             log.warning("fetch_positions: %s", e)
-            return []
+            raise
+        return [p for p in pos if float(p.get("contracts") or 0) > 0]
+
+
+def algo_orders(ex, symbol):
+    """Lệnh SL/TP đang treo của `symbol` (ex: đối tượng ccxt okx): cả loại conditional (một mức) lẫn oco (SL + TP,
+    gồm SL/TP gắn kèm lệnh mở). Dùng chung cho close_position và LiveEngine._replace_algo."""
+    seen, out = set(), []
+    for kind in ("conditional", "oco"):
+        for a in ex.fetch_open_orders(symbol, params={"ordType": kind}) or []:
+            if a.get("id") not in seen:
+                seen.add(a.get("id"))
+                out.append(a)
+    return out

@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `8fa0794`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `b97ec07`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -228,7 +228,7 @@ python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
 python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.3.0.zip
 ```
 
-Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng 8fa0794 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng b97ec07 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -291,8 +291,8 @@ Mục đích: thử trên đúng server Botkeep những điểm không thử đ�
 
    Không đặt `ALT_MODE` (paper) và **không** đặt `ALT_DATABASE_URL` (SQLite tạm). Thông báo của canary tới chat của anh/chị với tiêu đề `🪙 Altcoin ›`; muốn im thì tắt **Altcoin · thông báo** trên `/ai#kenh`.
 3. Kiểm tra trong 15–30 phút:
-   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (8fa0794)`. Không có lỗi múi giờ hay "thiếu thư viện".
-   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `8fa0794`, `dropped_secrets` rỗng.
+   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (b97ec07)`. Không có lỗi múi giờ hay "thiếu thư viện".
+   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `b97ec07`, `dropped_secrets` rỗng.
    - [ ] `/health` chỉ có `"altcoin": {"state": "running"}`.
    - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.3.0 "đúng bản phát hành".
    - [ ] Telegram `/alt status`; Zoom `alt status` (1:1) và `/vnbot alt status` (trong kênh) đều được trả lời.
@@ -319,9 +319,9 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 5. Đặt **`ALTCOIN_ENABLED=1`** rồi khởi động lại server Cổ phiếu.
    - Nếu `hub.json` báo `waiting` với "instance khác đang chạy: crypto@<host cũ>": heartbeat của server cũ còn mới (dưới 90 giây). Altcoin tự chạy sau khoảng 100 giây. Nếu vẫn chờ mãi: server cũ (hoặc Render) chưa thật sự dừng.
 6. **Kiểm tra chấp nhận:**
-   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `8fa0794`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
+   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `b97ec07`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
    - [ ] `/health` chỉ có `altcoin.state`.
-   - [ ] `/altcoin/phienban`: 3.3.0, `8fa0794`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng, ngưỡng tự học giống số đã ghi ở mục 7.
+   - [ ] `/altcoin/phienban`: 3.3.0, `b97ec07`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng, ngưỡng tự học giống số đã ghi ở mục 7.
    - [ ] `/alt status` được trả lời trên Telegram và trên Zoom (`alt status`, `/vnbot alt status`); `/trangthai` của Cổ phiếu vẫn chạy.
    - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.2.1 → v3.3.0" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
    - [ ] `/alt status` dòng "Instances": chỉ `crypto` còn sống. Dòng cũ (`render`, hoặc `crypto` của server cũ) hiện "(mất liên lạc)": chỉ là hiển thị.
@@ -364,7 +364,9 @@ Thiếu điều kiện thì `state` là `disabled`, lý do "ALT_MODE=live nhưng
 - Khi live, `/alt close xacnhan` đóng **vị thế thật** trên OKX.
 - Tránh upload hay khởi động lại server khi đang có lệnh `/alt close`. Lệnh SL/TP đã đặt sẵn trên OKX, nên vị thế vẫn được bảo vệ khi bot tạm dừng.
 - Đừng dùng hồ sơ rủi ro của `altcoin/botkeep.env` (10%/lệnh) cho live.
-- Chỉ chạy live từ Altcoin 3.3.0: khối lượng tính theo giá last lúc vào (bản cũ theo giá đóng nến 15m cũ, rủi ro thật có thể gấp 1,5 lần kế hoạch); khớp xong bot đo lại rủi ro từ giá khớp thật, vượt kế hoạch quá `LIVE_RISK_TOL` (20%) thì cắt bớt hợp đồng hoặc đóng và báo; SL/TP trên OKX kích hoạt theo giá last, cùng giá bot dùng cho TP1 và trailing.
+- Chỉ chạy live từ Altcoin 3.3.0: khối lượng tính theo giá last lúc vào (bản cũ theo giá đóng nến 15m cũ, rủi ro thật có thể gấp 1,5 lần kế hoạch); khớp xong bot đo lại rủi ro từ giá khớp thật, vượt kế hoạch quá `LIVE_RISK_TOL` (20%, với lệnh lot tối thiểu là 2× rủi ro dự tính) thì cắt bớt hợp đồng hoặc đóng và báo; SL/TP trên OKX kích hoạt theo giá last, cùng giá bot dùng cho TP1 và trailing.
+- Từ 3.3.0, khi OKX chưa nhận SL mới (dời về hoà vốn sau TP1, trailing) vì từ chối hay lỗi mạng, bot báo "sàn chưa nhận SL mới", tự giữ SL đó (giá last vượt là đóng bằng lệnh market) và đặt lại mỗi lượt. Lệnh đóng của bot lỗi thì lệnh **vẫn mở** trong bot (báo "Đóng … thất bại"), SL trên OKX giữ nguyên, bot thử đóng lại mỗi lượt. Không đọc được vị thế trên OKX thì bot bỏ qua lượt đó, không ghi đóng lệnh nào.
+- Sau lúc bot tắt (upload, khởi động lại) hay mất quyền giao dịch, bot không gửi lệnh market theo những gì đã xảy ra lúc tắt (chạm TP1 rồi giá quay về…): chỉ SL/TP đã đặt trên OKX có tác dụng trong lúc đó, bot quản lý tiếp từ nến mới.
 
 ---
 
@@ -375,7 +377,7 @@ Thiếu điều kiện thì `state` là `disabled`, lý do "ALT_MODE=live nhưng
 **Quay về server altcoin cũ** (trong 1–2 tuần đầu):
 
 1. Đặt `ALTCOIN_ENABLED=0` trên server Cổ phiếu và khởi động lại **trước**. Log có `Altcoin: tắt (ALTCOIN_ENABLED khác 1)`.
-2. SQLite: tải `data/altcoin/bot.db` từ server Cổ phiếu về, tải lên server cũ thành `data/bot.db` (dữ liệu từ lúc chuyển nằm ở đây). Supabase: không cần làm gì.
+2. SQLite: tải `data/altcoin/bot.db` từ server Cổ phiếu về, tải lên server cũ thành `data/bot.db` (dữ liệu từ lúc chuyển nằm ở đây). Supabase: không cần làm gì. Lệnh đang mở mà bản cũ đã dời SL thì khi lên lại 3.3 bot chỉ xét từ nến vừa đóng, không đọc lại nến cũ bằng SL bản cũ đặt.
 3. Khởi động server cũ. Nó vẫn dùng token bot OKX và app `okxbot`, nên chỉ revoke / deactivate chúng sau thời gian ổn định.
 
 **Quay về gói Cổ phiếu cũ** (v1.14.0): upload gói cũ như bình thường. `data/` vẫn dùng được (khoá `altcoin` thừa trong `channels.json` bị bỏ qua); `data/altcoin/` nằm yên.

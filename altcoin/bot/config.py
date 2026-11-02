@@ -92,8 +92,10 @@ class Config:
     MIN_RR = _f("MIN_RR", 1.5)                         # tỉ lệ lời/lỗ tối thiểu
     TAKER_FEE = _f("TAKER_FEE", 0.0005)                # OKX taker 0.05%
     SLIPPAGE = _f("SLIPPAGE", 0.0005)                  # mô phỏng trượt giá (mỗi chiều vào/ra – xem costs.py)
-    # v3.3: vào lệnh ở giá last MỚI (nến 15m đã đóng vài phút trước). Giá đã chạy ngược quá 0.5R so với giá đóng nến
-    # tín hiệu (về phía SL) → bỏ; chạy xuôi thì luật MAX_SL_ATR (SL từ giá vào ≤ 3 ATR) quyết định.
+    # v3.3: vào lệnh ở giá last MỚI (nến 15m đã đóng vài phút trước). Mặc định chỉ bỏ khi giá khớp đã vượt SL (hoặc vượt TP
+    # cố định của setup range) – sửa lỗi, không đổi chiến lược. FILL_RECHECK=true bật thêm các cổng CHIẾN LƯỢC xét lại ở giá
+    # mới: giá chạy ngược quá MAX_FILL_DRIFT_R (0.5R) về phía SL, SL cách giá > MAX_SL_ATR, R:R range < RANGE_MIN_RR.
+    FILL_RECHECK = _b("FILL_RECHECK", "false")
     MAX_FILL_DRIFT_R = _f("MAX_FILL_DRIFT_R", 0.5)
     # v3.3 live: sau khi khớp, rủi ro thật (từ giá khớp thật) vượt kế hoạch quá 20% → cắt bớt hợp đồng / đóng và báo
     LIVE_RISK_TOL = _f("LIVE_RISK_TOL", 0.2)
