@@ -49,8 +49,10 @@ RULES = {
     "long_side": ("Mọi lệnh LONG", lambda side, c: side == "long"),
     "short_side": ("Mọi lệnh SHORT", lambda side, c: side == "short"),
     # v3.2: hai luật mới từ 211 tín hiệu bóng (23–27/10/2026)
+    # v3.3 (bug 8): volume của chính nến breakout là XÁC NHẬN của trigger breakout (BREAKOUT_VOL), không phải cao trào –
+    # bản cũ BREAKOUT_VOL = CLIMAX_VOL nên luật này chặn mọi tín hiệu breakout. Xem breakout_confirmed.
     "climax_volume": ("Nến tín hiệu volume cao trào (≥ 1.5× trung bình 20 nến)",
-                      lambda side, c: _v(c, "vol_ratio", 1) >= cfg.CLIMAX_VOL),
+                      lambda side, c: _v(c, "vol_ratio", 1) >= cfg.CLIMAX_VOL and not breakout_confirmed(c)),
     "late_trend": ("Vào muộn: ADX 1h ≥ 35 (xu hướng đã chạy lâu)",
                    lambda side, c: _v(c, "htf_adx", 0) >= cfg.LATE_TREND_ADX),
     # ---- BTC dẫn dắt altcoin
@@ -89,13 +91,47 @@ def active_blocks():
     return learned | {r for r in cfg.DEFAULT_BLOCKS if r in RULES and r not in unblocked}
 
 
-def blocked_by(sig):
-    """Luật đang chặn tín hiệu này (sau khi đã có đủ dữ liệu BTC/OI). Trả về mô tả hoặc ''."""
+def block_origin(rule):
+    """'learned' nếu bộ tự học chặn luật này, 'default' nếu là luật chặn sẵn (DEFAULT_BLOCKS)."""
+    return "learned" if rule in set(LEARNED.get("blocks") or []) - NEVER_BLOCK else "default"
+
+
+BLOCK_LABELS = {"default": "luật chặn sẵn", "learned": "luật tự học"}
+
+
+def rule_ctx(sig):
+    """Dữ liệu để xét luật của một tín hiệu: context + mã trigger (như features của dòng tín hiệu bóng – bộ tự học xét
+    luật trên features nên hai nơi thấy cùng dữ liệu)."""
+    return {**(sig.context or {}), "triggers": list(sig.triggers or [])}
+
+
+def breakout_confirmed(c, enabled=None):
+    """v3.3 (bug 8): tín hiệu có trigger breakout ĐANG BẬT (BREAKOUT_ENABLED) → volume nến tín hiệu (≥ BREAKOUT_VOL) là
+    xác nhận của chính nến breakout: luật climax_volume và điểm trừ "volume cao trào" không áp dụng. Bản cũ BREAKOUT_VOL =
+    CLIMAX_VOL = 1.5 nên mọi tín hiệu breakout bị luật climax_volume (chặn sẵn) chặn – trigger chết im lặng. Tắt (mặc định):
+    diagnose không tính trigger breakout, và dòng cũ có breakout vẫn bị xét cao trào như trước.
+    enabled: True/False thay cờ (diagnose chấm tín hiệu chỉ có breakout "như khi bật" để ghi bóng – BREAKOUT_OFF)."""
+    on = cfg.BREAKOUT_ENABLED if enabled is None else enabled
+    return bool(on) and "breakout" in (c.get("triggers") or [])
+
+
+BREAKOUT_OFF = "chỉ có trigger breakout – đang tắt (BREAKOUT_ENABLED=false)"
+BREAKOUT_OFF_SOURCE = "breakout_off"   # nguồn dòng bóng của tín hiệu đó: chỉ đo, không hỏi AI, không vào lệnh, không tự học
+
+
+def blocking_rule(sig):
+    """Mã luật đang chặn tín hiệu này (sau khi đã có đủ dữ liệu BTC/OI), hoặc ''."""
     blocks = active_blocks()
-    for rule in matching_rules(sig.side, sig.context):
+    for rule in matching_rules(sig.side, rule_ctx(sig)):
         if rule in blocks:
-            return RULES[rule][0]
+            return rule
     return ""
+
+
+def blocked_by(sig):
+    """Mô tả luật đang chặn tín hiệu này, hoặc ''."""
+    rule = blocking_rule(sig)
+    return RULES[rule][0] if rule else ""
 
 
 def _v(c, k, default):
@@ -120,6 +156,14 @@ class Signal:
     context: dict = field(default_factory=dict)
     rejected: str = ""        # lý do bị loại (chỉ để log/debug)
     triggers: list = field(default_factory=list)   # mã trigger: macd_cross, ema_cross, breakout, pullback, engulf
+    # v3.3: `price` là giá đóng nến 15m tín hiệu (tham chiếu, đã cũ vài phút lúc bot quyết định). Lệnh paper/live và
+    # mô phỏng bóng vào ở giá last MỚI lấy lúc quyết định (ref_price, lúc ref_ts) – xem engine.stamp / engine.fill_check.
+    ref_price: float = None
+    ref_ts: float = None
+    skip: str = ""            # engine không vào được (giá đã chạy, vốn, lot...) – ghi vào tín hiệu bóng
+    # v3.3: giờ mở (giây) của nến 15m tín hiệu – định danh tín hiệu (mã, hướng, nến): lượt quét sau thấy lại đúng tín hiệu
+    # đã ghi bóng (slot_taken / max_positions / not_sent) mà hỏi AI thì dòng bóng cũ bị đánh dấu trùng (storage.log_signal)
+    candle_ts: float = None
 
     @property
     def rr(self):
@@ -248,18 +292,35 @@ def _gates(r, side, trend, market=None, chg1h=None):
     return ""
 
 
-def _score(df, htf, side, triggers, funding, change24h):
+def trigger_group_weights(keys, tw=None):
+    """Trọng số từng NHÓM trigger của một tín hiệu (v3.3 – luật cho tín hiệu nhiều trigger):
+      * MACD cắt & EMA9 cắt là một nhóm (động lượng trễ, tương quan cao); Pullback EMA21 & bật/gãy tại VWAP là một
+        nhóm (cùng cấu trúc "hồi về giá trị rồi bật"); mỗi trigger khác là một nhóm riêng;
+      * trọng số nhóm = TRUNG BÌNH trọng số học được của các trigger trong nhóm mà tín hiệu có (mỗi mã tính một lần);
+      * điểm trigger = 1.5 × tổng trọng số của tối đa 2 nhóm có trọng số cao nhất.
+    Mọi trọng số mặc định 1.0 → điểm y như trước. Bản cũ lấy MAX trong nhóm: trọng số pullback 0.82 bị bỏ qua ở mọi
+    tín hiệu có cả bật VWAP (1.0) – gần một nửa số tín hiệu pullback. Trung bình: trọng số học được của mỗi trigger luôn
+    có tác dụng (tăng / giảm) trên mọi tín hiệu có trigger đó."""
+    tw = (LEARNED.get("trigger_w") or {}) if tw is None else tw
+    keys = list(dict.fromkeys(keys))
+
+    def mean(ks):
+        return sum(tw.get(k, 1.0) for k in ks) / len(ks)
+
+    mom = [k for k in keys if k in MOMENTUM_TRIGGERS]
+    pb = [k for k in keys if k in PULLBACK_TRIGGERS]
+    struct = [k for k in keys if k not in MOMENTUM_TRIGGERS and k not in PULLBACK_TRIGGERS]
+    groups = ([mean(mom)] if mom else []) + ([mean(pb)] if pb else []) + [tw.get(k, 1.0) for k in struct]
+    return sorted(groups, reverse=True)[:2]
+
+
+def _score(df, htf, side, triggers, funding, change24h, breakout_on=None):
+    """breakout_on: chấm như khi trigger breakout bật/tắt (mặc định theo cờ BREAKOUT_ENABLED) – xem breakout_confirmed."""
     r = df.row(-1)
     h = htf.row(-1)
     s, why = 0.0, []
-    tw = LEARNED.get("trigger_w") or {}
-    # MACD cắt & EMA9 cắt cùng là chỉ báo động lượng trễ (tương quan cao) → chỉ tính 1 cái mạnh nhất.
-    # Pullback EMA21 & bật tại VWAP cùng một cấu trúc → cũng chỉ tính 1. Tối đa 2 nhóm trigger được cộng điểm.
-    keys = [trig_key(t) for t in triggers]
-    mom = [tw.get(k, 1.0) for k in keys if k in MOMENTUM_TRIGGERS]
-    pb = [tw.get(k, 1.0) for k in keys if k in PULLBACK_TRIGGERS]
-    struct = [tw.get(k, 1.0) for k in keys if k not in MOMENTUM_TRIGGERS and k not in PULLBACK_TRIGGERS]
-    weights = sorted(([max(mom)] if mom else []) + ([max(pb)] if pb else []) + struct, reverse=True)[:2]
+    # Tối đa 2 nhóm trigger được cộng điểm; luật gộp nhóm & trọng số học được: trigger_group_weights
+    weights = trigger_group_weights([trig_key(t) for t in triggers])
     s += sum(1.5 * w for w in weights); why += triggers
     # EMA stack đồng bộ
     if (side == "long" and r.ema9 > r.ema21 > r.ema50) or (side == "short" and r.ema9 < r.ema21 < r.ema50):
@@ -282,9 +343,12 @@ def _score(df, htf, side, triggers, funding, change24h):
     if (side == "long" and r.close > r.vwap) or (side == "short" and r.close < r.vwap):
         s += 0.5; why.append("Đúng phía VWAP")
     # Volume: v3.2 – volume cao trào trên nến tín hiệu là dấu hiệu cạn lực, KHÔNG cộng điểm mà trừ
-    # (31 tín hiệu bóng vol 1.5–2.5×: -0.68R, thắng 16%)
+    # (31 tín hiệu bóng vol 1.5–2.5×: -0.68R, thắng 16%). v3.3: trừ nến breakout đang bật – volume là xác nhận của nó.
     if r.vol_ratio >= cfg.CLIMAX_VOL:
-        s -= 1; why.append(f"Volume cao trào x{r.vol_ratio:.1f} (trừ điểm)")
+        if breakout_confirmed({"triggers": [trig_key(t) for t in triggers]}, breakout_on):
+            why.append(f"Volume x{r.vol_ratio:.1f} xác nhận breakout (không tính cao trào)")
+        else:
+            s -= 1; why.append(f"Volume cao trào x{r.vol_ratio:.1f} (trừ điểm)")
     # Xu hướng 1h đã chạy lâu (ADX 1h ≥ 35) → vào muộn, trừ điểm (76 short bóng: -0.44R)
     if h.adx >= cfg.LATE_TREND_ADX:
         s -= 1; why.append(f"ADX 1h {h.adx:.0f} – xu hướng đã chạy lâu (trừ điểm)")
@@ -308,7 +372,9 @@ def _score(df, htf, side, triggers, funding, change24h):
 
 def _levels(df, side, price, a):
     """SL theo cấu trúc (đáy/đỉnh 6 nến) – KHÔNG bao giờ kéo SL vào giữa vùng râu nến.
-    Cấu trúc quá xa → diagnose() bỏ tín hiệu thay vì đặt SL sai chỗ."""
+    Cấu trúc quá xa → diagnose() bỏ tín hiệu thay vì đặt SL sai chỗ.
+    TP (cách thoát fixed) ≥ 1.2 × MIN_RR × R theo cách dựng → R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR: MIN_RR là
+    mức sàn của TP cố định, không phải một cổng lọc (v3.3 – xem min_rr_for)."""
     if side == "long":
         swing = min(df.low[-6:])
         sl = min(price - cfg.ATR_SL_MULT * a, swing - 0.15 * a)
@@ -476,7 +542,19 @@ def _range_setup(symbol, df, htf, funding, change24h, market, info):
 
 
 def min_rr_for(sig):
-    return cfg.RANGE_MIN_RR if (sig.context or {}).get("setup") == "range" else cfg.MIN_RR
+    """Ngưỡng R:R tối thiểu tới TP THẬT sẽ dùng, hoặc None khi setup không có cổng R:R.
+    v3.3: chỉ setup range có cổng (RANGE_MIN_RR, TP = dải giữa Bollinger – cổng này thực sự loại tín hiệu ở
+    _range_setup và ở engine.fill_check khi FILL_RECHECK=true). Setup xu hướng: TP cố định dựng ≥ 1.2 × MIN_RR × R
+    (_levels, exits.levels) nên "RR ≥ MIN_RR" luôn đúng; hybrid/trail chốt TP1 ở TP1_R (mặc định 1R) rồi bám sóng không
+    có TP gần – so TP1 với MIN_RR sẽ chặn MỌI tín hiệu (đổi chiến lược). Bản cũ vẫn so sig.rr ≥ MIN_RR ở 5 chỗ, không
+    lần nào chặn được → bỏ, MIN_RR chỉ còn là mức sàn TP cố định."""
+    return cfg.RANGE_MIN_RR if (sig.context or {}).get("setup") == "range" else None
+
+
+def rr_ok(sig):
+    """Tín hiệu qua cổng R:R (tính ở giá đóng nến tín hiệu): setup không có cổng → luôn qua."""
+    need = min_rr_for(sig)
+    return need is None or sig.rr >= need - 1e-9
 
 
 def min_score_for(sig):
@@ -489,8 +567,10 @@ def min_score_for(sig):
 def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=None):
     """Trả về (signal, lý do loại, số liệu tóm tắt).
     - lý do == ""          → tín hiệu đạt, gửi AI
-    - signal != None + lý do → tín hiệu "suýt đạt" (điểm thấp / RR thấp / bị luật tự học chặn) – vẫn được
-      ghi lại để theo dõi kết quả bóng, giúp bộ tự học biết ngưỡng có quá chặt không.
+    - signal != None + lý do → tín hiệu "suýt đạt" (điểm thấp) – vẫn được ghi lại để theo dõi kết quả bóng, giúp bộ tự
+      học biết ngưỡng có quá chặt không. Luật chặn (sẵn / tự học) xét sau, ở main.scan, khi đã có dữ liệu dòng tiền.
+    - signal != None + BREAKOUT_OFF → tín hiệu chỉ có trigger breakout khi cờ tắt, chấm như khi bật: main.scan chỉ ghi
+      bóng nguồn BREAKOUT_OFF_SOURCE nếu qua ngưỡng điểm (sau dòng tiền) – không hỏi AI, không vào lệnh.
     - signal == None       → bị loại ở cổng bắt buộc."""
     if len(ohlcv_ltf) < 120 or len(ohlcv_htf) < 80:
         return None, "thiếu dữ liệu", {}
@@ -503,6 +583,8 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     if trend == 0:
         if cfg.RANGE_ENABLED:
             sig, why = _range_setup(symbol, df, htf, funding, change24h, market, info)
+            if sig is not None:
+                sig.candle_ts = df.ts[-1] / 1000
             return sig, why, info
         why = "1h sideway" if h.adx < cfg.HTF_MIN_ADX else "1h không rõ xu hướng (giá/EMA lệch nhau)"
         return None, why, info
@@ -514,9 +596,19 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     if gate:
         return None, gate, info
     triggers = _triggers(df, side)
+    brk_only = False
+    if not cfg.BREAKOUT_ENABLED and any(trig_key(t) == "breakout" for t in triggers):
+        # v3.3 (bug 8): trigger breakout tắt rõ ràng (cờ BREAKOUT_ENABLED, mặc định tắt – xem config) – không cộng điểm,
+        # không là trigger. Tín hiệu CHỈ có breakout bị loại với lý do riêng (đếm được trong log quét), không im lặng,
+        # nhưng vẫn được dựng và chấm NHƯ KHI BẬT để main.scan ghi bóng nguồn "breakout_off" (không hỏi AI, không vào
+        # lệnh, bộ tự học không dùng) – có số liệu ngoài mẫu trước khi quyết định bật (backtest: n = 0 ngoài mẫu).
+        info["breakout_off"] = True
+        rest = [t for t in triggers if trig_key(t) != "breakout"]
+        brk_only = not rest
+        triggers = triggers if brk_only else rest
     if not triggers:
         return None, "không có trigger (MACD/EMA cắt, breakout, pullback, nhấn chìm)", info
-    score, reasons = _score(df, htf, side, triggers, funding, change24h)
+    score, reasons = _score(df, htf, side, triggers, funding, change24h, breakout_on=True if brk_only else None)
     info["score"] = score
 
     price, a = float(r.close), float(r.atr)
@@ -525,15 +617,18 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
         return None, f"SL theo cấu trúc quá xa ({abs(price - sl) / a:.1f} ATR)", info
     ctx = _context(df, htf, trend, funding, change24h, market, a, "trend")
     sig = Signal(symbol, side, score, price, a, sl, tp, reasons, ctx,
-                 triggers=sorted({trig_key(t) for t in triggers}))
+                 triggers=sorted({trig_key(t) for t in triggers}), candle_ts=df.ts[-1] / 1000)
+    if info.get("breakout_off"):
+        sig.context["breakout_off"] = True      # có breakout nhưng không tính (cờ tắt) – features ghi lại để đo sau
 
     min_score = min_score_for(sig)
+    if brk_only:
+        sig.rejected = BREAKOUT_OFF
+        return (sig if score >= min_score - 1.5 else None), BREAKOUT_OFF, info
     if score < min_score:
         sig.rejected = f"điểm thấp ({score} < {min_score})"
         return (sig if score >= min_score - 1.5 else None), sig.rejected, info
-    if sig.rr < cfg.MIN_RR:
-        sig.rejected = f"RR thấp ({sig.rr:.2f})"
-        return None, sig.rejected, info
+    # v3.3: không còn cổng "RR thấp" cho setup xu hướng – TP dựng ≥ 1.2 × MIN_RR × R nên cổng không bao giờ chặn (min_rr_for)
     return sig, "", info
 
 

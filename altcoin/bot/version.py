@@ -16,13 +16,37 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.2.1"
-RELEASED = "2026-10-29"
-RELEASE_BUILD = "e737954"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.3.0"
+RELEASED = "2026-11-02"
+RELEASE_BUILD = "a1a7ad4"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.3.0", "2026-11-02", (
+        "Chạy ảo vào lệnh ở giá last lúc quyết định (+ trượt giá), không ở giá đóng nến 15m cũ vài phút; chỉ bỏ khi giá khớp đã vượt SL (range: vượt TP)",
+        "Cổng xét lại ở giá mới (ngược 0,5R, SL > 3 ATR, R:R range) là đổi chiến lược nên tắt sẵn – muốn dùng thì đặt FILL_RECHECK=true",
+        "Chạy thật: khối lượng theo giá mới; khớp xong rủi ro vượt kế hoạch 20% (lot tối thiểu: 2×) thì cắt bớt hợp đồng hoặc đóng",
+        "SL/TP1/trailing xét mọi nến 1 phút giá last đã đóng từ lần kiểm tra trước – không còn sót râu chạm SL; chạy thật cũng theo giá last thay giá mark",
+        "Nến lúc bot tắt / mất quyền giao dịch chỉ khớp SL/TP đang đặt như sàn, không chốt TP1 hay đóng theo giá cũ",
+        "Chạy thật: SL sàn chưa nhận thì bot tự giữ, đặt lại mỗi lượt; lỗi đọc vị thế / lệnh đóng không còn ghi đóng nhầm; huỷ cả lệnh oco",
+        "Chốt TP1 làm tròn theo lot của sàn (1 hợp đồng thì giữ cả), báo giá khớp thật; cột phí ghi đủ hai chiều; risk_mult là rủi ro thật",
+        "Tín hiệu bóng và bộ tự học dùng cùng giá vào, phí 0,20% và cách bỏ phút vào lệnh như lệnh chạy ảo; kết quả bóng bản cũ không dùng để học",
+        "Đủ 2 lệnh mở vẫn quét và ghi tín hiệu bóng (không hỏi AI, không vào lệnh); ứng viên xếp sau lệnh vừa vào cũng được ghi bóng",
+        "Lượt sau hỏi AI về tín hiệu đã ghi bóng (cùng nến 15m) thì dòng bóng thành 'Trùng' – tự học đếm mỗi tín hiệu một lần",
+        "Trong lượt quét (~30 giây) lệnh mở vẫn được quản lý mỗi 20 giây; /status báo 'đủ N lệnh, chỉ ghi bóng'",
+        "Chỉ quét hợp đồng crypto theo loại tài sản OKX ghi (instCategory) – bỏ cổ phiếu, dầu (trước: 9/50 mã)",
+        "Trọng số trigger tự học áp dụng cả khi tín hiệu có Pullback lẫn VWAP; log ghi đúng luật chặn sẵn hay luật tự học",
+        "Tự học: không học từ tín hiệu luật đang chặn, cần mẫu ≥ 7 ngày, t tính theo ngày; luật phiên theo đúng giờ bot đã xét",
+        "Tham số học bằng thống kê cũ (pullback 0,82) về mặc định một lần khi chạy ảo + tự học auto (mẫu env để trống); chạy thật / suggest: chờ duyệt",
+        "Bỏ cổng R:R của setup xu hướng (TP dựng ≥ 1,8R nên không bao giờ chặn); MIN_RR là mức sàn TP cố định",
+        "Tín hiệu bóng ghi thêm thử nghiệm SL 2,5 ATR + bám sóng, so ở trang Tự học (bot không tự chuyển)",
+        "Breakout hết bị luật volume cao trào chặn nhưng vẫn tắt (BREAKOUT_ENABLED): backtest 0 tín hiệu ngoài mẫu; vẫn ghi bóng để đo",
+        "AI nhận kế hoạch thoát thật (TP1 1R + bám sóng); thua đủ 1R không là GOOD_TRADE; bỏ hồ sơ test gắt",
+        "Khởi động lại giữa nến không ghi bóng trùng tín hiệu; log khởi động không còn báo 'schema' như tham số đã học",
+        "Giá đã về gần SL: giữ khối lượng kế hoạch, không phóng to lệnh; chạy ảo xét SL/TP ngay sau lúc vào (nến 1 giây), trừ ký quỹ lệnh mở như sàn",
+        "/close cùng lúc lượt kiểm tra không đóng, báo, cộng tiền hai lần; sàn tự đóng vị thế thì huỷ mọi SL/TP còn treo của mã",
+    )),
     ("3.2.1", "2026-10-29", (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",
         "Live: SIGTERM (server khởi động lại) rơi giữa lúc đặt lệnh trên sàn và lúc ghi DB không còn bỏ dở: ghi DB, báo tin, dời SL sau chốt TP1 xong rồi mới tắt",
@@ -145,15 +169,24 @@ def info():
             "notes": [{"version": v, "day": d, "notes": list(n)} for v, d, n in NOTES]}
 
 
-def text(history=3):
-    """Lệnh `phienban` trên Telegram/Zoom."""
+# /alt phienban qua bot Cổ phiếu: vnbot.altcoin_bridge cắt mỗi tin ở PART = 3500 ký tự, trả lời bắt đầu bằng
+# "🪙 Altcoin › phienban\n" – chừa chỗ cho phần đó và cho độ dài đổi theo thời gian chạy / trạng thái bản dựng
+TEXT_MAX = 3400
+
+
+def text(history=3, limit=TEXT_MAX):
+    """Lệnh `phienban` trên Telegram/Zoom: bản đang chạy và tối đa `history` bản gần nhất – bản cũ hơn bản mới nhất chỉ
+    thêm khi cả tin còn ≤ `limit` ký tự (vừa MỘT tin qua bot Cổ phiếu); đủ lịch sử ở trang Phiên bản."""
     lines = [f"🏷️ OKX Altcoin Bot v{VERSION} (phát hành {ddmmyyyy(RELEASED)})",
              f"Bản dựng {build()} · {status_line()}",
              f"Chạy từ {started_text()} ({uptime()}) · Python {platform.python_version()}"]
-    for v, day, notes in NOTES[:history]:
-        lines += ["", f"{'Có gì mới ở ' if v == VERSION else ''}v{v} ({ddmmyyyy(day)}):"] + [f"• {n}" for n in notes]
-    lines += ["", "Trên web: trang Phiên bản"]
-    return "\n".join(lines)
+    tail = ["", "Trên web: trang Phiên bản"]
+    for i, (v, day, notes) in enumerate(NOTES[:history]):
+        block = ["", f"{'Có gì mới ở ' if v == VERSION else ''}v{v} ({ddmmyyyy(day)}):"] + [f"• {n}" for n in notes]
+        if i and len("\n".join(lines + block + tail)) > limit:
+            break
+        lines += block
+    return "\n".join(lines + tail)
 
 
 def changes_since(previous):

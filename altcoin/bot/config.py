@@ -89,9 +89,19 @@ class Config:
     MIN_LOT_RISK_MULT = _f("MIN_LOT_RISK_MULT", 2.0)   # lot tối thiểu của sàn làm rủi ro vượt 2× dự tính → bỏ tín hiệu
     MAX_DAILY_LOSS = _f("MAX_DAILY_LOSS", 0.12)        # dừng ngày nếu lỗ 12% vốn đầu ngày (~4 lệnh thua)
     MAX_DRAWDOWN = _f("MAX_DRAWDOWN", 0.30)            # dừng hẳn bot nếu DD từ đỉnh > 30%, chờ /resume
-    MIN_RR = _f("MIN_RR", 1.5)                         # tỉ lệ lời/lỗ tối thiểu
+    # v3.3: MIN_RR là mức sàn của TP cố định (TP ≥ 1.2 × MIN_RR × R, cách thoát fixed), KHÔNG phải cổng lọc: theo cách dựng
+    # R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR nên cổng "RR ≥ MIN_RR" bản cũ không bao giờ chặn (đã bỏ – strategy.min_rr_for).
+    # Setup range có cổng thật: RANGE_MIN_RR.
+    MIN_RR = _f("MIN_RR", 1.5)
     TAKER_FEE = _f("TAKER_FEE", 0.0005)                # OKX taker 0.05%
-    SLIPPAGE = _f("SLIPPAGE", 0.0005)                  # mô phỏng trượt giá
+    SLIPPAGE = _f("SLIPPAGE", 0.0005)                  # mô phỏng trượt giá (mỗi chiều vào/ra – xem costs.py)
+    # v3.3: vào lệnh ở giá last MỚI (nến 15m đã đóng vài phút trước). Mặc định chỉ bỏ khi giá khớp đã vượt SL (hoặc vượt TP
+    # cố định của setup range) – sửa lỗi, không đổi chiến lược. FILL_RECHECK=true bật thêm các cổng CHIẾN LƯỢC xét lại ở giá
+    # mới: giá chạy ngược quá MAX_FILL_DRIFT_R (0.5R) về phía SL, SL cách giá > MAX_SL_ATR, R:R range < RANGE_MIN_RR.
+    FILL_RECHECK = _b("FILL_RECHECK", "false")
+    MAX_FILL_DRIFT_R = _f("MAX_FILL_DRIFT_R", 0.5)
+    # v3.3 live: sau khi khớp, rủi ro thật (từ giá khớp thật) vượt kế hoạch quá 20% → cắt bớt hợp đồng / đóng và báo
+    LIVE_RISK_TOL = _f("LIVE_RISK_TOL", 0.2)
     ATR_SL_MULT = _f("ATR_SL_MULT", 2.0)                # SL tối thiểu (ATR) – test 10 ngày: 2.0 tốt hơn 1.5
     ATR_TP_MULT = _f("ATR_TP_MULT", 3.0)
     TRAIL_ACTIVATE_R = _f("TRAIL_ACTIVATE_R", 1.2)     # kéo SL về hoà vốn khi lời 1.2R
@@ -109,7 +119,9 @@ class Config:
 
     # ---- Quét coin ----
     TOP_N_COINS = _i("TOP_N_COINS", 50)
-    # Loại BTC/ETH, stablecoin và các "token hoá" cổ phiếu / hàng hoá / chỉ số mà OKX niêm yết (không phải altcoin)
+    # v3.3: chỉ quét hợp đồng crypto theo instCategory của OKX (exchange.CRYPTO_CATEGORIES – cổ phiếu, dầu, vàng bị loại theo
+    # dữ liệu sàn, không theo tên). Danh sách tên dưới đây là lớp lọc THÊM: BTC/ETH, stablecoin, và các mã cổ phiếu / hàng hoá
+    # phòng khi OKX không ghi instCategory.
     _DEFAULT_EXCLUDE = (
         "BTC,ETH,USDC,USDT,DAI,TUSD,FDUSD,USDE,"
         "XAU,XAG,XPT,XPD,WTI,BRENT,NATGAS,"
@@ -129,7 +141,16 @@ class Config:
     HTF_MIN_ADX = _f("HTF_MIN_ADX", 18)                # ADX 1h tối thiểu để công nhận xu hướng
     MIN_ATR_PCT = _f("MIN_ATR_PCT", 0.35)              # ATR% tối thiểu
     MIN_VOL_RATIO = _f("MIN_VOL_RATIO", 0.7)           # volume nến tín hiệu >= 70% trung bình 20 nến (lý do loại #1 là "volume yếu")
-    BREAKOUT_VOL = _f("BREAKOUT_VOL", 1.5)
+    BREAKOUT_VOL = _f("BREAKOUT_VOL", 1.5)             # trigger breakout: nến phá đỉnh/đáy 20 nến với volume ≥ 1.5× (xác nhận)
+    # v3.3 (bug 8): BREAKOUT_VOL = CLIMAX_VOL = 1.5 nên luật climax_volume (chặn sẵn) chặn MỌI tín hiệu breakout – trigger chết
+    # im lặng từ v3.2. Đã sửa: bật trigger thì volume của chính nến breakout là xác nhận của nó, không tính là cao trào
+    # (strategy.breakout_confirmed). NHƯNG mặc định TẮT. Backtest 88 ngày (05/08–01/11/2026, 50 coin, code của bot đã sửa,
+    # phí + trượt 0,20%/vòng, 60% trong mẫu / 40% ngoài mẫu): 23.308 nến breakout thô, chỉ 2 thành tín hiệu qua mọi cổng
+    # (cổng chống đuổi giá MAX_EXT_ATR, khung 1h, BTC... loại phần còn lại): APR short 11/08 (điểm 5,0, phiên chiều – bị chặn)
+    # và KORU long 13/08 (điểm 3,5) – cả 2 TRONG mẫu, ngoài mẫu n = 0, số lệnh bot thật sự vào được n = 0. Không có bằng
+    # chứng R ≥ 0 ngoài mẫu → giữ tắt. Tắt: trigger breakout không được tính (không cộng điểm); tín hiệu chỉ có breakout bị
+    # loại với lý do riêng "chỉ có trigger breakout – đang tắt" (đếm trong log quét). Chi tiết: README mục "Trigger breakout".
+    BREAKOUT_ENABLED = _b("BREAKOUT_ENABLED", "false")
     MAX_EXT_ATR = _f("MAX_EXT_ATR", 1.0)               # giá cách EMA21 tối đa (ATR) – chống đuổi giá (backtest: >1 ATR lỗ)
     MAX_SL_ATR = _f("MAX_SL_ATR", 3.0)                 # SL theo cấu trúc xa hơn mức này → bỏ tín hiệu
     # v3.2: 0.6 → 0.3. 211 tín hiệu bóng: short khi BTC đang +0.3%/1h trở lên cho -0.60R (n=27, thắng 22%).
@@ -213,6 +234,10 @@ class Config:
     LEARN_EXIT_MIN_SAMPLES = _i("LEARN_EXIT_MIN_SAMPLES", 60)  # đổi cách thoát lệnh cần ≥ 60 tín hiệu so theo cặp
     LEARN_COOLDOWN_H = _f("LEARN_COOLDOWN_H", 48)             # mỗi tham số đổi tối đa 1 lần / 48h (chống nhảy qua lại)
     LEARN_WINDOW_DAYS = _i("LEARN_WINDOW_DAYS", 21)           # chỉ học từ dữ liệu N ngày gần nhất
+    # v3.3: tín hiệu dồn cụm theo ngày (cùng một nhịp thị trường) – mỗi thay đổi cần mẫu trải trên ≥ LEARN_MIN_DAYS ngày
+    # khác nhau, và t tính bằng sai số chuẩn gom cụm theo ngày (bản cũ coi mọi tín hiệu độc lập: trọng số pullback 0.82
+    # học từ 32 tín hiệu của 3 ngày với t ≈ -2.04)
+    LEARN_MIN_DAYS = _i("LEARN_MIN_DAYS", 7)
 
     # ---- Telegram ----
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")

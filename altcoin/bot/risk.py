@@ -5,6 +5,7 @@ mỗi lệnh có hệ số rủi ro = chất lượng (điểm KT + AI) × chu�
 Tổng rủi ro mọi lệnh đang mở không vượt MAX_TOTAL_RISK vốn.
 """
 from .config import cfg
+from .costs import after_fill_cost
 
 
 def quality_mult(sig, ai):
@@ -48,14 +49,14 @@ def risk_mult(sig, ai, closed_recent=None):
 
 
 def open_risk_usdt(open_trades):
-    """USDT sẽ mất (gồm phí + trượt giá) nếu mọi lệnh đang mở chạm SL hiện tại (SL đã dời về hoà vốn → chỉ còn phí)."""
+    """USDT sẽ mất (gồm phí + trượt giá chiều ra) nếu mọi lệnh đang mở chạm SL hiện tại (SL đã về hoà vốn → chỉ còn phí)."""
     total = 0.0
     for t in open_trades or []:
         entry, sl, notional = t.get("entry") or 0, t.get("sl") or 0, t.get("notional") or 0
         if not entry:
             continue
         loss = (entry - sl) if t.get("side") == "long" else (sl - entry)
-        total += (max(0.0, loss / entry) + 2 * cfg.TAKER_FEE + cfg.SLIPPAGE) * notional
+        total += (max(0.0, loss / entry) + after_fill_cost()) * notional
     return total
 
 
@@ -75,16 +76,16 @@ def position_notional(equity, entry, sl, mult=1.0, budget=None):
     sl_dist = abs(entry - sl) / entry
     if sl_dist <= 0:
         return 0.0
-    # trừ phí vào/ra + trượt giá vào tổng rủi ro
-    cost = 2 * cfg.TAKER_FEE + cfg.SLIPPAGE
-    notional = risk_usdt / (sl_dist + cost)
+    # entry là giá khớp vào (đã trượt) → còn phí vào/ra + trượt giá chiều ra (costs.after_fill_cost)
+    notional = risk_usdt / (sl_dist + after_fill_cost())
     max_notional = equity * cfg.LEVERAGE * 0.9
     return max(0.0, min(notional, max_notional))
 
 
 def risk_of(notional, entry, sl):
-    """USDT mất nếu lệnh `notional` chạm SL (gồm phí + trượt giá)."""
-    return notional * (abs(entry - sl) / entry + 2 * cfg.TAKER_FEE + cfg.SLIPPAGE) if entry else 0.0
+    """USDT mất nếu lệnh `notional` (vào ở giá khớp `entry`) chạm SL, gồm phí hai chiều + trượt giá chiều ra.
+    Không xét phía của SL – SL nằm sai phía giá vào do engine.fill_check chặn trước."""
+    return notional * (abs(entry - sl) / entry + after_fill_cost()) if entry else 0.0
 
 
 def margin_for(notional):
