@@ -49,8 +49,10 @@ RULES = {
     "long_side": ("Mọi lệnh LONG", lambda side, c: side == "long"),
     "short_side": ("Mọi lệnh SHORT", lambda side, c: side == "short"),
     # v3.2: hai luật mới từ 211 tín hiệu bóng (23–27/10/2026)
+    # v3.3 (bug 8): volume của chính nến breakout là XÁC NHẬN của trigger breakout (BREAKOUT_VOL), không phải cao trào –
+    # bản cũ BREAKOUT_VOL = CLIMAX_VOL nên luật này chặn mọi tín hiệu breakout. Xem breakout_confirmed.
     "climax_volume": ("Nến tín hiệu volume cao trào (≥ 1.5× trung bình 20 nến)",
-                      lambda side, c: _v(c, "vol_ratio", 1) >= cfg.CLIMAX_VOL),
+                      lambda side, c: _v(c, "vol_ratio", 1) >= cfg.CLIMAX_VOL and not breakout_confirmed(c)),
     "late_trend": ("Vào muộn: ADX 1h ≥ 35 (xu hướng đã chạy lâu)",
                    lambda side, c: _v(c, "htf_adx", 0) >= cfg.LATE_TREND_ADX),
     # ---- BTC dẫn dắt altcoin
@@ -97,10 +99,27 @@ def block_origin(rule):
 BLOCK_LABELS = {"default": "luật chặn sẵn", "learned": "luật tự học"}
 
 
+def rule_ctx(sig):
+    """Dữ liệu để xét luật của một tín hiệu: context + mã trigger (như features của dòng tín hiệu bóng – bộ tự học xét
+    luật trên features nên hai nơi thấy cùng dữ liệu)."""
+    return {**(sig.context or {}), "triggers": list(sig.triggers or [])}
+
+
+def breakout_confirmed(c):
+    """v3.3 (bug 8): tín hiệu có trigger breakout ĐANG BẬT (BREAKOUT_ENABLED) → volume nến tín hiệu (≥ BREAKOUT_VOL) là
+    xác nhận của chính nến breakout: luật climax_volume và điểm trừ "volume cao trào" không áp dụng. Bản cũ BREAKOUT_VOL =
+    CLIMAX_VOL = 1.5 nên mọi tín hiệu breakout bị luật climax_volume (chặn sẵn) chặn – trigger chết im lặng. Tắt (mặc định):
+    diagnose không tính trigger breakout, và dòng cũ có breakout vẫn bị xét cao trào như trước."""
+    return bool(cfg.BREAKOUT_ENABLED) and "breakout" in (c.get("triggers") or [])
+
+
+BREAKOUT_OFF = "chỉ có trigger breakout – đang tắt (BREAKOUT_ENABLED=false)"
+
+
 def blocking_rule(sig):
     """Mã luật đang chặn tín hiệu này (sau khi đã có đủ dữ liệu BTC/OI), hoặc ''."""
     blocks = active_blocks()
-    for rule in matching_rules(sig.side, sig.context):
+    for rule in matching_rules(sig.side, rule_ctx(sig)):
         if rule in blocks:
             return rule
     return ""
@@ -320,9 +339,12 @@ def _score(df, htf, side, triggers, funding, change24h):
     if (side == "long" and r.close > r.vwap) or (side == "short" and r.close < r.vwap):
         s += 0.5; why.append("Đúng phía VWAP")
     # Volume: v3.2 – volume cao trào trên nến tín hiệu là dấu hiệu cạn lực, KHÔNG cộng điểm mà trừ
-    # (31 tín hiệu bóng vol 1.5–2.5×: -0.68R, thắng 16%)
+    # (31 tín hiệu bóng vol 1.5–2.5×: -0.68R, thắng 16%). v3.3: trừ nến breakout đang bật – volume là xác nhận của nó.
     if r.vol_ratio >= cfg.CLIMAX_VOL:
-        s -= 1; why.append(f"Volume cao trào x{r.vol_ratio:.1f} (trừ điểm)")
+        if breakout_confirmed({"triggers": [trig_key(t) for t in triggers]}):
+            why.append(f"Volume x{r.vol_ratio:.1f} xác nhận breakout (không tính cao trào)")
+        else:
+            s -= 1; why.append(f"Volume cao trào x{r.vol_ratio:.1f} (trừ điểm)")
     # Xu hướng 1h đã chạy lâu (ADX 1h ≥ 35) → vào muộn, trừ điểm (76 short bóng: -0.44R)
     if h.adx >= cfg.LATE_TREND_ADX:
         s -= 1; why.append(f"ADX 1h {h.adx:.0f} – xu hướng đã chạy lâu (trừ điểm)")
@@ -568,6 +590,13 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     if gate:
         return None, gate, info
     triggers = _triggers(df, side)
+    if not cfg.BREAKOUT_ENABLED and any(trig_key(t) == "breakout" for t in triggers):
+        # v3.3 (bug 8): trigger breakout tắt rõ ràng (cờ BREAKOUT_ENABLED, mặc định tắt – xem config) – không cộng điểm,
+        # không là trigger; tín hiệu CHỈ có breakout bị loại với lý do riêng (đếm được trong log quét), không im lặng
+        triggers = [t for t in triggers if trig_key(t) != "breakout"]
+        info["breakout_off"] = True
+        if not triggers:
+            return None, BREAKOUT_OFF, info
     if not triggers:
         return None, "không có trigger (MACD/EMA cắt, breakout, pullback, nhấn chìm)", info
     score, reasons = _score(df, htf, side, triggers, funding, change24h)

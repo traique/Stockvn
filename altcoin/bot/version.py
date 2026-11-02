@@ -18,7 +18,7 @@ from pathlib import Path
 
 VERSION = "3.3.0"
 RELEASED = "2026-11-02"
-RELEASE_BUILD = "22dd96e"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "b77eb32"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
@@ -26,10 +26,10 @@ NOTES = (
     ("3.3.0", "2026-11-02", (
         "Chạy ảo vào lệnh ở giá last lúc quyết định (+ trượt giá), không ở giá đóng nến 15m cũ vài phút; chỉ bỏ khi giá khớp đã vượt SL (range: vượt TP)",
         "Cổng xét lại ở giá mới (ngược 0,5R, SL > 3 ATR, R:R range) là đổi chiến lược nên tắt sẵn – muốn dùng thì đặt FILL_RECHECK=true",
-        "Chạy thật: khối lượng theo giá mới; khớp xong rủi ro vượt kế hoạch 20% (hoặc 2× với lot tối thiểu) thì cắt bớt hợp đồng, dưới 1 lot giữ 1 lot, không được thì đóng",
+        "Chạy thật: khối lượng theo giá mới; khớp xong rủi ro vượt kế hoạch 20% (lot tối thiểu: 2×) thì cắt bớt hợp đồng hoặc đóng",
         "SL/TP1/trailing xét mọi nến 1 phút giá last đã đóng từ lần kiểm tra trước – không còn sót râu chạm SL; chạy thật cũng theo giá last thay giá mark",
-        "Sau lúc bot tắt / mất quyền giao dịch: nến cũ chỉ khớp SL/TP đang đặt như sàn, không chốt TP1 hay đóng theo giá cũ – chạy ảo và chạy thật như nhau",
-        "Chạy thật: SL mới mà sàn chưa nhận thì bot tự giữ và đặt lại mỗi lượt; lỗi đọc vị thế hay lệnh đóng lỗi không còn ghi đóng nhầm; đóng lệnh huỷ cả SL/TP loại oco",
+        "Nến lúc bot tắt / mất quyền giao dịch chỉ khớp SL/TP đang đặt như sàn, không chốt TP1 hay đóng theo giá cũ",
+        "Chạy thật: SL sàn chưa nhận thì bot tự giữ, đặt lại mỗi lượt; lỗi đọc vị thế / lệnh đóng không còn ghi đóng nhầm; huỷ cả lệnh oco",
         "Chốt TP1 làm tròn theo lot của sàn (1 hợp đồng thì giữ cả), báo giá khớp thật; cột phí ghi đủ hai chiều; risk_mult là rủi ro thật",
         "Tín hiệu bóng và bộ tự học dùng cùng giá vào, phí 0,20% và cách bỏ phút vào lệnh như lệnh chạy ảo; kết quả bóng bản cũ không dùng để học",
         "Đủ 2 lệnh mở vẫn quét và ghi tín hiệu bóng (không hỏi AI, không vào lệnh); ứng viên xếp sau lệnh vừa vào cũng được ghi bóng",
@@ -40,7 +40,9 @@ NOTES = (
         "Tự học: không học từ tín hiệu luật đang chặn, cần mẫu ≥ 7 ngày, t tính theo ngày; luật phiên theo đúng giờ bot đã xét",
         "Tham số học bằng thống kê cũ (pullback 0,82) về mặc định một lần khi chạy ảo + tự học auto; chạy thật / suggest: đề xuất chờ duyệt",
         "Bỏ cổng R:R của setup xu hướng (TP dựng ≥ 1,8R nên không bao giờ chặn); MIN_RR là mức sàn TP cố định",
-        "Tín hiệu bóng ghi thêm kết quả thử nghiệm SL 2,5 ATR + bám sóng (ghi sau, không giữ kết quả chính), so ở trang Tự học (bot không tự chuyển)",
+        "Tín hiệu bóng ghi thêm thử nghiệm SL 2,5 ATR + bám sóng, so ở trang Tự học (bot không tự chuyển)",
+        "Breakout hết bị luật volume cao trào chặn nhưng vẫn tắt (BREAKOUT_ENABLED): backtest 0 tín hiệu ngoài mẫu",
+        "AI nhận kế hoạch thoát thật (TP1 1R + bám sóng); thua đủ 1R không là GOOD_TRADE; bỏ hồ sơ test gắt",
     )),
     ("3.2.1", "2026-10-29", (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",

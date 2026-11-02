@@ -80,7 +80,8 @@ class Bot:
             if rev:
                 self.store.add_review(t, pnl, rev)
                 self.notify.send(f"🧠 TỔNG KẾT {t['side'].upper()} {t['symbol']} [{rev['verdict']}]\n"
-                             f"{rev['lesson']}\n#" + " #".join(rev.get("tags") or []))
+                             f"{rev['lesson']}\n#" + " #".join(rev.get("tags") or [])
+                             + (f"\n⚠️ {rev['note']}" if rev.get("note") else ""))
         threading.Thread(target=_run, daemon=True, name="ai-review").start()
 
     # ------------------------------------------------------------ text cho Telegram
@@ -135,7 +136,10 @@ class Bot:
         rows = self.store.reviews(8)
         if not rows:
             return "Chưa có tổng kết nào."
-        return "\n\n".join(f"{'✅' if r['pnl']>0 else '❌'} {r['side'].upper()} {r['symbol']} [{r['verdict']}]\n{r['lesson']}" for r in rows)
+        return "\n\n".join(f"{'✅' if r['pnl']>0 else '❌'} {r['side'].upper()} {r['symbol']}"
+                           + (f" {r['r']:+.2f}R" if r.get("r") is not None else "") + f" [{r['verdict']}]"
+                           + ("" if r.get("consistent", True) else " ⚠️ không khớp kết quả – không dùng làm bài học")
+                           + f"\n{r['lesson']}" for r in rows)
 
     HELP = ("Lệnh (Telegram gõ /lenh, Zoom gõ /okxbot lenh):\n"
             "status – vốn, lệnh mở, quét gần nhất\ntrades – 10 lệnh gần nhất\nsignals – tín hiệu & quyết định AI\n"
@@ -509,10 +513,11 @@ class Bot:
         from . import exits as _ex
         # giá trị THỰC đang dùng (tự học ghi đè mặc định) – bản cũ in mặc định gây hiểu nhầm
         log.info("Thông số đang dùng: MIN_SCORE=%s MIN_ADX=%s HTF_MIN_ADX=%s MAX_EXT_ATR=%s BTC_GATE=%s%% CHASE_1H=%s%% "
-                 "CLIMAX_VOL=%s LATE_ADX=%s SL=%s–%sATR TP1_R=%s "
+                 "CLIMAX_VOL=%s BREAKOUT=%s LATE_ADX=%s SL=%s–%sATR TP1_R=%s "
                  "RISK=%.1f%% (×%.2f–%.2f theo AI, trần tổng %.0f%%, tối đa %d lệnh) TOP_N=%s AI_MIN_CONF=%s/%s "
                  "AI_VETO=%s%% HỌC≥%s mẫu,t≥%s CHẶN=%s", L.get("min_score") or cfg.MIN_SCORE, cfg.MIN_ADX, cfg.HTF_MIN_ADX,
-                 cfg.MAX_EXT_ATR, cfg.BTC_GATE_CHG, cfg.CHASE_1H_PCT, cfg.CLIMAX_VOL, cfg.LATE_TREND_ADX,
+                 cfg.MAX_EXT_ATR, cfg.BTC_GATE_CHG, cfg.CHASE_1H_PCT, cfg.CLIMAX_VOL,
+                 "bật" if cfg.BREAKOUT_ENABLED else "tắt (BREAKOUT_ENABLED=false)", cfg.LATE_TREND_ADX,
                  cfg.ATR_SL_MULT, cfg.MAX_SL_ATR, _ex.current_tp1_r(), cfg.RISK_PER_TRADE * 100,
                  cfg.RISK_MIN_MULT, cfg.RISK_MAX_MULT, cfg.MAX_TOTAL_RISK * 100, cfg.MAX_OPEN_POSITIONS, cfg.TOP_N_COINS,
                  cfg.AI_MIN_CONFIDENCE, cfg.AI_WEAK_CONFIDENCE, current_veto_conf(), cfg.LEARN_MIN_SAMPLES, cfg.LEARN_MIN_T,

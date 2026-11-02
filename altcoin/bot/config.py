@@ -141,7 +141,16 @@ class Config:
     HTF_MIN_ADX = _f("HTF_MIN_ADX", 18)                # ADX 1h tối thiểu để công nhận xu hướng
     MIN_ATR_PCT = _f("MIN_ATR_PCT", 0.35)              # ATR% tối thiểu
     MIN_VOL_RATIO = _f("MIN_VOL_RATIO", 0.7)           # volume nến tín hiệu >= 70% trung bình 20 nến (lý do loại #1 là "volume yếu")
-    BREAKOUT_VOL = _f("BREAKOUT_VOL", 1.5)
+    BREAKOUT_VOL = _f("BREAKOUT_VOL", 1.5)             # trigger breakout: nến phá đỉnh/đáy 20 nến với volume ≥ 1.5× (xác nhận)
+    # v3.3 (bug 8): BREAKOUT_VOL = CLIMAX_VOL = 1.5 nên luật climax_volume (chặn sẵn) chặn MỌI tín hiệu breakout – trigger chết
+    # im lặng từ v3.2. Đã sửa: bật trigger thì volume của chính nến breakout là xác nhận của nó, không tính là cao trào
+    # (strategy.breakout_confirmed). NHƯNG mặc định TẮT. Backtest 88 ngày (05/08–01/11/2026, 50 coin, code của bot đã sửa,
+    # phí + trượt 0,20%/vòng, 60% trong mẫu / 40% ngoài mẫu): 23.308 nến breakout thô, chỉ 2 thành tín hiệu qua mọi cổng
+    # (cổng chống đuổi giá MAX_EXT_ATR, khung 1h, BTC... loại phần còn lại): APR short 11/08 (điểm 5,0, phiên chiều – bị chặn)
+    # và KORU long 13/08 (điểm 3,5) – cả 2 TRONG mẫu, ngoài mẫu n = 0, số lệnh bot thật sự vào được n = 0. Không có bằng
+    # chứng R ≥ 0 ngoài mẫu → giữ tắt. Tắt: trigger breakout không được tính (không cộng điểm); tín hiệu chỉ có breakout bị
+    # loại với lý do riêng "chỉ có trigger breakout – đang tắt" (đếm trong log quét). Chi tiết: README mục "Trigger breakout".
+    BREAKOUT_ENABLED = _b("BREAKOUT_ENABLED", "false")
     MAX_EXT_ATR = _f("MAX_EXT_ATR", 1.0)               # giá cách EMA21 tối đa (ATR) – chống đuổi giá (backtest: >1 ATR lỗ)
     MAX_SL_ATR = _f("MAX_SL_ATR", 3.0)                 # SL theo cấu trúc xa hơn mức này → bỏ tín hiệu
     # v3.2: 0.6 → 0.3. 211 tín hiệu bóng: short khi BTC đang +0.3%/1h trở lên cho -0.60R (n=27, thắng 22%).

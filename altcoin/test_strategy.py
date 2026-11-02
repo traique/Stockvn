@@ -350,6 +350,209 @@ def _():
         cfg.FILL_RECHECK = _fr
 
 
+# ======================================================================= v3.3 phần C: trigger breakout (bug 8)
+BRK = "Breakout đỉnh 20 nến, vol x1.6"
+
+
+def brk_frames(n=130):
+    """Nến giả đủ dài cho diagnose (cổng, trigger, khung 1h được thay trong từng phần – chỉ cần dựng được chỉ báo)."""
+    rnd = random.Random(8)
+    out, p, t = [], 100.0, 0
+    for _i in range(n):
+        o = p; p = p * (1 + rnd.uniform(-0.004, 0.005)); hi = max(o, p) * 1.002; lo = min(o, p) * 0.998
+        out.append([t, o, hi, lo, p, rnd.uniform(100, 200)]); t += 900_000
+    return out
+
+
+def diag_with(triggers, enabled):
+    """diagnose với cổng luôn qua, khung 1h tăng, trigger cho trước, MIN_SCORE thấp – chỉ xét cách tính trigger breakout."""
+    saved = (S._gates, S._triggers, S._htf_trend, cfg.BREAKOUT_ENABLED if hasattr(cfg, "BREAKOUT_ENABLED") else None,
+             cfg.MIN_SCORE)
+    S._gates = lambda *a, **k: ""
+    S._triggers = lambda df, side: list(triggers)
+    S._htf_trend = lambda htf: 1
+    cfg.BREAKOUT_ENABLED, cfg.MIN_SCORE = enabled, -99.0
+    try:
+        return S.diagnose("X/USDT:USDT", brk_frames(), brk_frames(90), 0.0, 0.0, {})
+    finally:
+        S._gates, S._triggers, S._htf_trend, cfg.BREAKOUT_ENABLED, cfg.MIN_SCORE = saved
+
+
+@section("bug 8: bật breakout – volume của chính nến breakout không bị luật climax_volume chặn, không bị trừ điểm cao trào")
+def _():
+    saved = getattr(cfg, "BREAKOUT_ENABLED", None)
+    S.LEARNED.update({"blocks": [], "unblocked": [], "trigger_w": {}})
+    try:
+        cfg.BREAKOUT_ENABLED = True
+        g = trend_sig("BRK/USDT:USDT", 6.0, vol_ratio=1.61)
+        g.triggers = ["breakout", "pullback"]
+        assert "climax_volume" not in S.matching_rules("long", S.rule_ctx(g)), S.matching_rules("long", S.rule_ctx(g))
+        assert S.blocking_rule(g) == "", S.blocking_rule(g)
+        # bộ tự học xét luật trên features của dòng bóng (có "triggers") – thấy đúng như lúc quét
+        assert "climax_volume" not in S.matching_rules("long", {"vol_ratio": 1.61, "triggers": ["breakout"], "hour": 21})
+        # tín hiệu KHÔNG có breakout mà volume cao trào vẫn bị chặn như v3.2
+        p = trend_sig("PB/USDT:USDT", 6.0, vol_ratio=1.61)
+        assert S.blocking_rule(p) == "climax_volume", S.blocking_rule(p)
+        # điểm: breakout + volume 1.6× không bị trừ 1 điểm "cao trào"; pullback + volume 1.6× vẫn bị trừ
+        r_ = NS(ema9=3, ema21=2, ema50=1, close=1, ema200=5, adx=10, vol_ratio=1.6, close_pos=0.5, body_pct=0.3, vwap=9)
+        h_ = NS(di_plus=0, di_minus=1, macd_hist=-1, rsi=40, adx=20)
+        fr_, hf_ = NS(row=lambda i: r_), NS(row=lambda i: h_)
+        r_lo = NS(**{**vars(r_), "vol_ratio": 1.0})
+        s_brk, why = S._score(fr_, hf_, "long", [BRK], 0, 0)
+        s_ref, _w = S._score(NS(row=lambda i: r_lo), hf_, "long", [BRK], 0, 0)
+        assert s_brk == s_ref and not any("cao trào" in w and "trừ" in w for w in why), (s_brk, s_ref, why)
+        s_pb, _w = S._score(fr_, hf_, "long", ["Pullback EMA21 + nến bật"], 0, 0)
+        s_pb0, _w = S._score(NS(row=lambda i: r_lo), hf_, "long", ["Pullback EMA21 + nến bật"], 0, 0)
+        assert s_pb == s_pb0 - 1, (s_pb, s_pb0)
+        # diagnose: bật thì breakout là trigger (cộng điểm)
+        sig, why, info = diag_with([BRK], True)
+        assert sig is not None and why == "" and sig.triggers == ["breakout"], (sig, why)
+    finally:
+        cfg.BREAKOUT_ENABLED = saved
+
+
+@section("bug 8: tắt breakout (mặc định) – không tính trigger, tín hiệu chỉ có breakout bị loại với lý do riêng, không im lặng")
+def _():
+    from bot.config import Config
+    assert Config().BREAKOUT_ENABLED is False                     # mặc định tắt (backtest 88 ngày: ngoài mẫu n = 0)
+    sig, why, info = diag_with([BRK], False)
+    assert sig is None and why == S.BREAKOUT_OFF and info.get("breakout_off"), (sig, why, info)
+    assert "BREAKOUT_ENABLED=false" in why
+    on, _w, _i = diag_with([BRK, "Pullback EMA21 + nến bật"], True)
+    off, why, info = diag_with([BRK, "Pullback EMA21 + nến bật"], False)
+    assert off is not None and off.triggers == ["pullback"] and info.get("breakout_off"), (off and off.triggers, why)
+    assert not any(t.startswith("Breakout") for t in off.reasons)
+    assert sorted(on.triggers) == ["breakout", "pullback"] and on.score > off.score, (on.triggers, on.score, off.score)
+    # tắt: dòng cũ có trigger breakout vẫn bị xét cao trào như trước (bộ tự học gỡ climax_volume cũng không mở breakout)
+    saved = getattr(cfg, "BREAKOUT_ENABLED", None)
+    cfg.BREAKOUT_ENABLED = False
+    try:
+        assert "climax_volume" in S.matching_rules("long", {"vol_ratio": 1.61, "triggers": ["breakout"]})
+    finally:
+        cfg.BREAKOUT_ENABLED = saved
+
+
+@section("bug 8: quét – bật breakout thì tín hiệu breakout volume 1.6× được hỏi AI; features ghi trigger để bộ tự học xét luật")
+def _():
+    saved = getattr(cfg, "BREAKOUT_ENABLED", None)
+    cfg.BREAKOUT_ENABLED = True
+    try:
+        g = trend_sig("BRK/USDT:USDT", 7.0, vol_ratio=1.61)
+        g.triggers = ["breakout"]
+        ai = FakeAI()
+        bot = make_bot({"BRK/USDT:USDT": (g, "")}, ai=ai)
+        bot.scan()
+        assert ai.asked == ["BRK/USDT:USDT"], ai.asked                 # bản cũ: luật climax_volume chặn → không hỏi AI
+        src, f = rows()["BRK"]
+        assert src == "taken" and f["triggers"] == ["breakout"], (src, f.get("triggers"))
+        assert "climax_volume" not in S.matching_rules("long", f)
+    finally:
+        cfg.BREAKOUT_ENABLED = saved
+
+
+# ======================================================================= v3.3 phần C: AI
+from bot import ai as AI
+
+
+def fake_ai(answer):
+    """AIFilter không gọi mạng: _ask ghi lại (system, user) và trả `answer`."""
+    a = AI.AIFilter.__new__(AI.AIFilter)
+    a.store, a.providers, a.asked, a.last_result = STORE, [{"name": "fake"}], [], None
+    a._ask = lambda system, user, key, kind="analyze": (a.asked.append((system, json.loads(user.split("\n", 1)[1]))),
+                                                        dict(answer, model="fake/m"))[1]
+    return a
+
+
+@section("AI: prompt phân tích nhận kế hoạch thoát bot thật sự dùng (hybrid: TP1 1R + bám sóng), không phải TP cố định")
+def _():
+    S.LEARNED.update({"exit_mode": None, "tp1_r": None})
+    _en = cfg.AI_ENABLED; cfg.AI_ENABLED = True
+    try:
+        a = fake_ai({"decision": "LONG", "confidence": 70})
+        g = S.Signal("X/USDT:USDT", "long", 6, 100.0, 1.0, 98.0, 106.0, ["t"], {"setup": "trend"}, triggers=["pullback"])
+        a.analyze(g)
+        system, pl = a.asked[-1]
+        # bản cũ: take_profit = 106 (TP cố định 3 ATR / 1.8R), risk_reward 3.0 – trong khi bot chốt 50% ở 1R rồi bám sóng
+        assert pl["take_profit"] == 102.0 and pl["risk_reward"] == 1.0, (pl["take_profit"], pl["risk_reward"])
+        ep = pl["exit_plan"]
+        assert ep["mode"] == "hybrid" and ep["tp1"] == 102.0 and ep["tp1_close_pct"] == 50, ep
+        assert ep["far_safety_tp"] == 100.0 + cfg.RUNNER_MAX_TP_ATR and "bám sóng" in ep["after_tp1"], ep
+        assert "exit_plan" in system and "take_profit" in system
+        S.LEARNED["tp1_r"] = 1.3                                   # TP1 tự học
+        a.analyze(g)
+        assert abs(a.asked[-1][1]["take_profit"] - 102.6) < 1e-9, a.asked[-1][1]["take_profit"]
+        S.LEARNED.update({"exit_mode": "trail", "tp1_r": None})    # bám sóng toàn bộ: không có TP gần
+        a.analyze(g)
+        assert a.asked[-1][1]["take_profit"] is None and a.asked[-1][1]["exit_plan"]["mode"] == "trail"
+        S.LEARNED["exit_mode"] = None
+        rg = S.Signal("X/USDT:USDT", "long", 6, 100.0, 1.0, 99.0, 101.5, ["t"], {"setup": "range"}, triggers=["range_revert"])
+        a.analyze(rg)                                              # range: TP = dải giữa Bollinger (fixed)
+        assert a.asked[-1][1]["take_profit"] == 101.5 and a.asked[-1][1]["exit_plan"]["mode"] == "fixed"
+    finally:
+        cfg.AI_ENABLED = _en
+        S.LEARNED.update({"exit_mode": None, "tp1_r": None})
+
+
+@section("AI: verdict tổng kết phải khớp kết quả – thua đủ 1R không là GOOD_TRADE (thua đúng quy tắc → UNLUCKY)")
+def _():
+    st = AI.settle_verdict
+    assert st("GOOD_TRADE", -1.12, True) == ("UNLUCKY", True, st("GOOD_TRADE", -1.12, True)[2])
+    assert st("good_trade", -1.0, "true")[:2] == ("UNLUCKY", True)
+    assert st("GOOD_TRADE", -1.12, False)[:2] == ("GOOD_TRADE", False)          # không giải thích → không dùng
+    assert st("GOOD_TRADE", -1.12, None)[:2] == ("GOOD_TRADE", False)
+    assert st("LUCKY", -1.1)[:2] == ("LUCKY", False) and st("LUCKY", -0.3)[:2] == ("LUCKY", False)
+    assert st("UNLUCKY", 0.45)[:2] == ("UNLUCKY", False)
+    assert st("UNLUCKY", -1.1)[:2] == ("UNLUCKY", True) and st("BAD_TRADE", -1.1)[:2] == ("BAD_TRADE", True)
+    assert st("GOOD_TRADE", 0.45)[:2] == ("GOOD_TRADE", True) and st("GOOD_TRADE", -0.3)[:2] == ("GOOD_TRADE", True)
+    assert st("WHATEVER", 0.4)[1] is False and st("GOOD_TRADE", None)[1] is True
+    assert st("good trade", 0.4)[:2] == ("GOOD_TRADE", True) and st("BAD", -1.1)[:2] == ("BAD_TRADE", True)
+    # review(): lệnh BEAT thua đủ 1R, AI chấm GOOD_TRADE và nói thua đúng quy tắc → UNLUCKY; payload có kế hoạch thoát thật
+    _en = cfg.AI_ENABLED; cfg.AI_ENABLED = True
+    try:
+        a = fake_ai({"verdict": "GOOD_TRADE", "rule_correct": True, "lesson": "Setup đúng, thị trường đảo chiều.", "tags": []})
+        tr = dict(id=1, symbol="BEAT/USDT:USDT", side="long", entry=100.0, sl=98.0, sl0=98.0, tp=110.0, tp1=102.0,
+                  exit_mode="hybrid", atr=1.0, notional=5.0, notional0=5.0, opened_at=time.time() - 600, peak=100.3)
+        rev = a.review(tr, 98.0, -0.1125, -22.5, "SL")
+        _sys, pl = a.asked[-1]
+        assert rev["verdict"] == "UNLUCKY" and rev["consistent"] and rev["verdict_ai"] == "GOOD_TRADE", rev
+        assert pl["facts"]["result_r"] == -1.12 and pl["take_profit"] == 102.0 and pl["exit_plan"]["mode"] == "hybrid", pl
+        a = fake_ai({"verdict": "GOOD_TRADE", "lesson": "Lệnh tốt.", "tags": []})
+        rev = a.review(tr, 98.0, -0.1125, -22.5, "SL")
+        assert rev["verdict"] == "GOOD_TRADE" and rev["consistent"] is False and "không dùng" in rev["note"], rev
+        assert "rule_correct" in AI.SYSTEM_REVIEW and "KHÔNG BAO GIỜ là GOOD_TRADE" in AI.SYSTEM_REVIEW
+    finally:
+        cfg.AI_ENABLED = _en
+
+
+@section("AI: chỉ tổng kết khớp kết quả được đưa lại vào prompt (bài học); /lessons và web đánh dấu tổng kết không khớp")
+def _():
+    STORE.db.run("DELETE FROM reviews"); STORE.db.run("DELETE FROM trades")
+
+    def closed(sym, pnl, verdict, lesson, ago):
+        tid = STORE.open_trade(dict(mode="paper", symbol=f"{sym}/USDT:USDT", side="long", entry=100.0, sl=98.0, sl0=98.0,
+                                    tp=110.0, notional=5.0, notional0=5.0, status="closed", pnl=pnl,
+                                    opened_at=time.time() - ago - 600, closed_at=time.time() - ago))
+        STORE.db.run("INSERT INTO reviews VALUES(?,?,?,?,?,?,?,?,?)",          # đúng câu lệnh của bản 3.2.x
+                     (time.time() - ago, tid, f"{sym}/USDT:USDT", "long", pnl, verdict, lesson, "", "m"))
+    closed("BEAT", -0.1125, "GOOD_TRADE", "BEAT tốt", 50)      # -1.12R chấm GOOD_TRADE (bản cũ) → không dùng
+    closed("LIT", 0.12, "UNLUCKY", "LIT xui", 40)              # lãi mà UNLUCKY → không dùng
+    closed("UNI", -0.11, "UNLUCKY", "UNI thua đúng quy tắc", 30)
+    closed("PUMP", 0.0475, "GOOD_TRADE", "PUMP chốt TP1", 20)
+    closed("AVAX", -0.105, "BAD_TRADE", "AVAX vào muộn", 10)
+    got = STORE.recent_lessons(5)
+    assert [x.split()[1].split("/")[0] for x in got] == ["AVAX", "PUMP", "UNI"], got
+    assert "(-1.10R)" in got[2] and "(+0.47R)" in got[1], got
+    assert len(STORE.recent_lessons(2)) == 2
+    rv = {r["symbol"].split("/")[0]: r for r in STORE.reviews(10)}
+    assert rv["BEAT"]["consistent"] is False and rv["LIT"]["consistent"] is False and rv["UNI"]["consistent"], rv
+    assert rv["BEAT"]["r"] == -1.12, rv["BEAT"]["r"]
+    b = M.Bot.__new__(M.Bot); b.store = STORE
+    txt = M.Bot.lessons_text(b)
+    assert "BEAT/USDT:USDT -1.12R [GOOD_TRADE] ⚠️ không khớp kết quả" in txt and "UNI/USDT:USDT -1.10R [UNLUCKY]\n" in txt, txt
+    from bot.dashboard import APP_JS
+    assert "x.consistent===false" in APP_JS
+
+
 # ======================================================================= v3.3 sửa sau review phần B
 from bot.learner import Learner, TECH_SOURCES
 

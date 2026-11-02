@@ -202,7 +202,7 @@ function renderLog(){
   else if(tab==='scans'){renderScans();return}
   else{rows=D.reviews||[];$('histN').textContent='';
     el.innerHTML=rows.length?rows.map(x=>`<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span class="pill">${esc(x.verdict)}</span></div>
-      <div class="r ${x.pnl>=0?'up':'dn'}">${x.pnl>=0?'+':''}${f(x.pnl,4)}</div><div class="m">${esc(x.lesson)}${x.tags?` <span style="color:var(--mut)">#${esc(x.tags).split(',').join(' #')}</span>`:''}</div></div>`).join(''):'<div class="empty">AI sẽ tổng kết sau mỗi lệnh đóng.</div>'}
+      <div class="r ${x.pnl>=0?'up':'dn'}">${x.pnl>=0?'+':''}${f(x.pnl,4)}${x.r!=null?`<small>${x.r>=0?'+':''}${f(x.r,2)}R</small>`:''}</div><div class="m">${x.consistent===false?'<b>Không khớp kết quả – không dùng làm bài học.</b> ':''}${esc(x.lesson)}${x.tags?` <span style="color:var(--mut)">#${esc(x.tags).split(',').join(' #')}</span>`:''}</div></div>`).join(''):'<div class="empty">AI sẽ tổng kết sau mỗi lệnh đóng.</div>'}
 }
 
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));b.setAttribute('aria-selected','true');tab=b.dataset.t;renderLog()});

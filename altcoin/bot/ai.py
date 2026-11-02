@@ -36,6 +36,10 @@ Cũng tránh lặp lại các lỗi trong "lessons_from_recent_trades".
   (50 = trung bình; 60–70 = tốt hơn rõ, có lý do cụ thể; 80+ = rất hiếm, mọi tiêu chí đều đẹp).
   Hệ thống vào lệnh khi confidence >= """ + str(cfg.AI_MIN_CONFIDENCE) + """.
 - Nếu decision == "SKIP": confidence = mức độ NGUY HIỂM của kèo (càng nhiều dấu hiệu bẫy giá, phân kỳ, ngược dòng tiền, ngược BTC thì càng cao).
+"exit_plan" là cách bot THẬT SỰ thoát lệnh; "take_profit" là mục tiêu chốt lời ĐẦU TIÊN của kế hoạch đó (hybrid: TP1 cách
+entry tp1_r R, chốt tp1_close_pct% rồi SL về hoà vốn, phần còn lại bám sóng không có TP gần; trail: không có TP gần, null).
+Xét kháng cự/hỗ trợ và khả năng giá tới take_profit này, không phải far_safety_tp (chỉ là lưới an toàn rất xa).
+"entry" là giá đóng nến tín hiệu; lệnh vào ở giá thị trường lúc vào (sau vài phút), 1R và TP1 tính lại từ giá khớp.
 Dữ liệu: "candles_15m" mô tả 6 nến gần nhất đã chuẩn hoá theo ATR (thân, râu, close_pos 0=đóng đáy…1=đóng đỉnh, vol so trung bình);
 oi_chg_1h + px_chg_1h – giá đi cùng OI tăng là tiền mới, OI giảm là chỉ đóng vị thế; ls_ratio – tỉ lệ tài khoản long/short.
 TRẢ LỜI DUY NHẤT bằng JSON hợp lệ:
@@ -46,10 +50,58 @@ Hãy tổng kết ngắn gọn, thẳng thắn: lệnh này thắng/thua vì đ�
 QUAN TRỌNG: mục "facts" là số liệu ĐÃ TÍNH SẴN từ dữ liệu thật (khoảng cách SL theo ATR, kết quả theo R, giá chạy
 thuận tối đa MFE, ngược tối đa MAE). Chỉ dùng đúng các con số đó, KHÔNG tự tính lại, KHÔNG bịa số khác.
 SL cách ≥ 1.5 ATR là theo đúng quy tắc hệ thống → không được kết luận "SL quá sát"; nếu MFE ≥ 1R rồi mới thua thì
-bài học là về quản lý lệnh (chốt/dời SL), không phải điểm vào.
+bài học là về quản lý lệnh (chốt/dời SL), không phải điểm vào. "exit_plan" là cách bot thật sự thoát lệnh (TP1, bám sóng).
+Chọn verdict ĐÚNG với kết quả (facts.result_r):
+- GOOD_TRADE: lệnh CÓ LÃI nhờ setup tốt và quản lý đúng kế hoạch (hoặc lỗ nhỏ khi thoát sớm đúng quy tắc).
+- LUCKY: có lãi nhưng setup / quản lý kém – lãi nhờ may.
+- UNLUCKY: vào và quản lý ĐÚNG quy tắc nhưng vẫn thua – thua đủ 1R tại SL theo đúng kế hoạch là UNLUCKY (hoặc BAD_TRADE nếu
+  setup có lỗi), KHÔNG BAO GIỜ là GOOD_TRADE.
+- BAD_TRADE: setup hoặc quản lý sai / có dấu hiệu xấu đã thấy được lúc vào.
+"rule_correct": true nếu lệnh vào và được quản lý đúng quy tắc hệ thống (thua là do thị trường, không do lỗi), false nếu không.
 TRẢ LỜI DUY NHẤT bằng JSON hợp lệ:
-{"verdict": "GOOD_TRADE" | "BAD_TRADE" | "LUCKY" | "UNLUCKY", "lesson": "1-2 câu tiếng Việt, cụ thể, có thể hành động",
- "tags": ["tối đa 3 từ khoá ngắn"]}"""
+{"verdict": "GOOD_TRADE" | "BAD_TRADE" | "LUCKY" | "UNLUCKY", "rule_correct": true | false,
+ "lesson": "1-2 câu tiếng Việt, cụ thể, có thể hành động", "tags": ["tối đa 3 từ khoá ngắn"]}"""
+
+
+# v3.3: tổng kết sau lệnh phải KHỚP kết quả – bản cũ chấm GOOD_TRADE cho lệnh BEAT thua đủ -1R và đưa "bài học" đó lại vào
+# prompt phân tích. Lệnh thua ≥ FULL_LOSS_R (thua đủ 1R tại SL, tính cả phí/trượt giá) không thể là GOOD_TRADE: AI giải thích
+# là thua đúng quy tắc (rule_correct) → đổi thành UNLUCKY; không → tổng kết không nhất quán, không dùng làm bài học.
+VERDICTS = ("GOOD_TRADE", "BAD_TRADE", "LUCKY", "UNLUCKY")
+FULL_LOSS_R = 0.9
+
+
+def verdict_consistent(verdict, r):
+    """verdict có khớp kết quả `r` (R, None = không biết) không: thua đủ 1R không là GOOD_TRADE/LUCKY, thua không là LUCKY,
+    lãi không là UNLUCKY; verdict lạ → không. Dùng lúc ghi (ai.review) và lúc đọc bài học (storage.recent_lessons)."""
+    if verdict not in VERDICTS:
+        return False
+    if r is None:
+        return True
+    if r <= -FULL_LOSS_R and verdict in ("GOOD_TRADE", "LUCKY"):
+        return False
+    if r < 0 and verdict == "LUCKY":
+        return False
+    if r > 0 and verdict == "UNLUCKY":
+        return False
+    return True
+
+
+def _truthy(v):
+    return v is True or (isinstance(v, (int, float)) and v == 1) or str(v).strip().lower() in ("true", "yes", "1", "có")
+
+
+def settle_verdict(verdict, r, rule_correct=None):
+    """(verdict cuối, nhất quán?, ghi chú) cho một tổng kết: GOOD_TRADE cho lệnh thua đủ 1R mà AI nói thua đúng quy tắc →
+    UNLUCKY; các trường hợp không khớp khác giữ nguyên verdict của AI (để thấy được) và đánh dấu không nhất quán."""
+    v = str(verdict or "").upper().strip().replace(" ", "_")
+    if v in ("GOOD", "BAD"):                    # model viết tắt
+        v += "_TRADE"
+    if r is not None and r <= -FULL_LOSS_R and v == "GOOD_TRADE" and _truthy(rule_correct):
+        return "UNLUCKY", True, "AI chấm GOOD_TRADE cho lệnh thua đủ 1R, giải thích là thua đúng quy tắc → UNLUCKY"
+    if verdict_consistent(v, r):
+        return v, True, ""
+    rr = "" if r is None else f" {r:+.2f}R"
+    return v, False, f"{v or '?'} không khớp kết quả{rr} – không dùng làm bài học"
 
 
 # model free không phù hợp để phân tích (an toàn nội dung, âm thanh, quá nhỏ)
@@ -353,11 +405,16 @@ class AIFilter:
         if not cfg.AI_ENABLED or not self.providers:
             return {"decision": signal.side.upper(), "confidence": 100, "reason": "AI tắt", "model": "none"}
         lessons = self.store.recent_lessons(cfg.AI_LESSONS_IN_PROMPT)
+        # v3.3: kế hoạch thoát bot THẬT SỰ dùng (hybrid: TP1 + bám sóng) – bản cũ gửi TP của cách thoát fixed (signal.tp)
+        from .engine import plan_exit
+        from .exits import describe_plan
+        mode, tp, tp1 = plan_exit(signal, signal.price)
+        target, target_r, plan = describe_plan(signal.side, signal.price, signal.sl, signal.atr, mode, tp, tp1)
         payload = {
             "symbol": signal.symbol, "proposed_side": signal.side.upper(),
             "technical_score": signal.score, "reasons": signal.reasons,
-            "entry": signal.price, "stop_loss": signal.sl, "take_profit": signal.tp,
-            "risk_reward": round(signal.rr, 2), "leverage": cfg.LEVERAGE,
+            "entry": signal.price, "stop_loss": signal.sl, "take_profit": target,
+            "risk_reward": target_r, "exit_plan": plan, "leverage": cfg.LEVERAGE,
             "indicators_15m_1h": {k: v for k, v in signal.context.items() if k != "last_candles"},
             "candles_15m": signal.context.get("last_candles"),
             "lessons_from_recent_trades": lessons,
@@ -400,9 +457,13 @@ class AIFilter:
             "tp1_hit": bool(trade.get("tp1_done")),
             "risk_mult": trade.get("risk_mult"),
         }
+        from .exits import describe_plan
+        mode = trade.get("exit_mode") or "fixed"
+        target, _r, plan = describe_plan(side, entry, sl0, atr, mode, trade["tp"], trade.get("tp1"))
         payload = {
             "symbol": trade["symbol"], "side": side, "entry": entry, "exit": exit_price,
-            "stop_loss_initial": sl0, "stop_loss_final": trade["sl"], "take_profit": trade["tp"], "pnl_usdt": round(pnl, 4),
+            "stop_loss_initial": sl0, "stop_loss_final": trade["sl"], "take_profit": target, "exit_plan": plan,
+            "pnl_usdt": round(pnl, 4),
             "pnl_pct_margin": round(pnl_pct, 1), "close_reason": reason_close,
             "hold_minutes": round((time.time() - trade["opened_at"]) / 60),
             "facts": facts,
@@ -411,7 +472,11 @@ class AIFilter:
         }
         res = self._ask(SYSTEM_REVIEW, "Lệnh vừa đóng:\n" + json.dumps(payload, ensure_ascii=False), "lesson", kind="review")
         if res:
-            res["verdict"] = str(res.get("verdict", "")).upper()
+            res["verdict_ai"] = str(res.get("verdict", "")).upper().strip()
+            res["verdict"], res["consistent"], res["note"] = settle_verdict(res["verdict_ai"], facts["result_r"],
+                                                                            res.get("rule_correct"))
             res["lesson"] = str(res.get("lesson", ""))[:400]
             res["tags"] = [str(t)[:20] for t in (res.get("tags") or [])][:3]
+            if res["note"]:
+                log.info("Tổng kết %s %s: %s", side, trade["symbol"], res["note"])
         return res

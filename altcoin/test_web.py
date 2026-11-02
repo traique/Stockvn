@@ -48,6 +48,8 @@ assert ver.update_notice(f"{ver.VERSION} {ver.build()}") is None
 assert ver.update_notice("2.9.7 abc1234").startswith("🆕 Bot đã cập nhật: v2.9.7 → v" + ver.VERSION)
 assert "vừa đổi" in ver.update_notice(f"{ver.VERSION} 0000000")
 assert len(ver.build()) == 7 and ver.NOTES[0][0] == ver.VERSION
+# lệnh phienban (/alt phienban qua bot Cổ phiếu) vừa MỘT tin Telegram (bot Cổ phiếu cắt ở 3900 ký tự), chừa chỗ cho thời gian chạy
+assert len(ver.text()) <= 3800, len(ver.text())
 print("✓ phiên bản & thông báo cập nhật:", ver.label())
 
 html = ui.page("Thử", ui.hero("Tiêu đề", "mô tả", eyebrow="Nhóm"), active="home")

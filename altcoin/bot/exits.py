@@ -59,6 +59,29 @@ def levels(side, entry, sl, atr, mode, tp1_r=None, tp_fixed=None):
     return tp, tp1
 
 
+def describe_plan(side, entry, sl, atr, mode, tp, tp1):
+    """Kế hoạch thoát lệnh bot THẬT SỰ dùng (cho AI – v3.3: bản cũ gửi AI TP của cách thoát fixed dù bot chạy hybrid).
+    Trả về (mục tiêu chốt lời đầu tiên hoặc None, R tới mục tiêu đó hoặc None, dict mô tả)."""
+    risk = abs(entry - sl)
+    r_of = (lambda px: round(abs(px - entry) / risk, 2)) if risk else (lambda px: None)
+    trail = (f"SL bám sóng = đỉnh/đáy kể từ lúc vào ∓ {cfg.TRAIL_ATR_MULT:g} ATR (siết {cfg.TRAIL_ATR_MULT_TIGHT:g} ATR khi "
+             f"lời ≥ {cfg.TRAIL_TIGHTEN_R:g}R, không dưới hoà vốn), thoát nếu {cfg.STALL_HOURS:g}h không lập đỉnh/đáy mới, "
+             f"giữ tối đa {cfg.RUNNER_MAX_HOLD_HOURS:g}h")
+    if mode == "hybrid" and tp1 is not None:
+        return tp1, r_of(tp1), {
+            "mode": "hybrid", "tp1": tp1, "tp1_r": r_of(tp1), "tp1_close_pct": round(cfg.TP1_FRACTION * 100),
+            "after_tp1": f"chốt {cfg.TP1_FRACTION * 100:.0f}% tại TP1, SL về hoà vốn; phần còn lại không có TP gần – " + trail,
+            "far_safety_tp": tp}
+    if mode == "trail":
+        return None, None, {
+            "mode": "trail", "first_target": None,
+            "trailing": f"không chốt phần đầu; lời ≥ {cfg.TRAIL_ACTIVATE_R:g}R thì toàn bộ vị thế bám sóng – " + trail,
+            "far_safety_tp": tp}
+    return tp, r_of(tp), {
+        "mode": "fixed", "tp": tp, "tp_r": r_of(tp),
+        "protect": f"lời ≥ {cfg.TRAIL_ACTIVATE_R:g}R thì kéo SL về hoà vốn rồi bám cách giá 1R; giữ tối đa {cfg.MAX_HOLD_HOURS:g}h"}
+
+
 def breakeven(side, entry):
     """Hoà vốn thật: giá khớp vào + phí hai chiều + trượt giá chiều ra (cùng mô hình chi phí với costs.py)."""
     return entry * (1 + after_fill_cost()) if side == "long" else entry * (1 - after_fill_cost())

@@ -416,12 +416,41 @@ class Store:
             time.time(), trade["id"], trade["symbol"], trade["side"], pnl,
             rev.get("verdict"), rev.get("lesson"), ",".join(rev.get("tags") or []), rev.get("model")))
 
+    def _reviews_r(self, limit):
+        """Tổng kết mới nhất trước, kèm r = kết quả theo R của lệnh (như facts.result_r lúc AI tổng kết: PnL / rủi ro theo
+        khoảng cách SL ban đầu) và consistent = verdict khớp kết quả (ai.verdict_consistent). Bảng reviews giữ nguyên cột
+        (bản 3.2.x ghi INSERT 9 giá trị) – r tính lại từ bảng trades."""
+        from .ai import verdict_consistent
+        rows = self.db.run("""SELECT r.*, t.entry AS t_entry, t.sl0 AS t_sl0, t.sl AS t_sl, t.notional0 AS t_n0,
+                              t.notional AS t_n FROM reviews r LEFT JOIN trades t ON t.id = r.trade_id
+                              ORDER BY r.ts DESC LIMIT ?""", (limit,), fetch=True)
+        out = []
+        for r in rows:
+            entry, sl0 = r.pop("t_entry"), r.pop("t_sl0")
+            sl, n0, n = r.pop("t_sl"), r.pop("t_n0"), r.pop("t_n")
+            sl0 = sl0 if sl0 is not None else sl
+            n0 = n0 or n
+            risk = float(n0) * abs(float(entry) - float(sl0)) / float(entry) if (entry and sl0 is not None and n0) else 0
+            r["r"] = round(float(r["pnl"]) / risk, 2) if risk and r.get("pnl") is not None else None
+            r["consistent"] = verdict_consistent(r.get("verdict"), r["r"])
+            out.append(r)
+        return out
+
     def recent_lessons(self, n=5):
-        rows = self.db.run("SELECT symbol, side, pnl, verdict, lesson FROM reviews ORDER BY ts DESC LIMIT ?", (n,), fetch=True)
-        return [f"{r['side'].upper()} {r['symbol']} {'+' if r['pnl']>0 else ''}{r['pnl']:.2f} [{r['verdict']}]: {r['lesson']}" for r in rows]
+        """Bài học đưa lại vào prompt AI: chỉ tổng kết NHẤT QUÁN với kết quả (v3.3 – bản cũ đưa cả "GOOD_TRADE" của lệnh thua
+        đủ 1R vào prompt)."""
+        out = []
+        for r in self._reviews_r(max(4 * n, 20)):
+            if not r["consistent"]:
+                continue
+            rr = f" ({r['r']:+.2f}R)" if r["r"] is not None else ""
+            out.append(f"{r['side'].upper()} {r['symbol']} {'+' if r['pnl']>0 else ''}{r['pnl']:.2f}{rr} [{r['verdict']}]: {r['lesson']}")
+            if len(out) >= n:
+                break
+        return out
 
     def reviews(self, limit=30):
-        return self.db.run("SELECT * FROM reviews ORDER BY ts DESC LIMIT ?", (limit,), fetch=True)
+        return self._reviews_r(limit)
 
     def stats(self):
         rows = self.db.run("SELECT pnl, pnl_pct FROM trades WHERE status='closed'", fetch=True)

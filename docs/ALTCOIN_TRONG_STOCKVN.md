@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `22dd96e`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `b77eb32`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -136,6 +136,7 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_OPENROUTER_API_KEY` | trống | Khoá OpenRouter riêng của Altcoin |
 | `ALT_NINEROUTER_BASE_URL`, `ALT_NINEROUTER_API_KEY`, `ALT_NINEROUTER_MODELS` | trống | 9Router riêng của Altcoin |
 | `ALT_CUSTOM_*` | trống | Nhà cung cấp AI tự chọn của Altcoin (không dùng chung với Cổ phiếu) |
+| `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo sau 3.3.0** (mục 10.1) |
 
 ### 4.3 AI dùng chung khi thiếu khoá riêng
 
@@ -172,7 +173,7 @@ Altcoin còn đọc `altcoin/.env` và `altcoin/bot.env` trên server (tên bi�
 | Khoá kênh, Render, đăng nhập riêng | Luôn rỗng (mục 4.4) |
 | Thông số còn lại | File thắng panel (như bot cũ) |
 
-`altcoin/botkeep.env` trong repo là hồ sơ **test gắt** (rủi ro 10%/lệnh, cầu dao 30%/50%): đừng chép các dòng rủi ro đó khi chạy live.
+Từ 3.3.0 `altcoin/botkeep.env` chỉ còn là mẫu an toàn (mẫu cho chế độ chạy độc lập): đã bỏ hồ sơ **test gắt** (`RISK_PER_TRADE=0.10`, `MAX_TOTAL_RISK=0.20`, `MAX_DAILY_LOSS=0.30`, `MAX_DRAWDOWN=0.50`). Nếu panel (`ALT_RISK_PER_TRADE`…) hoặc `altcoin/bot.env` trên server còn các giá trị đó thì xoá để dùng mặc định (3%/lệnh, tổng 5%, cầu dao 12%/ngày, 30% DD).
 
 ---
 
@@ -228,7 +229,7 @@ python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
 python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.3.0.zip
 ```
 
-Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng 22dd96e = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng b77eb32 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -291,8 +292,8 @@ Mục đích: thử trên đúng server Botkeep những điểm không thử đ�
 
    Không đặt `ALT_MODE` (paper) và **không** đặt `ALT_DATABASE_URL` (SQLite tạm). Thông báo của canary tới chat của anh/chị với tiêu đề `🪙 Altcoin ›`; muốn im thì tắt **Altcoin · thông báo** trên `/ai#kenh`.
 3. Kiểm tra trong 15–30 phút:
-   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (22dd96e)`. Không có lỗi múi giờ hay "thiếu thư viện".
-   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `22dd96e`, `dropped_secrets` rỗng.
+   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (b77eb32)`. Không có lỗi múi giờ hay "thiếu thư viện".
+   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `b77eb32`, `dropped_secrets` rỗng.
    - [ ] `/health` chỉ có `"altcoin": {"state": "running"}`.
    - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.3.0 "đúng bản phát hành".
    - [ ] Telegram `/alt status`; Zoom `alt status` (1:1) và `/vnbot alt status` (trong kênh) đều được trả lời.
@@ -319,9 +320,9 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 5. Đặt **`ALTCOIN_ENABLED=1`** rồi khởi động lại server Cổ phiếu.
    - Nếu `hub.json` báo `waiting` với "instance khác đang chạy: crypto@<host cũ>": heartbeat của server cũ còn mới (dưới 90 giây). Altcoin tự chạy sau khoảng 100 giây. Nếu vẫn chờ mãi: server cũ (hoặc Render) chưa thật sự dừng.
 6. **Kiểm tra chấp nhận:**
-   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `22dd96e`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
+   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `b77eb32`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
    - [ ] `/health` chỉ có `altcoin.state`.
-   - [ ] `/altcoin/phienban`: 3.3.0, `22dd96e`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
+   - [ ] `/altcoin/phienban`: 3.3.0, `b77eb32`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
    - [ ] `/alt status` được trả lời trên Telegram và trên Zoom (`alt status`, `/vnbot alt status`); `/trangthai` của Cổ phiếu vẫn chạy.
    - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.2.1 → v3.3.0" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
    - [ ] `/alt status` dòng "Instances": chỉ `crypto` còn sống. Dòng cũ (`render`, hoặc `crypto` của server cũ) hiện "(mất liên lạc)": chỉ là hiển thị.
@@ -340,6 +341,35 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 
 ## 10. Chạy live
 
+### 10.1 Bốn tuần đo sau 3.3.0 và tiêu chí quyết định
+
+Chẩn đoán 02/11/2026 (đợt lỗ 10 → 9,52 USDT, 30/10–02/11): sổ sách, cỡ lệnh, đòn bẩy đúng; lỗ chủ yếu do một đoạn thị trường xấu cho kiểu vào lệnh hồi về EMA21/VWAP. Nhưng backtest 88 ngày (50 coin, 706 lệnh, code của bot, phí + trượt giá 0,20%/vòng) cho **−0,01R ± 0,07 mỗi lệnh**: chiến lược gần như không có lợi thế sau phí (+0,14R trước phí, phí ≈ 0,15R/lệnh). 1.335 tổ hợp tham số không tổ hợp nào dương ngoài mẫu một cách chắc chắn, và xếp hạng trong mẫu / ngoài mẫu tương quan ngược (−0,56): chỉnh tham số theo dữ liệu gần đây nhiều khả năng gây hại. Bản 3.3.0 chỉ sửa lỗi (giá vào, theo dõi SL/TP1, phí, cỡ lệnh live, quét, tự học, AI) để số liệu đo được là thật; tham số chiến lược giữ nguyên. Trigger breakout được sửa nhưng **giữ tắt** (`BREAKOUT_ENABLED=false`: backtest chỉ có 2 tín hiệu trong 88 ngày, 0 ngoài mẫu – `altcoin/README.md` mục 12).
+
+**Trong 4 tuần đo:**
+
+- [ ] `ALT_MODE=paper`, không khai thông số giao dịch nào trên panel (xoá `ALT_RISK_PER_TRADE`, `ALT_MIN_SCORE`… nếu còn).
+- [ ] **`ALT_LEARN_MODE=suggest`** trên panel Cổ phiếu, rồi khởi động lại: bộ tự học chỉ đề xuất, không tự đổi tham số trong lúc đo. Cách gọn: lên 3.3.0 trước với `ALT_LEARN_MODE` trống (paper → `auto`: tham số tự học cũ – trọng số pullback 0,82 – tự về mặc định một lần, có tin "🧬 TỰ HỌC – v3.3: …"), rồi mới đặt `suggest`. Nếu đặt `suggest` trước: duyệt đề xuất "Khôi phục" bằng `/alt apply` → `/alt apply xacnhan`.
+- [ ] Không duyệt đề xuất tự học nào khác trong 4 tuần (`/alt learn` xem; đề xuất chỉ để tham khảo).
+- [ ] Mục tiêu: ≥ 150 tín hiệu bóng **mới** (sau 3.3.0) và ≥ 30 lệnh paper; tính sai số chuẩn **theo ngày** (tín hiệu dồn cụm). Trang Tự học có bảng so sánh "SL 2,5 ATR + bám sóng" trên cùng tín hiệu (chỉ để so, bot không tự chuyển).
+
+**Chỉ chuyển live nhỏ (`ALT_RISK_PER_TRADE=0.01`) khi đủ cả bốn điều kiện:**
+
+1. Đang chạy Altcoin ≥ 3.3.0 (cỡ lệnh live theo giá mới – bản cũ rủi ro thật có thể gấp 1,5 lần kế hoạch).
+2. ≥ 30 lệnh paper sau 3.3.0, R trung bình dương.
+3. ≥ 150 tín hiệu bóng sau 3.3.0, R trung bình dương.
+4. Backtest walk-forward (chọn tham số trên đoạn trước, thử trên đoạn sau, lặp lại) dương ngoài mẫu và vượt 2 lần sai số chuẩn.
+
+Với vốn 10 USDT, 1% rủi ro thường nhỏ hơn 1 lot (UNI: 1 hợp đồng ≈ 1,2% vốn), nên nhiều lệnh sẽ không vào được – cần vốn lớn hơn để mức 1% có nghĩa.
+
+**Tạm dừng và thiết kế lại chiến lược nếu một trong hai điều sau xảy ra:**
+
+- sau 150 tín hiệu bóng *mới*, trải trên ít nhất 3 tuần, R trung bình dưới −0,1 **và** cận trên của khoảng tin cậy 95% (tính theo ngày) vẫn dưới 0;
+- paper sụt quá 15% từ đỉnh.
+
+Lấy tín hiệu mới và trải trên nhiều tuần để quyết định không chỉ dựa vào một tuần xấu.
+
+### 10.2 Điều kiện và quy tắc chạy live
+
 Từ Altcoin 3.2.1 có **vùng găng**: khi server khởi động lại (mỗi lần upload), tín hiệu dừng rơi vào giữa lúc đặt lệnh trên OKX và lúc ghi DB sẽ được giữ lại tới khi ghi xong (cùng tin báo, và việc dời SL trên OKX sau chốt TP1). Lệnh `/alt close` đang chạy được chờ đóng hết các lệnh, tối đa 12 giây. Supervisor cho Altcoin 15 giây trước khi buộc dừng.
 
 **Điều kiện (thiếu một cái là Altcoin không chạy, không bao giờ lùi về paper):**
@@ -357,13 +387,13 @@ Thiếu điều kiện thì `state` là `disabled`, lý do "ALT_MODE=live nhưng
 
 **Quy tắc:**
 
-- Chạy paper ít nhất 2 tuần trên server mới trước khi bật live.
+- Chỉ bật live khi đủ tiêu chí ở mục 10.1 (ít nhất 4 tuần paper sau 3.3.0).
 - Khoá API OKX chỉ cấp quyền giao dịch, không cấp quyền rút tiền.
 - DB đang có lệnh **paper** mở thì live bị từ chối (78): đóng chúng ở paper trước (`/alt close` → `xacnhan`). Ngược lại, DB có lệnh **live** mở thì paper bị từ chối, để không đóng ảo vị thế thật.
 - Không đổi chế độ bằng web hay chat được. `MODE` trên panel hoặc trong `altcoin/bot.env` bị bỏ qua.
 - Khi live, `/alt close xacnhan` đóng **vị thế thật** trên OKX.
 - Tránh upload hay khởi động lại server khi đang có lệnh `/alt close`. Lệnh SL/TP đã đặt sẵn trên OKX, nên vị thế vẫn được bảo vệ khi bot tạm dừng.
-- Đừng dùng hồ sơ rủi ro của `altcoin/botkeep.env` (10%/lệnh) cho live.
+- Đừng khai rủi ro cao trên panel (hồ sơ "test gắt" cũ 10%/lệnh đã bỏ khỏi `altcoin/botkeep.env` từ 3.3.0); live bắt đầu ở `ALT_RISK_PER_TRADE=0.01`.
 - Chỉ chạy live từ Altcoin 3.3.0: khối lượng tính theo giá last lúc vào (bản cũ theo giá đóng nến 15m cũ, rủi ro thật có thể gấp 1,5 lần kế hoạch); khớp xong bot đo lại rủi ro từ giá khớp thật, vượt kế hoạch quá `LIVE_RISK_TOL` (20%, với lệnh lot tối thiểu là 2× rủi ro dự tính) thì cắt bớt hợp đồng hoặc đóng và báo; SL/TP trên OKX kích hoạt theo giá last, cùng giá bot dùng cho TP1 và trailing.
 - Từ 3.3.0, khi OKX chưa nhận SL mới (dời về hoà vốn sau TP1, trailing) vì từ chối hay lỗi mạng, bot báo "sàn chưa nhận SL mới", tự giữ SL đó (giá last vượt là đóng bằng lệnh market) và đặt lại mỗi lượt. Lệnh đóng của bot lỗi thì lệnh **vẫn mở** trong bot (báo "Đóng … thất bại"), SL trên OKX giữ nguyên, bot thử đóng lại mỗi lượt. Không đọc được vị thế trên OKX thì bot bỏ qua lượt đó, không ghi đóng lệnh nào.
 - Sau lúc bot tắt (upload, khởi động lại) hay mất quyền giao dịch, bot không gửi lệnh market theo những gì đã xảy ra lúc tắt (chạm TP1 rồi giá quay về…): chỉ SL/TP đã đặt trên OKX có tác dụng trong lúc đó, bot quản lý tiếp từ nến mới.
