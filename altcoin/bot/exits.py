@@ -108,6 +108,16 @@ def held_hit(side, sl, tp, hi, lo, op=None):
     return []
 
 
+def held_path(side, sl, tp, bars):
+    """Lần chạm đầu tiên của SL/TP đang đặt trên chuỗi nến [ts_ms, o, h, l, c, …] theo thứ tự thời gian (nến 1 giây của
+    phút vào lệnh – engine._entry_minute và mô phỏng bóng dùng chung): [(kind, price)] hoặc []. Mỗi nến như held_hit."""
+    for b in bars or ():
+        out = held_hit(side, sl, tp, float(b[2]), float(b[3]), float(b[1]))
+        if out:
+            return out
+    return []
+
+
 class ExitState:
     """Trạng thái 1 vị thế trong quá trình quản lý (dùng cho engine & mô phỏng)."""
     __slots__ = ("side", "entry", "sl", "tp", "tp1", "atr", "mode", "peak", "peak_ts", "tp1_done", "frac", "opened_at")
@@ -178,13 +188,15 @@ class ExitState:
 
 
 def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=None, tp1_r=None, tp_fixed=None,
-             first=None):
+             first=None, secs=None):
     """Mô phỏng 1 tín hiệu trên nến 5m (list [ts_ms,o,h,l,c,v]) theo cách thoát `mode`.
     entry: GIÁ KHỚP VÀO (đã trượt – costs.entry_fill); cost_frac: chi phí còn lại sau khi vào (costs.after_fill_cost).
     first: nến 1m của khung 5m chứa lúc vào (t0). Có thì khung đó được xét bằng các nến 1m mở SAU phút chứa lúc vào – y
     như lệnh paper (engine._track bỏ nến 1m chứa lúc vào) – rồi mới tới các nến 5m từ khung sau: râu TRƯỚC lúc vào không bị
     tính, phần sau lúc vào không bị bỏ (OKX trả nến từ `since` = lúc vào, nên nến 5m chứa lúc vào thường không có).
     Không có (None) thì như cũ: nến 5m chứa lúc vào nếu có được dùng cả (gồm giá trước lúc vào).
+    secs: nến 1 giây từ giây sau lúc vào tới hết phút chứa lúc vào – xét TRƯỚC mọi nến khác, chỉ SL/TP đang đặt, y như lệnh
+    paper (engine._entry_minute) và SL/TP gắn kèm lệnh live nằm trên sàn từ lúc khớp.
     Trả về (outcome, R) – R đã trừ phí+trượt giá; None nếu chưa kết thúc."""
     risk = abs(entry - sl)
     if risk <= 0:
@@ -214,6 +226,9 @@ def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=
                 continue
             op = float(c[1]) if ts >= t0 else None      # nến chứa lúc vào: giá mở là trước khi vào
             yield ts + 300, op, float(c[2]), float(c[3]), float(c[4])
+
+    for kind, price in held_path(side, st.sl, st.tp, secs):
+        return kind, round(r_of(price) - cost_r, 3)
 
     for end, op, hi, lo, cl in bars():
         for kind, price in st.step(end, hi, lo, cl, risk, op=op):

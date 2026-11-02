@@ -18,7 +18,7 @@ from pathlib import Path
 
 VERSION = "3.3.0"
 RELEASED = "2026-11-02"
-RELEASE_BUILD = "f2267d8"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "a1a7ad4"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
@@ -44,6 +44,8 @@ NOTES = (
         "Breakout hết bị luật volume cao trào chặn nhưng vẫn tắt (BREAKOUT_ENABLED): backtest 0 tín hiệu ngoài mẫu; vẫn ghi bóng để đo",
         "AI nhận kế hoạch thoát thật (TP1 1R + bám sóng); thua đủ 1R không là GOOD_TRADE; bỏ hồ sơ test gắt",
         "Khởi động lại giữa nến không ghi bóng trùng tín hiệu; log khởi động không còn báo 'schema' như tham số đã học",
+        "Giá đã về gần SL: giữ khối lượng kế hoạch, không phóng to lệnh; chạy ảo xét SL/TP ngay sau lúc vào (nến 1 giây), trừ ký quỹ lệnh mở như sàn",
+        "/close cùng lúc lượt kiểm tra không đóng, báo, cộng tiền hai lần; sàn tự đóng vị thế thì huỷ mọi SL/TP còn treo của mã",
     )),
     ("3.2.1", "2026-10-29", (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",

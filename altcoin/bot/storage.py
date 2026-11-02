@@ -212,9 +212,18 @@ class Store:
         return cur.lastrowid
 
     def close_trade(self, tid, exit_price, pnl, pnl_pct, fee, reason):
-        self.db.run("""UPDATE trades SET exit=?, pnl=?, pnl_pct=?, fee=?, closed_at=?,
-                       status='closed', reason_close=? WHERE id=?""",
-                    (exit_price, pnl, pnl_pct, fee, time.time(), reason, tid))
+        """Ghi đóng lệnh – CHỈ khi lệnh còn mở. Trả số dòng đã ghi: 0 = lệnh đã được đóng trước đó (luồng /close và lượt
+        kiểm tra cùng đóng, hai instance chung DB) – không ghi đè giá ra / lý do, engine không cộng số dư, không báo lần hai."""
+        cur = self.db.run("""UPDATE trades SET exit=?, pnl=?, pnl_pct=?, fee=?, closed_at=?,
+                       status='closed', reason_close=? WHERE id=? AND status='open'""",
+                          (exit_price, pnl, pnl_pct, fee, time.time(), reason, tid))
+        n = getattr(cur, "rowcount", None)
+        return 1 if n is None or n < 0 else n
+
+    def trade_status(self, tid):
+        """Trạng thái hiện tại của lệnh trong DB ('open' / 'closed'), None nếu không có."""
+        r = self.db.run("SELECT status FROM trades WHERE id=?", (tid,), fetch=True)
+        return r[0]["status"] if r else None
 
     def update_trade(self, tid, **fields):
         sets = ",".join(f"{k}=?" for k in fields)

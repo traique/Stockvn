@@ -176,7 +176,7 @@ class Learner:
         self.last_resolve = 0
         self.last_learn = 0
         self.last_alt = 0       # lần xét gần nhất các tín hiệu chỉ còn biến thể A/B chạy (ALT_RECHECK_S)
-        self._first = {}        # sid → nến 1m của khung 5m chứa lúc vào (không đổi nữa sau khi khung đóng)
+        self._first = {}        # sid → (nến 1m của khung 5m chứa lúc vào, nến 1s của phút vào) – chỉ đọc khi khung đã đóng
 
     LEARNED_SCHEMA = 3
     RESET_FLAG = "learn_reset_3_3"      # kv: đã chạy lần đưa tham số tự học về mặc định của v3.3 (chỉ một lần)
@@ -303,10 +303,10 @@ class Learner:
                 log.debug("shadow %s: %s", sym, e)
                 candles = None
             for it in (items if candles is not None else []):
-                first = self._entry_bars(sym, it)
-                if first is False:
-                    continue            # chưa đọc được nến 1m lúc vào – để lượt sau, không mô phỏng lẫn giá trước lúc vào
-                res = self._simulate_all(it, candles, cost_frac, first)
+                eb = self._entry_bars(sym, it)
+                if eb is False:
+                    continue            # khung 5m lúc vào chưa đóng / chưa đọc được nến 1m, 1s lúc vào – để lượt sau
+                res = self._simulate_all(it, candles, cost_frac, *eb)
                 if res:
                     outcome, r, rf, rh, rt, rv, ra, alt_open = res
                     self.store.set_outcome(it["sid"], outcome, r, rf, rh, rt, rv, ra, alt_open=alt_open)
@@ -315,9 +315,9 @@ class Learner:
                     done += 1
             for it in alts:
                 fin, ra = False, None
-                first = self._entry_bars(sym, it) if candles is not None else False
-                if first is not False:
-                    fin, ra = self._simulate_alt(it, candles, cost_frac, first)
+                eb = self._entry_bars(sym, it) if candles is not None else False
+                if eb is not False:
+                    fin, ra = self._simulate_alt(it, candles, cost_frac, eb[0], secs=eb[1])
                 if not fin and now - float(it["ts"]) > (cfg.RUNNER_MAX_HOLD_HOURS + 3) * 3600:
                     fin = True          # quá hạn mà vẫn không đọc được nến (mã bị gỡ…) – bỏ biến thể, không kẹt hàng chờ
                 if fin:
@@ -327,21 +327,39 @@ class Learner:
             log.info("Tự học: cập nhật kết quả %d tín hiệu", done)
         return done
 
+    ENTRY_SECS_GIVEUP = 3600    # giây: đọc nến 1s của phút vào lỗi quá lâu → mô phỏng không có phút đó (như paper bỏ qua)
+
     def _entry_bars(self, sym, it):
-        """Nến 1m của khung 5m chứa lúc vào tín hiệu (để mô phỏng bóng bỏ phút chứa lúc vào như lệnh paper – v3.3).
-        None: sàn không trả nến 1m nào (dùng cả nến 5m như cũ); False: lỗi mạng, để lượt sau."""
+        """(first, secs) của tín hiệu – y như lệnh paper xét lúc vào (v3.3):
+          first: nến 1m của khung 5m chứa lúc vào (mô phỏng bỏ phút chứa lúc vào, dùng các phút sau trong khung);
+                 None: sàn không trả nến 1m nào (dùng cả nến 5m như cũ);
+          secs : nến 1 giây từ giây sau lúc vào tới hết phút đó – SL/TP đang đặt (engine._entry_minute); None: không có.
+        False: khung 5m chứa lúc vào chưa đóng hẳn (CLOSED_LAG – kết quả được lưu mãi, không đọc khung dở), hoặc lỗi mạng
+        – để lượt sau."""
+        from .engine import CLOSED_LAG
         sid = it["sid"]
         if sid in self._first:
             return self._first[sid]
-        b0 = int(float(it["ts"]) // 300) * 300
+        ts = float(it["ts"])
+        b0 = int(ts // 300) * 300
+        if time.time() < b0 + 300 + CLOSED_LAG:
+            return False
         try:
             rows = self.okx.ex.fetch_ohlcv(sym, "1m", since=b0 * 1000, limit=6)
         except Exception as e:
             log.debug("shadow 1m %s: %s", sym, e)
             return False
         rows = [r for r in rows or [] if b0 * 1000 <= r[0] < (b0 + 300) * 1000] or None
-        self._first[sid] = rows
-        return rows
+        secs = None
+        if rows is not None:
+            try:
+                secs = self.okx.seconds(sym, int(ts) + 1, int(ts // 60) * 60 + 60) or None
+            except Exception as e:
+                log.debug("shadow 1s %s: %s", sym, e)
+                if time.time() - ts < self.ENTRY_SECS_GIVEUP:
+                    return False
+        self._first[sid] = (rows, secs)
+        return rows, secs
 
     @staticmethod
     def _plan(it):
@@ -372,12 +390,13 @@ class Learner:
         return dict(side=side, sl=sl, entry=entry, atr=atr, is_range=is_range, tp_fixed=tp_fixed, alt_sl=alt_sl)
 
     @staticmethod
-    def _run(p, it, jobs, candles, cost_frac, first):
+    def _run(p, it, jobs, candles, cost_frac, first, secs=None):
         """Mô phỏng các cách thoát `jobs`. Hết dữ liệu mà chưa kết thúc → sau RUNNER_MAX_HOLD_HOURS + 1h đóng theo giá cuối
         (TIMEOUT). Trả {job: (outcome, R)}, hoặc None khi còn job chưa kết thúc."""
         side, entry, sl = p["side"], p["entry"], p["sl"]
         res = {k: exits.simulate(side, entry, j.get("sl", sl), p["atr"], j["mode"], it["ts"], candles, cost_frac,
-                                 tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"), first=first) for k, j in jobs.items()}
+                                 tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"), first=first, secs=secs)
+               for k, j in jobs.items()}
         unfinished = [k for k in res if res[k][0] is None]
         if unfinished:
             if time.time() - it["ts"] <= cfg.RUNNER_MAX_HOLD_HOURS * 3600 + 3600 or not candles:
@@ -390,12 +409,13 @@ class Learner:
         return res
 
     @staticmethod
-    def _simulate_all(it, candles, cost_frac, first=None):
+    def _simulate_all(it, candles, cost_frac, first=None, secs=None):
         """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1 + biến thể A/B "SL 2.5 ATR + bám sóng toàn bộ" (exits.ALT_*).
         Kết quả chính (outcome/R) theo cách bot đang dùng. Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ
         thoát kiểu fixed, không có biến thể (SL/TP của range là một setup khác).
         Trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper.
-        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate).
+        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate); secs: nến 1 giây của
+        phần còn lại phút vào – SL/TP đang đặt, như paper (engine._entry_minute).
         Trả về (outcome, R, R fixed, R hybrid, R trail, {TP1: R}, R biến thể, biến thể còn chạy) hoặc None nếu các cách
         thoát đang có chưa kết thúc. Biến thể (chỉ để so sánh) KHÔNG giữ kết quả chính: còn chạy thì R biến thể = None,
         cờ thứ 8 = True, resolve_pending ghi sau (_simulate_alt)."""
@@ -407,10 +427,10 @@ class Learner:
         if not is_range:
             for v in exits.TP1_CANDIDATES:
                 jobs[f"tp1:{v}"] = dict(mode="hybrid", tp1_r=v)
-        res = Learner._run(p, it, jobs, candles, cost_frac, first)
+        res = Learner._run(p, it, jobs, candles, cost_frac, first, secs)
         if res is None:
             return None
-        fin, ra = Learner._simulate_alt(it, candles, cost_frac, first, p)
+        fin, ra = Learner._simulate_alt(it, candles, cost_frac, first, p, secs)
         rv = {k.split(":")[1]: res[k][1] for k in res if k.startswith("tp1:")} or None
         from .engine import current_exit_mode
         main = current_exit_mode()
@@ -418,13 +438,13 @@ class Learner:
         return o, r, res["fixed"][1], res["hybrid"][1], res["trail"][1], rv, ra, not fin
 
     @staticmethod
-    def _simulate_alt(it, candles, cost_frac, first=None, p=None):
+    def _simulate_alt(it, candles, cost_frac, first=None, p=None, secs=None):
         """Biến thể A/B của một tín hiệu: (True, R) khi đã kết thúc (hoặc TIMEOUT), (True, None) khi không có biến thể
         (range / không vào được), (False, None) khi còn chạy."""
         p = p or Learner._plan(it)
         if p is None or p["alt_sl"] is None:
             return True, None
-        res = Learner._run(p, it, {"alt": dict(mode=exits.ALT_MODE, sl=p["alt_sl"])}, candles, cost_frac, first)
+        res = Learner._run(p, it, {"alt": dict(mode=exits.ALT_MODE, sl=p["alt_sl"])}, candles, cost_frac, first, secs)
         return (False, None) if res is None else (True, res["alt"][1])
 
     # ================================================================ 2. thống kê

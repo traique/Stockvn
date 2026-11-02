@@ -5,9 +5,11 @@ Logic thoát nằm ở exits.py và được dùng y hệt trong mô phỏng bó
 
 v3.3 – paper phản chiếu live:
   * Vào lệnh ở giá last MỚI lấy lúc quyết định (stamp), không phải giá đóng nến 15m đã cũ vài phút. SL giữ nguyên mức
-    giá theo cấu trúc; 1R, TP1, cỡ lệnh tính lại từ giá khớp. Giá khớp đã vượt SL (range: vượt TP cố định) → bỏ, ghi lý
+    giá theo cấu trúc; 1R, TP1, cỡ lệnh tính lại từ giá khớp – nhưng cỡ lệnh không lớn hơn cỡ của kế hoạch lúc tín hiệu
+    (giá về gần SL thì giữ cỡ kế hoạch, không phóng to lệnh). Giá khớp đã vượt SL (range: vượt TP cố định) → bỏ, ghi lý
     do (fill_check) vào tín hiệu bóng; FILL_RECHECK=true bật thêm cổng chiến lược xét lại ở giá mới.
-  * Paper: giá khớp = giá last ± SLIPPAGE, phí taker hai chiều (costs.py – cùng mô hình với mô phỏng bóng & tự học).
+  * Paper: giá khớp = giá last ± SLIPPAGE, phí taker hai chiều (costs.py – cùng mô hình với mô phỏng bóng & tự học); ký quỹ
+    trống = số dư trừ ký quỹ các lệnh đang mở, thiếu thì bỏ như live.
     Live: cỡ lệnh theo giá last mới + trượt giá dự tính; khớp xong đo rủi ro thật từ giá khớp thật, vượt kế hoạch quá
     LIVE_RISK_TOL (hoặc vượt MIN_LOT_RISK_MULT × rủi ro dự tính) thì cắt bớt hợp đồng, không cắt được thì đóng nếu vượt
     MIN_LOT_RISK_MULT, và báo.
@@ -15,10 +17,14 @@ v3.3 – paper phản chiếu live:
     mỗi nến đúng một lần: SL trước, rồi TP/TP1, rồi trailing – không bỏ sót râu nến giữa hai lần kiểm tra (bản cũ chỉ
     đọc nến 1m đang chạy). Giá last là loại giá SL/TP trên sàn kích hoạt (exchange.open_position) và là giá của mô
     phỏng bóng / backtest; bản cũ live dùng giá mark cho TP1/trailing. Một lần chạm được xử lý chậm nhất ~1 phút +
-    MONITOR_INTERVAL. Khác biệt còn lại: live chốt TP1 bằng lệnh market lúc phát hiện, paper khớp đúng mức TP1.
+    MONITOR_INTERVAL. Phút chứa lúc vào: live có SL/TP gắn kèm lệnh trên sàn ngay từ lúc khớp; paper xét phần còn lại của
+    phút đó trên nến 1 GIÂY, chỉ SL/TP đang đặt (_entry_minute – mô phỏng bóng cũng vậy). Khác biệt còn lại: live chốt TP1
+    bằng lệnh market lúc phát hiện, paper khớp đúng mức TP1.
   * Nến đóng lúc bot KHÔNG theo dõi (vừa khởi động / tiếp quản, vòng lặp kẹt quá MAX_PASS_GAP – _watch_from): chỉ lệnh
     SL/TP đang nằm trên sàn có thể khớp (live: sàn tự khớp; paper: khớp như sàn); TP1, dời SL, STALL/TIMEOUT không chạy
     lại trên nến cũ – live không gửi lệnh market theo giá của mấy giờ trước, paper làm y như vậy.
+  * Một lệnh chỉ được đóng một lần: lượt kiểm tra đọc lại trạng thái trong vùng găng (/close ở luồng khác có thể vừa đóng),
+    store.close_trade chỉ ghi lệnh còn mở. Sàn tự đóng vị thế → huỷ mọi SL/TP còn treo của mã trước khi ghi đóng.
   * Live: cột sl = SL bot muốn, sl_exch = SL đang nằm trên sàn. Sàn chưa nhận SL mới (từ chối, lỗi mạng) → bot tự giữ SL
     đó (giá last đã vượt → đóng bằng lệnh market) và thử đặt lại mỗi lượt. Lệnh đóng lỗi → lệnh vẫn mở (close_req), thử
     lại lượt sau; đọc vị thế lỗi → bỏ qua lượt đối chiếu; sàn không còn vị thế mà chưa thấy lệnh khớp đóng → chờ xác nhận.
@@ -52,6 +58,9 @@ EXIT_WAIT = 12
 TERMINAL = ("SL", "TP", "STALL", "TIMEOUT")
 CLOSED_LAG = 5          # giây: nến 1m coi là đã đóng khi đã qua giờ đóng 5 giây (lệch đồng hồ, sàn cập nhật trễ)
 MAX_PASS_GAP = 600      # giây: hai lượt kiểm tra cách nhau lâu hơn → giữa hai lượt bot không theo dõi (kẹt, mất leader)
+# Đọc nến 1 giây của phút vào lệnh lỗi: thử lại ở các lượt sau tới khi nến 1m kế tiếp đóng (chưa có nến nào phải chờ), quá
+# thì bỏ qua phút đó – không giữ các nến 1m sau lại (giữ lâu thì chúng thành nến "lúc không theo dõi", TP1 bị bỏ).
+ENTRY_SECS_WAIT = 60 + CLOSED_LAG
 
 
 @contextmanager
@@ -174,7 +183,10 @@ class BaseEngine:
 
     def _size(self, sig, ai, equity, entry):
         """(notional, hệ số rủi ro): rủi ro cơ bản × chất lượng tín hiệu × chuỗi thua, trong ngân sách rủi ro còn lại.
-        entry: giá khớp vào (dự tính) – khoảng cách SL thật."""
+        entry: giá khớp vào (dự tính) – khoảng cách SL thật.
+        Trần: không lớn hơn cỡ lệnh của KẾ HOẠCH lúc tín hiệu (giá đóng nến tín hiệu ± trượt giá → SL). Giá đã chạy xa SL
+        → SL thật rộng hơn → lệnh nhỏ lại (rủi ro không vượt kế hoạch – lỗi 2); giá đã chạy về gần SL → KHÔNG phóng to lệnh
+        (bản đầu 3.3: SL cách 0.25% → lệnh 7–9× vốn, rủi ro chỉ đúng nếu lệnh stop khớp đúng mức SL)."""
         try:
             recent = self.store.last_closed(6)
         except Exception:
@@ -182,6 +194,12 @@ class BaseEngine:
         mult = risk_mult(sig, ai, recent)
         budget = risk_budget(equity, self.store.open_trades())
         notional = position_notional(equity, entry, sig.sl, mult=mult, budget=budget)
+        if sig.price:
+            plan = position_notional(equity, costs.entry_fill(sig.side, sig.price), sig.sl, mult=mult, budget=budget)
+            if plan < notional:
+                log.info("%s: giá đã về gần SL (giá đóng nến %.6g, vào %.6g, SL %.6g) – giữ cỡ lệnh kế hoạch %.2f USDT "
+                         "thay vì %.2f", sig.symbol, sig.price, entry, sig.sl, plan, notional)
+                notional = plan
         if notional < 1:
             sig.skip = f"hết ngân sách rủi ro (còn {budget:.3f} USDT)"
             log.info("%s: không mở – ngân sách rủi ro còn %.3f USDT (trần %.0f%% vốn)", sig.symbol, budget, cfg.MAX_TOTAL_RISK * 100)
@@ -291,15 +309,32 @@ class BaseEngine:
             except Exception as e:
                 log.warning("on_close callback lỗi: %s", e)
 
-    def _finalize(self, t, exit_, reason):
-        """Tính PnL tổng (phần còn lại + phần đã chốt), ghi DB (phí = mọi phần, cả hai chiều), thông báo."""
+    def _is_open(self, t):
+        """Lệnh còn mở trong DB? Đọc lại sau khi đã vào vùng găng: lượt kiểm tra đọc danh sách lệnh (và vị thế, nến) TRƯỚC
+        khi giữ khoá – /close ở luồng khác có thể đã đóng lệnh ngay sau đó. Đọc DB lỗi → coi như còn mở (close_trade vẫn
+        chỉ đóng lệnh đang mở)."""
+        try:
+            return self.store.trade_status(t["id"]) == "open"
+        except Exception as e:
+            log.warning("đọc trạng thái lệnh #%s: %s", t.get("id"), e)
+            return True
+
+    def _finalize(self, t, exit_, reason, on_closed=None):
+        """Tính PnL tổng (phần còn lại + phần đã chốt), ghi DB (phí = mọi phần, cả hai chiều), thông báo.
+        Chỉ ghi khi lệnh còn mở (store.close_trade có điều kiện): lệnh đã được đóng ở luồng / instance khác → không ghi đè lý
+        do, không báo ĐÓNG lần hai, không gọi AI tổng kết lần hai; trả None. on_closed: việc làm ngay sau khi ghi đóng, trước
+        tin báo (paper: cộng tiền vào số dư – tin ĐÓNG ghi vốn hiện tại)."""
         pnl_rest, fee = self._pnl(t["side"], t["entry"], exit_, t["notional"])
         pnl = pnl_rest + float(t.get("realized") or 0)
         fee_total = float(t.get("fee") or 0) + fee
         margin0 = margin_for(t.get("notional0") or t["notional"])
         pnl_pct = 100 * pnl / margin0 if margin0 else 0
-        self.store.close_trade(t["id"], exit_, pnl, pnl_pct, fee_total, reason)
-        t["pnl"], t["fee"] = pnl, fee_total
+        if not self.store.close_trade(t["id"], exit_, pnl, pnl_pct, fee_total, reason):
+            log.warning("%s: lệnh #%s đã được đóng ở nơi khác – không ghi đóng lần nữa (%s)", t["symbol"], t["id"], reason)
+            return None
+        if on_closed:
+            on_closed()
+        t["pnl"], t["fee"], t["status"] = pnl, fee_total, "closed"
         self._announce_close(t, exit_, pnl, pnl_pct, reason)
         return pnl
 
@@ -335,25 +370,55 @@ class BaseEngine:
         b = t.get("bar_sl")
         return b is not None and abs(float(b) - float(t["sl"])) > 1e-9 * max(1.0, abs(float(t["sl"])))
 
+    # Paper: phần còn lại của phút vào lệnh được xét trên nến 1 giây (_entry_minute). Live: SL/TP gắn kèm lệnh mở nằm trên
+    # sàn từ lúc khớp – sàn tự khớp, bot không cần (và không gửi lệnh theo) phút đó.
+    ENTRY_SECONDS = False
+
+    def _entry_minute(self, t, st, now):
+        """Phút chứa lúc vào lệnh, từ giây sau lúc vào tới hết phút, trên nến 1 GIÂY giá last (okx.seconds): chỉ SL/TP đang
+        đặt – như SL/TP gắn kèm lệnh live nằm trên sàn ngay từ lúc khớp (TP1, dời SL, đỉnh do bot quyết trên nến 1m đã
+        đóng; nến 1m chứa lúc vào lẫn giá TRƯỚC lúc vào nên bot không dùng nó – live cũng vậy). Bản đầu 3.3 bỏ hẳn phút
+        này: râu chạm SL ngay sau lúc vào đóng lệnh live mà lệnh paper vẫn mở. Trả [(kind, price)] hoặc [].
+        Đọc lỗi: ném lỗi (lượt sau thử lại, bar_ts chưa ghi) tới khi nến 1m kế tiếp đóng (ENTRY_SECS_WAIT), rồi bỏ qua."""
+        o = float(t["opened_at"])
+        end = int(o // 60) * 60 + 60
+        start = int(o) + 1
+        if start >= end:
+            return []
+        try:
+            rows = self.okx.seconds(t["symbol"], start, end)
+        except Exception as e:
+            if now < end + ENTRY_SECS_WAIT:
+                raise
+            log.warning("%s: không đọc được nến 1 giây của phút vào lệnh – bỏ qua phút đó: %s", t["symbol"], str(e)[:120])
+            return []
+        return exits.held_path(st.side, st.sl, st.tp, rows)
+
     def _track(self, t, now=None, watch_from=None, held_sl=None):
         """Nến 1m giá last ĐÃ ĐÓNG kể từ lần xét trước (t['bar_ts']), theo thứ tự thời gian – paper và live dùng chung.
         Mỗi nến xét đúng một lần bằng exits.ExitState.step (SL trước, rồi TP/TP1, rồi đỉnh & trailing – như backtest
-        và mô phỏng bóng). Nến chứa lúc vào lệnh bị bỏ: high/low của nó lẫn giá TRƯỚC lúc vào.
+        và mô phỏng bóng). Nến 1m chứa lúc vào lệnh không dùng (high/low của nó lẫn giá TRƯỚC lúc vào); paper xét phút đó
+        trên nến 1 giây sau lúc vào, chỉ SL/TP đang đặt (_entry_minute, ghi bar_ts = phút vào lệnh).
         Nến đóng trước watch_from (bot không theo dõi – _watch_from): chỉ SL/TP đang nằm trên sàn được xét (held_sl: SL
         trên sàn, mặc định SL trong DB) – không TP1, không dời SL, không cập nhật đỉnh, không STALL/TIMEOUT.
-        Trả về (events [(kind, price, sl_in_force, fresh)], upd, st); fresh=False: sự kiện của nến lúc không theo dõi."""
+        Trả về (events [(kind, price, sl_in_force, fresh)], upd, st); fresh=False: sự kiện của nến lúc không theo dõi /
+        của SL/TP đang đặt trong phút vào lệnh."""
         now = time.time() if now is None else now
         st = self._state(t)
-        since = max(int(float(t["opened_at"]) // 60) * 60 + 60, int(t.get("bar_ts") or 0) + 60)
-        if self._foreign(t):
+        m0 = int(float(t["opened_at"]) // 60) * 60
+        since = max(m0 + 60, int(t.get("bar_ts") or 0) + 60)
+        foreign = self._foreign(t)
+        if foreign:
             # SL/đỉnh đã cập nhật tới giờ bởi bản khác – chỉ xét từ nến 1m vừa đóng
             since = max(since, int(now // 60) * 60 - 60)
-        if since + 60 + CLOSED_LAG > now:
-            return [], {}, st
+        ev, last = [], None
+        if self.ENTRY_SECONDS and t.get("bar_ts") is None and not foreign and m0 + 60 + CLOSED_LAG <= now:
+            ev += [(k, p, st.sl, False) for k, p in self._entry_minute(t, st, now)]
+            last = m0
         risk0 = abs(t["entry"] - (t.get("sl0") or t["sl"]))
         held = st.sl if held_sl is None else held_sl
-        ev, last = [], None
-        for c in self.okx.ohlcv_since(t["symbol"], "1m", since):
+        skip = since + 60 + CLOSED_LAG > now or any(k in TERMINAL for k, _, _, _ in ev)
+        for c in ([] if skip else self.okx.ohlcv_since(t["symbol"], "1m", since)):
             ots = c[0] / 1000
             if ots < since or ots + 60 + CLOSED_LAG > now:
                 continue
@@ -384,6 +449,8 @@ class BaseEngine:
 
 
 class PaperEngine(BaseEngine):
+    ENTRY_SECONDS = True
+
     def __init__(self, okx, store, notify):
         super().__init__(okx, store, notify)
         if store.get("paper_balance") is None:
@@ -401,8 +468,13 @@ class PaperEngine(BaseEngine):
                 eq += pnl
         return eq
 
+    def free_margin(self):
+        """Ký quỹ còn trống: số dư trừ ký quỹ của các lệnh đang mở (như số dư khả dụng `free` của sàn với lệnh live)."""
+        return self.balance() - sum(float(t.get("margin") or 0) for t in self.store.open_trades())
+
     def open(self, sig, ai):
         equity = self.balance()
+        free = self.free_margin()
         plan = self._prepare(sig)             # giá last mới ± trượt giá, như lệnh market live
         if not plan:
             return None
@@ -411,8 +483,12 @@ class PaperEngine(BaseEngine):
         if notional < 1:
             return None
         risk_plan = risk_of(notional, entry, sig.sl)
-        contracts, notional = self._fit_lot(sig, notional, equity, entry)
+        contracts, notional = self._fit_lot(sig, notional, free, entry)
         if not contracts:
+            return None
+        if margin_for(notional) > free * 0.95:     # như LiveEngine.open: lệnh live bị sàn/bot từ chối thì paper cũng không vào
+            sig.skip = "ký quỹ không đủ"
+            log.info("%s: ký quỹ không đủ (cần %.2f, còn %.2f USDT)", sig.symbol, margin_for(notional), free)
             return None
         t = self._trade_row(sig, ai, entry, notional, contracts, mult=mult, equity=equity, risk_plan=risk_plan)
         t["id"] = self.store.open_trade(t)
@@ -420,10 +496,17 @@ class PaperEngine(BaseEngine):
         return t
 
     def close(self, t, price, reason):
+        """Đóng ở mức `price` (khớp trượt giá). True khi đã đóng; None khi lệnh đã được đóng ở nơi khác (/close ở luồng
+        khác, lượt kiểm tra đọc danh sách lệnh trước đó) – số dư không cộng lần hai."""
         exit_ = costs.exit_fill(t["side"], price)
         pnl_rest, _ = self._pnl(t["side"], t["entry"], exit_, t["notional"])
-        self.store.set("paper_balance", self.balance() + pnl_rest)   # phần đã chốt (realized) đã cộng lúc chốt TP1
-        self._finalize(t, exit_, reason)
+        with critical():
+            if not self._is_open(t):
+                return None
+            # phần đã chốt (realized) đã cộng vào số dư lúc chốt TP1
+            credit = lambda: self.store.set("paper_balance", self.balance() + pnl_rest)     # noqa: E731
+            if self._finalize(t, exit_, reason, on_closed=credit) is None:
+                return None
         return True
 
     def partial(self, t, price):
@@ -455,21 +538,26 @@ class PaperEngine(BaseEngine):
             except Exception as e:
                 log.warning("monitor %s: %s", t["symbol"], e)
                 continue
-            closed = False
-            for kind, p, _, _ in ev:
-                if kind == "TP1":
-                    pnl, part, fill = self.partial(t, p)
-                    self._announce_partial(t, fill, pnl, part)
-                    log.info("%s: TP1 tại %.6g – chốt %g hợp đồng (%+.4f USDT)", t["symbol"], p, part, pnl)
-                elif kind == "SL_MOVE":
-                    t["sl"] = upd["sl"] = p
-                    log.info("%s: dời SL -> %.6g", t["symbol"], p)
-                elif kind in TERMINAL:
-                    self.close(t, p, self._reason(kind, t))
-                    closed = True
-                    break
-            if not closed and upd:
-                self.store.update_trade(t["id"], **upd)
+            if not ev and not upd:
+                continue
+            with critical():        # /close (luồng khác) có thể vừa đóng lệnh sau khi lượt này đọc danh sách
+                if not self._is_open(t):
+                    continue
+                closed = False
+                for kind, p, _, _ in ev:
+                    if kind == "TP1":
+                        pnl, part, fill = self.partial(t, p)
+                        self._announce_partial(t, fill, pnl, part)
+                        log.info("%s: TP1 tại %.6g – chốt %g hợp đồng (%+.4f USDT)", t["symbol"], p, part, pnl)
+                    elif kind == "SL_MOVE":
+                        t["sl"] = upd["sl"] = p
+                        log.info("%s: dời SL -> %.6g", t["symbol"], p)
+                    elif kind in TERMINAL:
+                        self.close(t, p, self._reason(kind, t))
+                        closed = True
+                        break
+                if not closed and upd:
+                    self.store.update_trade(t["id"], **upd)
 
 
 class LiveEngine(BaseEngine):
@@ -658,6 +746,8 @@ class LiveEngine(BaseEngine):
         close_req = lý do (vẫn tính vào số lệnh mở và trần rủi ro), SL trên sàn giữ nguyên, báo một lần; lượt kiểm tra
         sau thử đóng lại, hoặc ghi sổ nếu sàn báo vị thế đã hết (bản cũ ghi đóng dù lệnh đóng lỗi → bot bỏ mặc vị thế thật)."""
         with critical():
+            if not self._is_open(t):        # /close ở luồng khác vừa đóng – không gửi lệnh đóng vị thế đã hết
+                return None
             try:
                 o = self.okx.close_position(t["symbol"], t["side"], t["contracts"])
             except Exception as e:
@@ -707,7 +797,36 @@ class LiveEngine(BaseEngine):
     def _gone(self, t):
         """Sàn không còn vị thế (lần đọc vị thế thành công): sàn đã khớp SL/TP (hoặc lệnh đóng của bot đã khớp dù báo lỗi,
         hoặc người dùng tự đóng). Giá khớp thật từ lịch sử giao dịch, trừ các lệnh bot tự đóng một phần; chưa thấy lệnh
-        khớp đóng thì chờ thêm một lượt xác nhận rồi mới ước lượng bằng mức SL/TP gần giá hiện tại hơn."""
+        khớp đóng thì chờ thêm một lượt xác nhận rồi mới ước lượng bằng mức SL/TP gần giá hiện tại hơn.
+        Trong vùng găng, đọc lại trạng thái: /close (luồng khác) vừa đóng lệnh sau khi lượt này đọc vị thế → bỏ qua (bản
+        trước: lệnh đóng của chính bot bị coi là sàn khớp SL, ghi đóng và báo lần hai). Trước khi ghi đóng: huỷ mọi lệnh
+        SL/TP còn treo của mã (_sweep_algo)."""
+        with critical():
+            if self._is_open(t):
+                self._gone_locked(t)
+
+    def _sweep_algo(self, t):
+        """Huỷ mọi lệnh SL/TP (conditional, oco) còn treo của mã sau khi vị thế đã hết trên sàn. OKX giữ lệnh algo sau
+        khi vị thế đóng hẳn: một lệnh SL/TP cũ huỷ lỗi lúc dời SL (_replace_algo chỉ ghi log) còn sống và có thể đóng nhầm
+        vị thế sau cùng mã. Lỗi → ghi log và báo (người dùng kiểm tra trên sàn); không chặn việc ghi đóng lệnh."""
+        sym, left = t["symbol"], []
+        try:
+            algos = algo_orders(self.okx.ex, sym)
+        except Exception as e:
+            algos, left = [], [f"đọc lệnh treo lỗi: {str(e)[:80]}"]
+        for a in algos:
+            try:
+                self.okx.ex.cancel_order(a["id"], sym, params={"stop": True})
+            except Exception as e:
+                left.append(f"{a.get('id')}: {str(e)[:80]}")
+        if left:
+            log.warning("%s: vị thế đã đóng nhưng chưa huỷ hết SL/TP còn treo: %s", sym, "; ".join(left))
+            self.notify(f"⚠️ {sym}: vị thế đã đóng trên sàn nhưng bot chưa huỷ được lệnh SL/TP còn treo ({'; '.join(left)[:200]})"
+                        f" – kiểm tra trên OKX, lệnh reduce-only còn treo có thể đóng nhầm vị thế sau cùng mã")
+        elif algos:
+            log.info("%s: đã huỷ %d lệnh SL/TP còn treo sau khi vị thế đóng", sym, len(algos))
+
+    def _gone_locked(self, t):
         since = (t.get("tp1_ts") if t.get("tp1_done") else None) or t["opened_at"]
         fill = self.okx.close_fill_price(t["symbol"], since, t["side"], exclude=self._own(t))
         if fill is None:
@@ -731,6 +850,7 @@ class LiveEngine(BaseEngine):
             reason = "Chạm TP (sàn)" if near_tp else ("Trailing stop (sàn)" if t.get("tp1_done") else "Chạm SL (sàn)")
         if not fill:
             reason += " – giá ước lượng"
+        self._sweep_algo(t)
         self._finalize(t, exit_, reason)
 
     def _manage(self, t, now, watch):
@@ -739,6 +859,8 @@ class LiveEngine(BaseEngine):
         exch_sl = t["sl_exch"] if t.get("sl_exch") is not None else t["sl"]     # SL đang nằm trên sàn
         ev, upd, st = self._track(t, now, watch, held_sl=exch_sl)
         with critical():    # TP1: chốt trên sàn → dời SL trên sàn → ghi DB → báo tin, SIGTERM chờ hết
+            if not self._is_open(t):        # /close (luồng khác) vừa đóng lệnh sau khi lượt này đọc danh sách
+                return
             resize = False
             for kind, p, level, fresh in ev:
                 if not fresh:

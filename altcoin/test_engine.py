@@ -15,6 +15,7 @@ class FakeOKX:
         return (round(c, 2), 0.0) if c >= 0.01 else (0.0, 0.01 * 1000 * price)
     def price(self, s): return 0.10              # v3.3: giá last lúc vào lệnh
     def ohlcv_since(self, s, tf, since): return [c for c in self.candles if c[0] >= since * 1000]
+    def seconds(self, s, start, end): return []  # v3.3: nến 1 giây của phút vào lệnh
 
 msgs = []
 st = Store(); eng = PaperEngine(FakeOKX(), st, msgs.append)
@@ -189,6 +190,7 @@ class Fake33:
     """Sàn giả: lot/contractSize theo market, giá last, nến 1m giá last."""
     def __init__(self, last, ct=1.0, lot=0.01, candles=()):
         self.last, self.ct, self.lot, self.candles = last, ct, lot, list(candles)
+        self.secs = []                  # nến 1 giây giá last (phút vào lệnh)
     def market(self, s): return {"contractSize": self.ct, "limits": {"amount": {"min": self.lot}}, "precision": {"amount": self.lot}}
     def contracts_for_notional(self, s, notional, price):
         c = math.floor(notional / (price * self.ct) / self.lot + 1e-9) * self.lot
@@ -196,6 +198,7 @@ class Fake33:
     def price(self, s): return self.last
     def ohlcv_since(self, s, tf, since): return [c for c in self.candles if c[0] >= since * 1000]
     def ohlcv(self, s, tf, limit=2): return self.candles[-limit:]          # bản cũ chỉ đọc nến 1m đang chạy
+    def seconds(self, s, start, end): return [c for c in self.secs if start * 1000 <= c[0] < end * 1000]
 
 
 class Ex33:
@@ -787,4 +790,267 @@ want = FEE * (N * f + N * f * x1 / E0 + N * (1 - f) + N * (1 - f) * x2 / E0)
 assert abs(row["fee"] - want) < 1e-9, ("phí phải gồm cả phần đã chốt ở TP1", row["fee"], want)
 assert abs(row["risk_mult"] - row["risk_usdt"] / (10 * cfg.RISK_PER_TRADE)) < 1e-3 and row["mult_plan"] == 1.0
 print("✓ cột fee gồm phí hai chiều của mọi phần; risk_usdt / risk_mult = rủi ro thật")
+# ============================== kiểm tra cuối 2 (final review 2) ==============================
+# Mỗi phần chạy riêng (phần đỏ trên code cũ không che phần sau); phần nào lỗi thì in ✗ và cả file thoát mã lỗi.
+import traceback
+from bot.risk import position_notional
+FAILED = []
+
+
+def section(name):
+    def run(fn):
+        try:
+            fn()
+            print("✓", name)
+        except Exception:
+            FAILED.append(name)
+            print("✗", name, "\n" + traceback.format_exc(limit=3))
+        return fn
+    return run
+
+
+def plan_notional(sig, equity=10.0, mult=1.0):
+    """Cỡ lệnh của kế hoạch lúc tín hiệu: giá đóng nến tín hiệu ± trượt giá → SL."""
+    return position_notional(equity, costs.entry_fill(sig.side, sig.price), sig.sl, mult=mult)
+
+
+@section("final review 2-1 (paper): giá về gần SL (last 98.2 / 98.1, SL 98) → giữ cỡ lệnh kế hoạch, không 7–9× vốn")
+def _():
+    for last in (98.2, 98.1):
+        reset()
+        s_ = S()
+        t_ = opened(PaperEngine(Fake33(last), st3, msgs.append), s_)
+        cap = plan_notional(s_)
+        assert t_ and t_["notional"] <= cap + 1e-9 and t_["notional"] < 1.5 * 10, \
+            ("paper: cỡ lệnh không được vượt kế hoạch lúc tín hiệu", last, t_ and t_["notional"], cap)
+        assert risk_of(t_["notional"], t_["entry"], 98.0) <= 10 * cfg.RISK_PER_TRADE + 1e-9
+    # giá chạy XA SL: vẫn tính theo SL thật từ giá mới (nhỏ hơn kế hoạch) – lỗi 2 vẫn được sửa
+    reset(); s_ = S()
+    t_ = opened(PaperEngine(Fake33(101.0), st3, msgs.append), s_)
+    assert t_["notional"] < plan_notional(s_) - 1 and 0.25 < risk_of(t_["notional"], t_["entry"], 98.0) <= 0.3 + 1e-9, t_
+
+
+@section("final review 2-1 (live): giá về gần SL → lệnh live cũng không phóng to quá kế hoạch")
+def _():
+    for last in (98.2, 98.1):
+        reset()
+        lv = Live33(last, fill=costs.entry_fill("long", last))
+        s_ = S()
+        t_ = opened(LiveEngine(lv, st3, msgs.append), s_)
+        assert t_ and t_["notional"] <= plan_notional(s_) + 1e-9, ("live: cỡ lệnh vượt kế hoạch", last, t_ and t_["notional"])
+
+
+@section("final review 2-3: paper trừ ký quỹ các lệnh đang mở, thiếu thì bỏ như live ('ký quỹ không đủ')")
+def _():
+    reset()
+    other = dict(mode="paper", symbol="B/USDT:USDT", side="long", entry=50.0, sl=50.0, tp=60.0, notional=90.0, margin=9.0,
+                 contracts=1.8, opened_at=CLK.now, status="open", notional0=90.0, risk_usdt=0.1, bar_ts=None,
+                 exit_mode="hybrid")
+    st3.open_trade(other)
+    s_ = S()
+    assert opened(PaperEngine(Fake33(100.2), st3, msgs.append), s_) is None and s_.skip == "ký quỹ không đủ", \
+        ("paper phải từ chối như live khi ký quỹ trống không đủ", s_.skip)
+    st3.db.run("UPDATE trades SET margin=1.0, notional=10.0 WHERE symbol='B/USDT:USDT'")
+    assert opened(PaperEngine(Fake33(100.2), st3, msgs.append), S()), "còn đủ ký quỹ thì vẫn vào"
+
+
+# ---- FR2-2: phút vào lệnh – SL/TP gắn kèm lệnh live nằm trên sàn ngay từ lúc khớp; paper xét phần còn lại của phút đó trên
+# nến 1 giây (bản đầu 3.3 bỏ hẳn phút này: râu chạm SL ngay sau lúc vào đóng lệnh live, lệnh paper vẫn mở)
+def sec(i, k, o, h, l, c):
+    """Nến 1 giây: giây k của phút i."""
+    return [(CUR - 3600 + 60 * i + k) * 1000, o, h, l, c, 1]
+
+
+class Secs33(Fake33):
+    calls = 0
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.fail = 0
+    def seconds(self, s, start, end):
+        Secs33.calls += 1
+        if self.fail:
+            self.fail -= 1
+            raise Exception("RequestTimeout okx GET /api/v5/market/history-candles")
+        return super().seconds(s, start, end)
+
+
+def entry_minute(secs, i_check=1, sec_check=30, fail=0):
+    """Lệnh paper vào ở giây 10 của phút 0 (giá last 100.2, SL 98), nến 1m phẳng; kiểm tra ở giây sec_check của phút i_check."""
+    reset()
+    okx = Secs33(100.2, candles=[flat(i) for i in range(0, 61)])
+    okx.secs, okx.fail = secs, fail
+    eng = PaperEngine(okx, st3, msgs.append)
+    t = opened(eng, S(), 0, sec=10)
+    Secs33.calls = 0
+    at(i_check, sec_check); eng.monitor()
+    return eng, okx, t
+
+
+FLAT_S = [sec(0, k, 100.2, 100.25, 100.15, 100.2) for k in range(0, 60)]
+
+
+@section("final review 2-2: râu chạm SL ngay sau lúc vào (cùng phút) → lệnh paper đóng ở SL như SL trên sàn")
+def _():
+    eng, okx, t = entry_minute(FLAT_S[:30] + [sec(0, 30, 100.0, 100.0, 97.9, 99.5)] + FLAT_S[31:])
+    row = row_of(t)
+    assert row["status"] == "closed" and row["reason_close"] == "Chạm SL" and abs(row["exit"] - 98.0 * (1 - SLIP)) < 1e-9, \
+        ("râu chạm SL trong phút vào lệnh (sau lúc vào) phải đóng lệnh paper như SL trên sàn", row)
+    # giây mở cửa đã vượt SL (giá nhảy cóc) → khớp quanh giá mở như lệnh stop của sàn
+    eng, okx, t = entry_minute(FLAT_S[:20] + [sec(0, 20, 97.6, 97.7, 97.4, 97.5)] + FLAT_S[21:])
+    assert abs(row_of(t)["exit"] - 97.6 * (1 - SLIP)) < 1e-9, row_of(t)
+
+
+@section("final review 2-2: râu TRƯỚC lúc vào không tính; phút vào xét một lần; mức TP1 chạm trong phút vào không chốt")
+def _():
+    eng, okx, t = entry_minute([sec(0, 5, 99.0, 99.0, 97.5, 99.0)] + FLAT_S[6:])
+    row = st3.open_trades()[0]
+    assert row["bar_ts"] == CUR - 3600 and Secs33.calls == 1, (row["bar_ts"], Secs33.calls)
+    at(2); eng.monitor()
+    assert st3.open_trades() and Secs33.calls == 1 and st3.open_trades()[0]["bar_ts"] == CUR - 3600 + 60
+    tp1 = t["tp1"]
+    eng, okx, t = entry_minute(FLAT_S[:40] + [sec(0, 40, 100.2, tp1 + 0.1, 100.2, 100.3)] + FLAT_S[41:])
+    assert st3.open_trades()[0]["tp1_done"] == 0, "TP1 do bot quyết trên nến 1m đã đóng – live cũng không xét phút vào"
+
+
+@section("final review 2-2: đọc nến 1 giây lỗi – thử lại tới khi nến 1m kế tiếp đóng, quá hạn thì bỏ qua, không giữ nến 1m sau")
+def _():
+    eng, okx, t = entry_minute(FLAT_S[:30] + [sec(0, 30, 100.0, 100.0, 97.9, 99.5)] + FLAT_S[31:], sec_check=10, fail=1)
+    assert st3.open_trades() and st3.open_trades()[0]["bar_ts"] is None, "lỗi mạng: chưa ghi bar_ts – lượt sau thử lại"
+    at(1, 40); eng.monitor()
+    assert row_of(t)["status"] == "closed", "lượt sau đọc được → vẫn thấy râu chạm SL"
+    eng, okx, t = entry_minute(FLAT_S, sec_check=10, fail=99)
+    at(2, 10); eng.monitor()
+    row = st3.open_trades()[0]
+    assert row["bar_ts"] == CUR - 3600 + 60, ("quá hạn: bỏ qua phút vào, các nến 1m sau vẫn được xét đúng lúc", row["bar_ts"])
+    # live không đọc nến 1 giây (SL/TP gắn kèm lệnh đã nằm trên sàn – sàn tự khớp)
+    lv, le, t = live_trade()
+    lv.seconds = lambda *a: (_ for _ in ()).throw(AssertionError("live không cần nến 1 giây"))
+    at(3); le.monitor()
+    assert st3.open_trades()
+
+
+@section("final review 2-2: OKX.seconds – bar=1s, từ giây sau lúc vào tới hết phút, một lần gọi, lọc nến ngoài khoảng")
+def _():
+    class SecEx:
+        calls = []
+        def fetch_ohlcv(self, s, tf, since=None, limit=None):
+            self.calls.append((tf, since, limit))
+            return [[since - 1000, 1, 1, 1, 1, 1]] + [[since + 1000 * k, 1, 1, 1, 1, 1] for k in range(limit + 1)]
+    ok = OKX.__new__(OKX); ok.ex = SecEx()
+    got = OKX.seconds(ok, SYM, 1000011, 1000060)
+    assert ok.ex.calls == [("1s", 1000011000, 49)] and len(got) == 49 and got[0][0] == 1000011000 and \
+        got[-1][0] == 1000059000, (ok.ex.calls, len(got))
+    assert OKX.seconds(ok, SYM, 1000060, 1000060) == [] and len(ok.ex.calls) == 1
+
+
+# ---- FR2-4: /close (luồng khác) và lượt kiểm tra cùng đóng một lệnh – chỉ đóng, cộng số dư, báo, tổng kết MỘT lần
+class Race33(Fake33):
+    """Lượt kiểm tra đọc nến xong thì /close ở luồng khác đóng lệnh (hook) – chen giữa lúc đọc và lúc xử lý."""
+    hook = None
+    def ohlcv_since(self, s, tf, since):
+        rows = Fake33.ohlcv_since(self, s, tf, since)
+        if self.hook:
+            h, self.hook = self.hook, None
+            h()
+        return rows
+
+
+class LiveRace(Live33):
+    hook = None
+    ohlcv_since = Race33.ohlcv_since
+
+
+@section("final review 2-4 (paper): /close chen giữa lượt kiểm tra – số dư cộng một lần, lý do giữ, báo & tổng kết một lần")
+def _():
+    reset()
+    okx = Race33(100.2, candles=[flat(0), bar(1, 100.2, 100.3, 97.9, 98.5)] + [flat(i, 98.5) for i in range(2, 61)])
+    eng = PaperEngine(okx, st3, msgs.append)
+    closes = []
+    eng.on_close = lambda *a: closes.append(a)
+    t = opened(eng, S())
+    okx.hook = lambda: eng.close(st3.open_trades()[0], 100.0, "Đóng thủ công qua Zoom")
+    at(3); eng.monitor()
+    row = row_of(t)
+    bal = 10.0 + row["pnl"]
+    assert row["reason_close"] == "Đóng thủ công qua Zoom" and abs(eng.balance() - bal) < 1e-9, \
+        ("lệnh đóng hai lần: số dư cộng hai lần / lý do bị ghi đè", row["reason_close"], eng.balance(), bal)
+    assert sum("ĐÓNG" in m for m in msgs) == 1 and len(closes) == 1, msgs
+    assert st3.close_trade(t["id"], 1.0, 0, 0, 0, "x") == 0 and row_of(t)["reason_close"] == "Đóng thủ công qua Zoom", \
+        "close_trade chỉ đóng lệnh còn mở"
+
+
+@section("final review 2-4 (live): /close xong ngay sau khi lượt kiểm tra đọc danh sách – _gone không ghi đóng lần hai")
+def _():
+    reset()
+    lv = Live33(100.2, fill=costs.entry_fill("long", 100.2))
+    le = LiveEngine(lv, st3, msgs.append)
+    closes = []
+    le.on_close = lambda *a: closes.append(a)
+    t = opened(le, S())
+
+    def closed_meanwhile(self, params=None):
+        le.close(st3.open_trades()[0], 100.5, "Đóng thủ công qua Zoom")     # /close ở luồng khác
+        lv.pos = []
+        lv.ex.trades = [{"order": "c1", "side": "sell", "price": 100.5, "amount": t["contracts"],
+                         "timestamp": int(CLK.now * 1000)}]
+        return []
+    lv.ex.fetch_positions = closed_meanwhile.__get__(lv.ex)
+    at(2); le.monitor()
+    row = row_of(t)
+    assert row["reason_close"] == "Đóng thủ công qua Zoom" and len(closes) == 1, ("ghi đóng lần hai", row["reason_close"],
+                                                                                  len(closes))
+    assert sum("ĐÓNG" in m for m in msgs) == 1, msgs
+
+
+@section("final review 2-4 (live): /close chen giữa lúc đọc nến và lúc quản lý – không chốt TP1 / dời SL vị thế đã đóng")
+def _():
+    reset()
+    lv = LiveRace(100.2, fill=costs.entry_fill("long", 100.2))
+    le = LiveEngine(lv, st3, msgs.append)
+    t = opened(le, S())
+    lv.candles = [flat(0), bar(1, 100.3, t["tp1"] + 0.05, 100.2, t["tp1"] - 0.1)] + [flat(i, t["tp1"]) for i in range(2, 61)]
+    lv.hook = lambda: le.close(st3.open_trades()[0], t["tp1"], "Đóng thủ công qua Zoom")
+    lv.ex.orders.clear(); msgs.clear()
+    at(3); le.monitor()
+    assert not orders(lv, "reduce") and not orders(lv, "sl") and not any(m.startswith("💰") for m in msgs), \
+        (lv.ex.orders, msgs)
+    assert row_of(t)["reason_close"] == "Đóng thủ công qua Zoom"
+
+
+@section("final review 2-5: sàn tự đóng vị thế → huỷ mọi SL/TP còn treo của mã (OCO cũ huỷ lỗi lúc dời SL)")
+def _():
+    lv, le, t = live_trade()
+    lv.ex.fail_cancel = 1
+    orig = Ex33.cancel_order
+
+    def flaky_cancel(self, oid, sym, params=None):
+        if self.fail_cancel:
+            self.fail_cancel -= 1
+            raise Exception("RequestTimeout okx POST /api/v5/trade/cancel-algos")
+        return orig(self, oid, sym, params)
+    lv.ex.cancel_order = flaky_cancel.__get__(lv.ex)
+    lv.candles = [flat(0), flat(1), bar(2, 100.3, t["tp1"] + 0.05, 100.2, t["tp1"] - 0.1)] + \
+                 [flat(i, t["tp1"]) for i in range(3, 61)]
+    lv.last = t["tp1"]
+    at(4); le.monitor()
+    assert len(lv.ex.algos) == 2, ("huỷ OCO cũ lỗi → còn hai lệnh SL/TP treo", lv.ex.algos)
+    lv.pos = []
+    lv.ex.trades = [{"order": "sl-x", "side": "sell", "price": 101.0, "amount": st3.open_trades()[0]["contracts"],
+                     "timestamp": int(CLK.now * 1000)}]
+    at(6); le.monitor()
+    assert row_of(t)["status"] == "closed" and lv.ex.algos == {}, ("vị thế đã hết mà lệnh SL/TP còn treo", lv.ex.algos)
+
+
+@section("final review 2-5: huỷ SL/TP còn treo vẫn lỗi → vẫn ghi đóng, báo người dùng kiểm tra trên sàn")
+def _():
+    lv, le, t = live_trade()
+    lv.ex.cancel_order = (lambda *a, **k: (_ for _ in ()).throw(Exception("RequestTimeout"))).__get__(lv.ex)
+    lv.ex.algos = {"oco-1": "oco", "oco-old": "oco"}
+    lv.pos = []
+    lv.ex.trades = [{"order": "sl-x", "side": "sell", "price": 98.0, "amount": t["contracts"], "timestamp": int(CLK.now * 1000)}]
+    at(3); le.monitor()
+    assert row_of(t)["status"] == "closed" and any("còn treo" in m for m in msgs), msgs
+
+
+assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"
 print("TẤT CẢ OK")

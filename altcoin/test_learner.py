@@ -153,7 +153,8 @@ class Ex:
 
 
 class Okx:
-    def __init__(self, last): self.last, self.candles, self.ex = last, [], Ex(self)
+    def __init__(self, last): self.last, self.candles, self.ex, self.secs = last, [], Ex(self), []
+    def seconds(self, s, start, end): return [x for x in self.secs if start * 1000 <= x[0] < end * 1000]
     def price(self, s): return self.last
     def market(self, s): return {"contractSize": 1, "limits": {"amount": {"min": 0.01}}, "precision": {"amount": 0.01}}
     def contracts_for_notional(self, s, n, p):
@@ -562,6 +563,52 @@ def _():
     assert st.log_signal(blocked_sig(c=candle + 900, ts=t0 + 900), None, False, source="blocked")   # nến sau: tín hiệu mới
     assert st.log_signal(blocked_sig(ts=t0 + 200), None, False, source="below_score")   # nguồn khác (điểm đổi theo dòng tiền)
     assert len(st.db.run("SELECT sid FROM signals WHERE symbol='CRV/USDT:USDT'", fetch=True)) == 3
+
+
+@section("final review 2-2: bóng xét phút vào lệnh trên nến 1 giây như lệnh paper – râu chạm SL ngay sau lúc vào")
+def _():
+    fresh()
+    # exits.simulate: secs xét trước mọi nến khác, chỉ SL/TP đang đặt (không TP1); không có secs thì như cũ
+    k = lambda ts, o, h, l, cl: [ts * 1000, o, h, l, cl, 1]       # noqa: E731
+    secs = [k(1001, 100.5, 100.6, 100.4, 100.5), k(1002, 100.5, 100.5, 97.9, 99.0)]
+    later = [k(1060, 100, 103, 99.5, 102.5), k(1300, 102.5, 104.5, 100, 104)]
+    assert exits.simulate("long", 100, 98, atr, "hybrid", 1000, later, 0.00125, secs=secs) == ("SL", round(-1 - 0.00125 * 50, 3))
+    assert exits.simulate("long", 100, 98, atr, "hybrid", 1000, later, 0.00125, secs=secs[:1])[0] != "SL"
+    tp1_touch = [k(1001, 100.5, 102.5, 100.4, 100.5)]           # mức TP1 1R = 102 chạm trong phút vào: không chốt
+    o1, r1 = exits.simulate("long", 100, 98, atr, "hybrid", 1000, [k(1300, 100, 101, 97.5, 98)], 0.00125, tp1_r=1.0,
+                            secs=tp1_touch)
+    assert o1 == "SL" and r1 < -1, (o1, r1)
+    # cùng tín hiệu, cùng đường giá: lệnh paper và bóng cùng đóng ở SL bởi râu ngay sau lúc vào (giây 40 của phút vào)
+    sig = Signal("SEC/USDT:USDT", "long", 6.0, 1.000, 0.005, 0.990, 1.015, ["t"], {"setup": "trend", "atr_pct": 0.5})
+    okx = Okx(1.002)
+    t_ent = CUR - 3600 + 10
+    okx.secs = [[(t_ent - 5) * 1000, 1.002, 1.002, 0.980, 1.002, 1]] + \
+               [[(t_ent + k) * 1000, 1.002, 1.0025, 1.0015, 1.002, 1] for k in range(1, 30)] + \
+               [[(t_ent + 30) * 1000, 1.002, 1.002, 0.9895, 0.999, 1]] + \
+               [[(t_ent + k) * 1000, 0.999, 0.9995, 0.9985, 0.999, 1] for k in range(31, 50)]
+    st.set("paper_balance", 10.0)
+    run = run_paper(okx, sig, t_ent, [CUR - 3600 + 60 * m for m in range(1, 61)])
+    t = next(run)
+    okx.candles = [bar(0, 1.002, 1.0025, 0.980, 0.999), bar(1, 0.999, 1.004, 0.998, 1.003)] + \
+                  [bar(i, 1.003, 1.004, 1.002, 1.003) for i in range(2, 61)]
+    for _i in run:
+        pass
+    st.log_signal(sig, {"confidence": 70}, True, source="taken")
+    tr = [x for x in st.trades(50) if x["id"] == t["id"]][0]
+    assert tr["status"] == "closed" and tr["reason_close"] == "Chạm SL", ("paper: râu sau lúc vào phải chạm SL", tr)
+    r_paper = tr["pnl"] / (tr["notional0"] * abs(tr["entry"] - tr["sl0"]) / tr["entry"])
+    lr.okx = okx
+    lr.resolve_pending()
+    row = st.db.run("SELECT * FROM signals WHERE symbol=?", ("SEC/USDT:USDT",), fetch=True)[0]
+    assert row["outcome"] == "SL" and abs(row["r_hybrid"] - r_paper) < 0.01 and row["r_fixed"] == row["r_hybrid"], \
+        ("bóng phải thấy râu chạm SL trong phút vào lệnh như paper", row["outcome"], row["r_hybrid"], r_paper)
+    # khung 5m chứa lúc vào chưa đóng hẳn: chưa đọc (không lưu mãi bộ nến dở)
+    real = LM.time
+    try:
+        LM.time = types.SimpleNamespace(time=lambda: (int(T0 // 300) * 300 + 302.0))
+        assert lr._entry_bars("SEC/USDT:USDT", {"sid": "fresh-x", "ts": T0}) is False and "fresh-x" not in lr._first
+    finally:
+        LM.time = real
 
 
 assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"

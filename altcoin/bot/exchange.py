@@ -119,6 +119,17 @@ class OKX:
                 break
         return out
 
+    def seconds(self, symbol, start_s, end_s):
+        """Nến 1 GIÂY giá last [ts_ms, o, h, l, c, v] mở trong [start_s, end_s) (≤ 300 giây, một lần gọi) – phần còn lại
+        của phút vào lệnh (engine._entry_minute, mô phỏng bóng). OKX có bar=1s ở cả candles lẫn history-candles (ccxt chưa
+        liệt kê "1s" trong timeframes nhưng chuyển nguyên, tự chọn history-candles cho dữ liệu cũ hơn ~24 phút) – kiểm tra
+        trực tiếp 02/11/2026: có nến 1s của 30 giờ trước."""
+        n = int(end_s) - int(start_s)
+        if n <= 0:
+            return []
+        rows = self.ex.fetch_ohlcv(symbol, "1s", since=int(start_s) * 1000, limit=min(n, 300))
+        return [r for r in rows or [] if int(start_s) * 1000 <= r[0] < int(end_s) * 1000]
+
     def price(self, symbol):
         t = self.ex.fetch_ticker(symbol)
         return float(t["last"])
