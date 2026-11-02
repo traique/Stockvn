@@ -24,12 +24,14 @@ from collections import defaultdict
 from .config import cfg
 from . import strategy
 from . import exits
+from . import costs
 
 log = logging.getLogger("learner")
 
-TECH_SOURCES = ("taken", "ai_weak", "ai_override", "ai_rejected", "ai_error", "not_sent", "blocked")
+TECH_SOURCES = ("taken", "ai_weak", "ai_override", "ai_rejected", "ai_error", "skipped", "not_sent", "blocked")
 EXIT_NAMES = {"fixed": "TP cố định", "hybrid": "Ăn sóng (chốt 1 phần + bám sóng)", "trail": "Bám sóng toàn bộ"}
 SOURCE_NAMES = {"taken": "Đã vào lệnh", "ai_weak": "Vào (AI đồng ý nhưng chưa chắc, rủi ro giảm)", "ai_override": "Vào dù AI phản đối yếu", "ai_rejected": "AI từ chối", "ai_error": "AI lỗi / hết lượt",
+                "skipped": "AI duyệt nhưng không vào được (giá đã chạy / vốn / lot)",
                 "not_sent": "Không gửi AI (xếp sau)", "blocked": "Bị luật tự học chặn", "below_score": "Suýt đạt (điểm thấp)"}
 
 SYSTEM_DAILY = """Bạn là quản lý rủi ro của một bot giao dịch futures altcoin. Bạn nhận thống kê kết quả THẬT
@@ -158,7 +160,7 @@ class Learner:
         for r in rows:
             by_sym[r["symbol"]].append(r)
         done = 0
-        cost_frac = 2 * cfg.TAKER_FEE + cfg.SLIPPAGE
+        cost_frac = costs.after_fill_cost()     # v3.3: cùng mô hình chi phí với paper (bản cũ thiếu trượt giá chiều vào)
         for sym, items in by_sym.items():
             since = int(min(i["ts"] for i in items) * 1000)
             try:
@@ -179,9 +181,14 @@ class Learner:
     @staticmethod
     def _simulate_all(it, candles, cost_frac):
         """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1. Kết quả chính (outcome/R) theo cách bot đang dùng.
-        Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ thoát kiểu fixed."""
-        entry, sl, side = it["entry"], it["sl"], it["side"]
-        if not entry or not sl or abs(entry - sl) <= 0:
+        Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ thoát kiểu fixed.
+        v3.3 – cùng giá & phí với lệnh paper: vào ở it["entry"] (giá last lúc quyết định) trượt SLIPPAGE, 1R/TP1 tính
+        từ giá khớp đó, trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper."""
+        side, sl = it["side"], it["sl"]
+        if not it["entry"] or not sl:
+            return "NODATA", 0.0, None, None, None, None
+        entry = costs.entry_fill(side, it["entry"])
+        if (entry - sl) * (1 if side == "long" else -1) <= 0:        # giá khớp đã vượt SL – không vào được
             return "NODATA", 0.0, None, None, None, None
         try:
             f = json.loads(it.get("features") or "{}")
@@ -216,40 +223,6 @@ class Learner:
         main = current_exit_mode()
         o, r = res["fixed"] if is_range else res[main]
         return o, r, res["fixed"][1], res["hybrid"][1], res["trail"][1], rv
-
-    @staticmethod
-    def _simulate(it, candles, cost_frac):
-        entry, sl, tp, side = it["entry"], it["sl"], it["tp"], it["side"]
-        if not entry or not sl or not tp:
-            return "NODATA", 0.0
-        risk = abs(entry - sl)
-        if risk <= 0:
-            return "NODATA", 0.0
-        cost_r = cost_frac * entry / risk
-        rr = abs(tp - entry) / risk
-        ts_ms = it["ts"] * 1000
-        last_close = None
-        for c in candles:
-            if c[0] + 5 * 60 * 1000 <= ts_ms:        # nến kết thúc trước lúc có tín hiệu
-                continue
-            hi, lo, cl = float(c[2]), float(c[3]), float(c[4])
-            last_close = cl
-            hit_sl = lo <= sl if side == "long" else hi >= sl
-            hit_tp = hi >= tp if side == "long" else lo <= tp
-            if hit_sl:                                # cùng nến chạm cả 2 → tính SL (thận trọng)
-                return "SL", round(-1 - cost_r, 3)
-            if hit_tp:
-                return "TP", round(rr - cost_r, 3)
-            if (c[0] / 1000 - it["ts"]) > cfg.MAX_HOLD_HOURS * 3600:
-                move = (cl - entry) if side == "long" else (entry - cl)
-                return "TIMEOUT", round(move / risk - cost_r, 3)
-        age = time.time() - it["ts"]
-        if age > cfg.MAX_HOLD_HOURS * 3600 + 1800:
-            if last_close is None:
-                return "NODATA", 0.0
-            move = (last_close - entry) if side == "long" else (entry - last_close)
-            return "TIMEOUT", round(move / risk - cost_r, 3)
-        return None, None
 
     # ================================================================ 2. thống kê
     def compute_stats(self):

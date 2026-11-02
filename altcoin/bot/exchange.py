@@ -75,6 +75,21 @@ class OKX:
     def ohlcv(self, symbol, timeframe, limit=200):
         return self.ex.fetch_ohlcv(symbol, timeframe, limit=limit)
 
+    def ohlcv_since(self, symbol, timeframe, since_s, max_bars=2000):
+        """Nến [ts_ms, o, h, l, c, v] mở cửa từ since_s (giây) tới hiện tại, tăng dần (gồm nến đang chạy ở cuối).
+        OKX trả tối đa 300 nến/lần → tự lật trang (bot tắt vài giờ vẫn đọc đủ nến 1m của lệnh đang mở)."""
+        step = self.ex.parse_timeframe(timeframe) * 1000
+        cur, out = int(since_s * 1000), []
+        while len(out) < max_bars:
+            rows = [r for r in self.ex.fetch_ohlcv(symbol, timeframe, since=cur, limit=300) if r[0] >= cur]
+            if not rows:
+                break
+            out += rows
+            cur = int(rows[-1][0]) + step
+            if cur > time.time() * 1000:
+                break
+        return out
+
     def price(self, symbol):
         t = self.ex.fetch_ticker(symbol)
         return float(t["last"])
@@ -128,6 +143,9 @@ class OKX:
                 "tpOrdPx": "-1",
                 "slTriggerPx": self.ex.price_to_precision(symbol, sl),
                 "slOrdPx": "-1",
+                # v3.3: kích hoạt theo giá last – cùng loại giá bot dùng cho TP1/trailing, paper và mô phỏng bóng
+                "tpTriggerPxType": "last",
+                "slTriggerPxType": "last",
             }],
         }
         order = self.ex.create_order(symbol, "market", order_side, contracts, params=params)

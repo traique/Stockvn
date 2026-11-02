@@ -16,7 +16,7 @@ from .learner import current_veto_conf
 from .exchange import OKX
 from .storage import Store
 from .ai import AIFilter
-from .engine import PaperEngine, LiveEngine, critical
+from .engine import PaperEngine, LiveEngine, critical, stamp
 from .risk import CircuitBreaker
 from .strategy import diagnose
 from collections import Counter
@@ -386,8 +386,11 @@ class Bot:
                 src = "ai_override"
             elif taken and ai and ai.get("weak"):
                 src = "ai_weak"
+            elif not taken and sig.skip:
+                src = "skipped"         # AI duyệt nhưng engine không vào được (giá đã chạy, vốn, lot) – lý do ở features.skip
             else:
                 src = "taken" if taken else ("ai_error" if ai is None or ai.get("fallback") else "ai_rejected")
+            stamp(self.okx, sig)        # giá last lúc quyết định – lệnh vừa vào đã có (cùng giá với lệnh)
             self.store.log_signal(sig, ai, taken, source=src)
             self.shadow_seen[(sig.symbol, sig.side)] = time.time()
             self.cooldown[sig.symbol] = time.time() + (3600 if not taken else 7200)
@@ -404,6 +407,7 @@ class Bot:
                 sig.context.update(mkt.symbol_context(self.okx, sig.symbol))
             except Exception:
                 pass
+        stamp(self.okx, sig)            # v3.3: kết quả bóng tính từ giá last lúc này, như lệnh paper, không từ giá đóng nến cũ
         try:
             self.store.log_signal(sig, None, False, source=source)
         except Exception as e:

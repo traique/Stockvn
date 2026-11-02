@@ -34,13 +34,13 @@ os.environ.setdefault("MODE", "paper")
 os.environ.setdefault("TIMEZONE", "Asia/Ho_Chi_Minh")
 
 from bot.config import cfg  # noqa: E402
-from bot import strategy, exits  # noqa: E402
+from bot import strategy, exits, costs  # noqa: E402
 from bot.indicators import to_frame, enrich, atr as atr_fn, Frame  # noqa: E402
 
 API = "https://www.okx.com/api/v5"
 M5 = 300_000
 VN = 7 * 3600
-COST = 2 * cfg.TAKER_FEE + cfg.SLIPPAGE
+COST = costs.round_trip_cost()     # vào ở giá đóng nến chưa trượt → phí + trượt giá cả hai chiều (như paper)
 
 
 # ============================================================ dữ liệu

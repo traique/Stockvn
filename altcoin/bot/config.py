@@ -91,7 +91,12 @@ class Config:
     MAX_DRAWDOWN = _f("MAX_DRAWDOWN", 0.30)            # dừng hẳn bot nếu DD từ đỉnh > 30%, chờ /resume
     MIN_RR = _f("MIN_RR", 1.5)                         # tỉ lệ lời/lỗ tối thiểu
     TAKER_FEE = _f("TAKER_FEE", 0.0005)                # OKX taker 0.05%
-    SLIPPAGE = _f("SLIPPAGE", 0.0005)                  # mô phỏng trượt giá
+    SLIPPAGE = _f("SLIPPAGE", 0.0005)                  # mô phỏng trượt giá (mỗi chiều vào/ra – xem costs.py)
+    # v3.3: vào lệnh ở giá last MỚI (nến 15m đã đóng vài phút trước). Giá đã chạy ngược quá 0.5R so với giá đóng nến
+    # tín hiệu (về phía SL) → bỏ; chạy xuôi thì luật MAX_SL_ATR (SL từ giá vào ≤ 3 ATR) quyết định.
+    MAX_FILL_DRIFT_R = _f("MAX_FILL_DRIFT_R", 0.5)
+    # v3.3 live: sau khi khớp, rủi ro thật (từ giá khớp thật) vượt kế hoạch quá 20% → cắt bớt hợp đồng / đóng và báo
+    LIVE_RISK_TOL = _f("LIVE_RISK_TOL", 0.2)
     ATR_SL_MULT = _f("ATR_SL_MULT", 2.0)                # SL tối thiểu (ATR) – test 10 ngày: 2.0 tốt hơn 1.5
     ATR_TP_MULT = _f("ATR_TP_MULT", 3.0)
     TRAIL_ACTIVATE_R = _f("TRAIL_ACTIVATE_R", 1.2)     # kéo SL về hoà vốn khi lời 1.2R

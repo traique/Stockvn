@@ -119,7 +119,10 @@ class Store:
                                    ("r_fixed", real), ("r_hybrid", real), ("r_trail", real), ("r_tp1v", "TEXT")])
         self._add_cols("trades", [("tp1", real), ("tp1_done", "INTEGER"), ("peak", real), ("peak_ts", real),
                                   ("realized", real), ("atr", real), ("notional0", real), ("exit_mode", "TEXT"),
-                                  ("sl0", real), ("risk_mult", real), ("tp1_ts", real)])
+                                  ("sl0", real), ("risk_mult", real), ("tp1_ts", real),
+                                  # v3.3: rủi ro thật / dự tính, giá đóng nến tín hiệu, giá last lúc vào, nến 1m đã xét
+                                  ("risk_usdt", real), ("risk_plan", real), ("mult_plan", real), ("sig_price", real),
+                                  ("ref_price", real), ("bar_ts", real)])
         for idx in ("CREATE INDEX IF NOT EXISTS ix_events_ts ON events(ts)",
                     "CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts)",
                     "CREATE INDEX IF NOT EXISTS ix_scans_ts ON scans(ts)"):
@@ -230,7 +233,9 @@ class Store:
 
     # ---- signals
     def log_signal(self, sig, ai, taken, source="ai"):
-        """source: taken | ai_override | ai_rejected | ai_error | not_sent | below_score | blocked"""
+        """source: taken | ai_weak | ai_override | ai_rejected | ai_error | skipped | not_sent | below_score | blocked
+        v3.3: entry = giá last MỚI lúc quyết định (sig.ref_price – cùng giá lệnh paper/live vào), ts = lúc lấy giá đó;
+        giá đóng nến 15m tín hiệu giữ ở features.signal_close. Bộ tự học mô phỏng từ entry ± trượt giá như paper."""
         import uuid
         feats = {k: v for k, v in (sig.context or {}).items() if k != "last_candles"}
         feats["triggers"] = list(getattr(sig, "triggers", []) or [])
@@ -239,12 +244,18 @@ class Store:
         feats["hour"] = time.localtime().tm_hour
         if getattr(sig, "rejected", ""):
             feats["rejected"] = sig.rejected
+        ref = getattr(sig, "ref_price", None)
+        feats["signal_close"] = sig.price
+        feats["entry_ref"] = "last" if ref else "close"       # close: không lấy được giá mới (mạng) – dùng giá đóng nến
+        if getattr(sig, "skip", ""):
+            feats["skip"] = sig.skip
         self.db.run("""INSERT INTO signals(ts, symbol, side, score, ai_decision, ai_conf, ai_reason, ai_model, taken,
                        sid, source, entry, sl, tp, features, outcome) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            time.time(), sig.symbol, sig.side, sig.score,
+            getattr(sig, "ref_ts", None) or time.time(), sig.symbol, sig.side, sig.score,
             (ai or {}).get("decision"), (ai or {}).get("confidence"),
             (ai or {}).get("reason"), (ai or {}).get("model"), int(taken),
-            uuid.uuid4().hex[:12], source, sig.price, sig.sl, sig.tp, json.dumps(feats, ensure_ascii=False), "PENDING"))
+            uuid.uuid4().hex[:12], source, ref or sig.price, sig.sl, sig.tp, json.dumps(feats, ensure_ascii=False),
+            "PENDING"))
 
     def pending_signals(self, limit=40):
         return self.db.run("SELECT * FROM signals WHERE outcome='PENDING' AND ts < ? ORDER BY ts LIMIT ?",

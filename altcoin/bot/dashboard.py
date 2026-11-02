@@ -111,7 +111,7 @@ function renderAI(a){
     <div class="m">${m.analyze} phân tích · ${m.review} tổng kết${m.avg_ms?` · ~${(m.avg_ms/1000).toFixed(1)}s/lượt`:''} · dùng lần cuối ${ago(m.last_ts)} trước${m.last_error?`<br><span class="dn">Lỗi cuối: ${esc(m.last_error)}</span>`:''}</div></div>`}).join('')
    :'<div class="empty">Chưa gọi model nào.</div>');
 }
-const SRC={taken:'Đã vào lệnh',ai_override:'Vào dù AI phản đối yếu',ai_rejected:'AI từ chối',ai_error:'AI lỗi/hết lượt',not_sent:'Không gửi AI',blocked:'Luật tự học chặn',below_score:'Suýt đạt'};
+const SRC={taken:'Đã vào lệnh',ai_override:'Vào dù AI phản đối yếu',ai_rejected:'AI từ chối',ai_error:'AI lỗi/hết lượt',skipped:'Không vào được (giá đã chạy/vốn/lot)',not_sent:'Không gửi AI',blocked:'Luật tự học chặn',below_score:'Suýt đạt'};
 const OUT={TP:'TP',SL:'SL',TIMEOUT:'Hết giờ',PENDING:'Đang theo dõi',NODATA:'Không dữ liệu'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});return r.json()}

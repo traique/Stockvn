@@ -41,7 +41,9 @@ print("✓ khối lượng theo rủi ro & ngân sách")
 
 # 4) 2 lệnh: tổng rủi ro đang mở không vượt MAX_TOTAL_RISK
 class FakeOKX:
+    PRICES = {"A/USDT:USDT": 100.0, "B/USDT:USDT": 50.0, "C/USDT:USDT": 10.0, "X/USDT:USDT": 100.0}
     def __init__(self, lot=0.001): self.lot = lot
+    def price(self, s): return self.PRICES[s]          # v3.3: giá last lúc vào = giá đóng nến tín hiệu trong bài này
     def market(self, s): return {"contractSize": 1, "limits": {"amount": {"min": self.lot}}, "precision": {"amount": self.lot}}
     def contracts_for_notional(self, s, notional, price):
         c = int(notional / price / self.lot) * self.lot
@@ -50,7 +52,9 @@ msgs = []
 st = Store(); st.set("paper_balance", 100.0)
 eng = PaperEngine(FakeOKX(), st, msgs.append)
 t1 = eng.open(Signal("A/USDT:USDT", "long", 6.0, 100.0, 1.0, 97.0, 106.0, [], {}), {"confidence": 70})
-assert t1 and abs(t1["risk_mult"] - 1.0) < 1e-9
+# v3.3: risk_mult = rủi ro THẬT / rủi ro cơ bản (sau làm tròn lot); hệ số dự tính ở mult_plan
+assert t1 and t1["mult_plan"] == 1.0 and abs(t1["risk_mult"] - t1["risk_usdt"] / (100 * cfg.RISK_PER_TRADE)) < 1e-3
+assert 0.99 < t1["risk_mult"] <= 1.0, t1["risk_mult"]
 open_risk = R.open_risk_usdt(st.open_trades())
 assert abs(open_risk - 100 * cfg.RISK_PER_TRADE) < 0.05, open_risk                     # ≈ 3 USDT (gồm phí)
 t2 = eng.open(Signal("B/USDT:USDT", "long", 6.0, 50.0, 0.5, 48.5, 53.0, [], {}), {"confidence": 70})
@@ -66,6 +70,9 @@ st2 = Store(); st2.set("paper_balance", 10.0)
 big = PaperEngine(FakeOKX(lot=1.0), st2, msgs.append)             # 1 hợp đồng = 100 USDT → rủi ro 3 USDT ≫ 0.3 dự tính
 assert big.open(sig, {"confidence": 70}) is None
 ok = PaperEngine(FakeOKX(lot=0.15), st2, msgs.append)             # 15 USDT → rủi ro ~0.46 < 2× dự tính 0.3
-t = ok.open(sig, {"confidence": 70}); assert t and abs(t["notional"] - 15.0) < 1e-6, t
+t = ok.open(sig, {"confidence": 70}); assert t and abs(t["notional"] - 0.15 * t["entry"]) < 1e-6, t
+# lot tối thiểu nâng rủi ro thật lên ~1.5× kế hoạch: risk_mult phải ghi đúng con số đó (bản cũ ghi 1.0)
+assert abs(t["risk_usdt"] - R.risk_of(t["notional"], t["entry"], t["sl"])) < 1e-9
+assert abs(t["risk_mult"] - t["risk_usdt"] / (10 * cfg.RISK_PER_TRADE)) < 1e-3 and t["risk_mult"] > 1.4 and t["mult_plan"] == 1.0, t
 print("✓ lot tối thiểu: quá to → bỏ, vừa phải → dùng lot tối thiểu")
 print("TẤT CẢ OK")

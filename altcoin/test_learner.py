@@ -10,14 +10,15 @@ from bot import strategy
 # 1) mô phỏng kết quả từ nến
 from bot import exits
 from bot.config import cfg
-c = lambda t, h, l, cl: [t * 1000, 100, h, l, cl, 1]
+c = lambda t, h, l, cl, o=100: [t * 1000, o, h, l, cl, 1]     # o: giá mở (v3.3: nến mở vượt SL → khớp ở giá mở)
 atr = 2 / 1.5
 o, r = exits.simulate("long", 100, 98, atr, "fixed", 1000, [c(1000, 101, 99, 100), c(1300, 104.5, 99.5, 104)], 0.00125)
 assert o == "TP" and 1.9 < r < 2.0, (o, r)
 assert exits.simulate("long", 100, 98, atr, "fixed", 1000, [c(1000, 101, 97.9, 98)], 0.00125)[0] == "SL"
 assert exits.simulate("long", 100, 98, atr, "fixed", 1000, [c(1000, 105, 97, 100)], 0.00125)[0] == "SL"   # cùng nến → SL
 # hybrid: chốt 50% ở TP1 (2R = 104), sau đó sóng chạy tới 112 (6R) rồi quay đầu → trailing chốt phần còn lại
-cs = [c(1000, 101, 99, 100), c(1300, 104.5, 100, 104), c(1600, 108, 103.5, 108), c(1900, 112, 107, 111.5), c(2200, 111.6, 104, 104.5)]
+cs = [c(1000, 101, 99, 100), c(1300, 104.5, 100, 104), c(1600, 108, 103.5, 108, 104), c(1900, 112, 107, 111.5, 108),
+      c(2200, 111.6, 104, 104.5, 111.5)]
 o, r = exits.simulate("long", 100, 98, atr, "hybrid", 1000, cs, 0.00125, tp1_r=2.0)
 assert o == "TRAIL" and r > 3.0, (o, r)
 o1, r1 = exits.simulate("long", 100, 98, atr, "hybrid", 1000, cs, 0.00125, tp1_r=1.0)
@@ -85,3 +86,90 @@ assert pend and LEARNED["blocks"] == [], "suggest không được tự áp dụn
 n = lr.apply_pending(); assert n == len(pend) and "short_htf_oversold" in LEARNED["blocks"]
 print(f"✓ chế độ chờ duyệt: {len(pend)} đề xuất, áp dụng thủ công OK")
 print("Thống kê AI chặn đúng:", lr.last_stats["ai_veto"]["veto_accuracy"], "%")
+
+# 6) v3.3: tín hiệu bóng dùng ĐÚNG giá & phí của lệnh paper – bản cũ vào ở giá đóng nến 15m đã cũ và chỉ trừ 0.15%
+# (thiếu trượt giá chiều vào) trong khi paper trừ 0.20% → bộ tự học thấy đẹp hơn thực tế
+import math, types
+from bot import costs
+from bot.engine import PaperEngine
+LEARNED.update({"exit_mode": None, "tp1_r": None})
+CUR = int(time.time() // 60) * 60
+T0 = CUR - 3600 + 10                      # vào lệnh 1 giờ trước (giây thứ 10 của phút 0)
+
+
+def bar(i, o, h, l, cl):
+    return [(CUR - 3600 + 60 * i) * 1000, o, h, l, cl, 1]
+
+
+class Ex:
+    def __init__(self, okx): self.okx = okx
+    def fetch_ohlcv(self, s, tf, since=None, limit=None): return [x for x in self.okx.candles if x[0] >= (since or 0) - 300_000]
+
+
+class Okx:
+    def __init__(self, last): self.last, self.candles, self.ex = last, [], Ex(self)
+    def price(self, s): return self.last
+    def market(self, s): return {"contractSize": 1, "limits": {"amount": {"min": 0.01}}, "precision": {"amount": 0.01}}
+    def contracts_for_notional(self, s, n, p):
+        k = math.floor(n / p / 0.01 + 1e-9) * 0.01
+        return (round(k, 8), 0.0) if k >= 0.01 else (0.0, 0.01 * p)
+    def ohlcv_since(self, s, tf, since): return [x for x in self.candles if x[0] >= since * 1000]
+
+
+def paper_vs_shadow(sym, path):
+    """Cùng một tín hiệu (giá đóng nến 1.000, giá last lúc vào 1.002), cùng đường giá: R của lệnh paper và R bóng."""
+    sig = Signal(sym, "long", 6.0, 1.000, 0.005, 0.990, 1.015, ["t"], {"setup": "trend", "atr_pct": 0.5})
+    okx = Okx(1.002)
+    st.set("paper_balance", 10.0)
+    t = PaperEngine(okx, st, notes.append).open(sig, {"confidence": 70})
+    t["opened_at"] = T0; st.update_trade(t["id"], opened_at=T0)
+    sig.ref_ts = T0
+    st.log_signal(sig, {"confidence": 70}, True, source="taken")
+    okx.candles = path(t)
+    PaperEngine(okx, st, notes.append).monitor()
+    tr = [x for x in st.trades(50) if x["id"] == t["id"]][0]
+    assert tr["status"] == "closed", tr
+    r_paper = tr["pnl"] / (tr["notional0"] * abs(tr["entry"] - tr["sl0"]) / tr["entry"])
+    lr.okx = okx
+    lr.resolve_pending()
+    row = st.db.run("SELECT * FROM signals WHERE symbol=?", (sym,), fetch=True)[0]
+    return t, r_paper, row
+
+
+# 6a) bộ tự học: vào ở giá ghi trong tín hiệu ± trượt giá, trừ phí hai chiều + trượt chiều ra = 0.20% như paper
+# (bản cũ: vào đúng giá ghi, chỉ trừ 0.15%)
+sg = Signal("FEE/USDT:USDT", "long", 6.0, 1.002, 0.005, 0.997, 1.02, ["t"], {"setup": "trend", "atr_pct": 0.5})
+st.log_signal(sg, None, False, source="below_score")
+st.db.run("UPDATE signals SET ts=? WHERE symbol=?", (T0, "FEE/USDT:USDT"))
+okx = Okx(1.002)
+okx.candles = [bar(1, 1.002, 1.003, 1.0, 1.001), bar(2, 1.001, 1.002, 0.996, 0.997)] + [bar(i, 0.99, 0.991, 0.989, 0.99) for i in range(3, 61)]
+lr.okx = okx
+lr.resolve_pending()
+row = st.db.run("SELECT * FROM signals WHERE symbol=?", ("FEE/USDT:USDT",), fetch=True)[0]
+E = 1.002 * (1 + cfg.SLIPPAGE)
+want = -1 - (2 * cfg.TAKER_FEE + cfg.SLIPPAGE) * E / (E - 0.997)
+assert abs(row["r_hybrid"] - want) < 1e-3, ("bộ tự học phải dùng cùng giá khớp & phí với paper", row["r_hybrid"], want)
+print(f"✓ v3.3: bộ tự học trừ đủ phí + trượt giá hai chiều ({row['r_hybrid']:+.3f}R khi chạm SL cách 0.5%)")
+
+t, rp, row = paper_vs_shadow("SLX/USDT:USDT", lambda t: [bar(1, 1.002, 1.003, 1.0, 1.001), bar(2, 1.001, 1.002, 0.989, 0.991)] +
+                             [bar(i, 0.991, 0.992, 0.99, 0.991) for i in range(3, 61)])
+f = json.loads(row["features"])
+assert row["entry"] == 1.002 and f["signal_close"] == 1.0 and f["entry_ref"] == "last", (row["entry"], f)
+risk = t["entry"] - 0.990
+assert abs(row["r_hybrid"] - (-1 - costs.after_fill_cost() * t["entry"] / risk)) < 1e-3, row["r_hybrid"]
+assert abs(row["r_hybrid"] - rp) < 0.01, ("R bóng phải bằng R lệnh paper", row["r_hybrid"], rp)
+t, rp2, row2 = paper_vs_shadow("TPX/USDT:USDT", lambda t: [bar(1, 1.002, 1.003, 1.0, 1.001),
+                               bar(2, 1.001, t["tp1"] + 0.001, 1.0, t["tp1"]), bar(3, t["tp1"], t["tp1"], 1.005, 1.006),
+                               bar(4, 1.006, 1.006, 1.0, 1.001)] + [bar(i, 1.001, 1.002, 1.0, 1.001) for i in range(5, 50)] +
+                              [bar(i, 0.985, 0.986, 0.98, 0.985) for i in range(50, 61)])      # cách thoát khác cũng kết thúc
+assert row2["outcome"] == "TRAIL" and abs(row2["r_hybrid"] - rp2) < 0.01, ("TP1 rồi về hoà vốn: R bóng = R paper", row2, rp2)
+print(f"✓ v3.3: R bóng = R lệnh paper trên cùng đường giá (SL {row['r_hybrid']:+.3f} / {rp:+.3f}, "
+      f"TP1+hoà vốn {row2['r_hybrid']:+.3f} / {rp2:+.3f}); vào ở giá last mới, phí {costs.round_trip_cost()*100:.2f}%")
+
+# tín hiệu bóng (suýt đạt, bị chặn…) cũng vào ở giá last lúc ghi, không ở giá đóng nến 15m
+from bot.main import Bot
+sg = Signal("ZZ/USDT:USDT", "short", 4.5, 2.0, 0.01, 2.03, 1.95, ["t"], {"setup": "trend"})
+Bot._shadow(types.SimpleNamespace(shadow_seen={}, okx=Okx(1.99), store=st), sg, "below_score")
+row = st.db.run("SELECT * FROM signals WHERE symbol=?", ("ZZ/USDT:USDT",), fetch=True)[0]
+assert row["entry"] == 1.99 and json.loads(row["features"])["signal_close"] == 2.0, row["entry"]
+print("✓ v3.3: tín hiệu bóng ghi giá last lúc quyết định, giữ giá đóng nến tín hiệu trong features")

@@ -9,8 +9,13 @@ Ba cách thoát:
 
 Mọi hàm ở đây thuần tính toán (không gọi sàn), để engine và learner dùng y hệt nhau
 → kết quả mô phỏng bóng phản ánh đúng cách bot giao dịch thật.
+
+v3.3: mọi quyết định thoát dùng giá LAST (nến 1m/5m thường, không phải giá mark) – cùng loại giá mà SL/TP trên sàn
+kích hoạt (slTriggerPxType/tpTriggerPxType = last), mà mô phỏng bóng và backtest dùng. Nến mở cửa đã vượt SL
+(giá nhảy cóc) thì lệnh stop khớp quanh giá mở, không phải đúng mức SL.
 """
 from .config import cfg
+from .costs import after_fill_cost
 
 MODES = ("fixed", "hybrid", "trail")
 
@@ -41,7 +46,8 @@ def levels(side, entry, sl, atr, mode, tp1_r=None, tp_fixed=None):
 
 
 def breakeven(side, entry):
-    return entry * (1 + 3 * cfg.TAKER_FEE) if side == "long" else entry * (1 - 3 * cfg.TAKER_FEE)
+    """Hoà vốn thật: giá khớp vào + phí hai chiều + trượt giá chiều ra (cùng mô hình chi phí với costs.py)."""
+    return entry * (1 + after_fill_cost()) if side == "long" else entry * (1 - after_fill_cost())
 
 
 def trail_stop(side, entry, peak, atr, risk, r_now):
@@ -67,15 +73,18 @@ class ExitState:
     def better(self, a, b):
         return a > b if self.side == "long" else a < b
 
-    def step(self, ts, hi, lo, close, risk0):
+    def step(self, ts, hi, lo, close, risk0, op=None):
         """Xử lý 1 nến (hoặc 1 tick: hi=lo=close). Trả về danh sách sự kiện:
            ("SL", price) | ("TP", price) | ("TP1", price) | ("STALL", price) | ("TIMEOUT", price) | ("SL_MOVE", new_sl)
-        Thứ tự thận trọng: SL trước, rồi TP/TP1, rồi cập nhật đỉnh & trailing."""
+        Thứ tự thận trọng: SL trước, rồi TP/TP1, rồi cập nhật đỉnh & trailing. SL dời trong nến này chỉ được xét
+        từ nến sau (như backtest). op: giá mở cửa của nến – chỉ truyền khi nến mở SAU lúc vào lệnh; nến mở đã vượt SL
+        thì giá thoát là giá mở (giá nhảy cóc qua SL, lệnh stop không khớp đúng mức SL)."""
         ev = []
         long = self.side == "long"
         hit_sl = lo <= self.sl if long else hi >= self.sl
         if hit_sl:
-            return [("SL", self.sl)]
+            gap = op is not None and (op < self.sl if long else op > self.sl)
+            return [("SL", op if gap else self.sl)]
         hit_tp = hi >= self.tp if long else lo <= self.tp
         if hit_tp:
             return [("TP", self.tp)]
@@ -120,7 +129,8 @@ class ExitState:
 
 
 def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=None, tp1_r=None, tp_fixed=None):
-    """Mô phỏng 1 tín hiệu trên nến (list [ts_ms,o,h,l,c,v]) theo cách thoát `mode`.
+    """Mô phỏng 1 tín hiệu trên nến 5m (list [ts_ms,o,h,l,c,v]) theo cách thoát `mode`.
+    entry: GIÁ KHỚP VÀO (đã trượt – costs.entry_fill); cost_frac: chi phí còn lại sau khi vào (costs.after_fill_cost).
     Trả về (outcome, R) – R đã trừ phí+trượt giá; None nếu chưa kết thúc."""
     risk = abs(entry - sl)
     if risk <= 0:
@@ -141,7 +151,8 @@ def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=
             continue
         hi, lo, cl = float(c[2]), float(c[3]), float(c[4])
         last_close = cl
-        for kind, price in st.step(ts + 300, hi, lo, cl, risk):
+        op = float(c[1]) if ts >= t0 else None          # nến chứa lúc vào: giá mở là trước khi vào
+        for kind, price in st.step(ts + 300, hi, lo, cl, risk, op=op):
             if kind == "TP1":
                 realized += r_of(price) * cfg.TP1_FRACTION
                 frac = 1 - cfg.TP1_FRACTION

@@ -120,6 +120,11 @@ class Signal:
     context: dict = field(default_factory=dict)
     rejected: str = ""        # lý do bị loại (chỉ để log/debug)
     triggers: list = field(default_factory=list)   # mã trigger: macd_cross, ema_cross, breakout, pullback, engulf
+    # v3.3: `price` là giá đóng nến 15m tín hiệu (tham chiếu, đã cũ vài phút lúc bot quyết định). Lệnh paper/live và
+    # mô phỏng bóng vào ở giá last MỚI lấy lúc quyết định (ref_price, lúc ref_ts) – xem engine.stamp / engine.fill_check.
+    ref_price: float = None
+    ref_ts: float = None
+    skip: str = ""            # engine không vào được (giá đã chạy, vốn, lot...) – ghi vào tín hiệu bóng
 
     @property
     def rr(self):

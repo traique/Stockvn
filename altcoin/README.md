@@ -36,6 +36,8 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 **Bước 6 – Vào & quản lý lệnh**: SL theo cấu trúc (đáy/đỉnh 6 nến ± 0.15 ATR, tối thiểu 1.5 ATR; xa hơn 2.5 ATR thì bỏ tín hiệu). Khối lượng tính để chạm SL mất `RISK_PER_TRADE` = **3% vốn × hệ số chất lượng** (đã gồm phí + trượt giá): điểm ≥ 7 và AI ≥ 80 được 1.5×, AI chưa chắc / phản đối yếu 0.5×, mỗi lệnh thua liên tiếp (từ lệnh thứ 2) nhân 0.7, kẹp 0.35–1.5×. x10 isolated, tối đa **2 lệnh** nhưng tổng rủi ro đang mở ≤ `MAX_TOTAL_RISK` = 5% vốn; lot tối thiểu của sàn làm rủi ro vượt 2× dự tính thì bỏ tín hiệu. Thoát lệnh: hybrid (chốt 50% ở TP1 do bộ tự học chọn, phần còn lại bám sóng) hoặc cách khác mà bộ tự học chọn.
 
+**v3.3 – lệnh chạy ảo giống lệnh thật**: bot vào lệnh ở **giá last lúc quyết định** (cộng trượt giá `SLIPPAGE`), không ở giá đóng nến 15m đã cũ vài phút; SL giữ đúng mức theo cấu trúc, 1R, TP1 và khối lượng tính lại từ giá khớp. Giá đã vượt SL, chạy ngược về phía SL quá `MAX_FILL_DRIFT_R` = 0,5R, SL cách giá quá `MAX_SL_ATR`, hay R:R tới dải giữa (setup range) không còn đủ → bỏ tín hiệu, lý do ghi vào tín hiệu bóng (nguồn "Không vào được"). Chạy thật: khớp xong bot đo lại rủi ro từ giá khớp thật, vượt kế hoạch quá `LIVE_RISK_TOL` = 20% thì cắt bớt hợp đồng (không cắt được theo lot mà vượt 2× thì đóng) và báo. SL/TP, TP1, trailing đều theo **giá last** trên **mọi nến 1 phút đã đóng** kể từ lần kiểm tra trước (bản cũ chỉ nhìn nến đang chạy nên sót râu chạm SL/TP1); nến mở cửa vượt qua SL thì khớp ở giá mở. Chốt TP1 làm tròn xuống theo lot của sàn (1 hợp đồng thì giữ cả, dời SL về hoà vốn). Cột phí ghi phí cả hai chiều của mọi phần; `risk_mult` là rủi ro thật so với rủi ro cơ bản.
+
 **Bước 7 – AI lần 2 (tổng kết)**: khi lệnh đóng, AI đánh giá GOOD/BAD/LUCKY/UNLUCKY và rút 1–2 câu bài học. Bài học được lưu và đưa lại vào prompt của các lần phân tích sau → bot "học" dần từ chính lịch sử của nó. Xem bằng `/lessons` hoặc trên dashboard.
 
 **Cầu dao**: lỗ 12% vốn trong ngày (~4 lệnh thua) → nghỉ đến ngày mai; drawdown 30% từ đỉnh → dừng hẳn, chờ `/resume`. Hạn mức AI mặc định 80 lần/ngày (`AI_MAX_CALLS_PER_DAY`), hết hạn mức bot không vào lệnh mới.
@@ -126,7 +128,7 @@ python run.py
 - Thẻ **Tải dữ liệu**: tải CSV (mở được bằng Excel / Google Sheets, đúng tiếng Việt) hoặc sao lưu toàn bộ JSON.
 
 **Tự học hoạt động thế nào:**
-1. Mọi tín hiệu đã qua bộ lọc kỹ thuật, kể cả tín hiệu không vào lệnh, đều được theo dõi "bóng": bot xem nến 5 phút sau đó để biết nếu vào thì sẽ chạm TP hay SL trước. Kết quả tính bằng R (1R = khoảng cách tới SL), đã trừ phí.
+1. Mọi tín hiệu đã qua bộ lọc kỹ thuật, kể cả tín hiệu không vào lệnh, đều được theo dõi "bóng": bot xem nến 5 phút sau đó để biết nếu vào thì sẽ chạm TP hay SL trước. Kết quả tính bằng R (1R = khoảng cách tới SL), đã trừ phí. v3.3: cùng giá và phí với lệnh chạy ảo – vào ở giá last lúc quyết định cộng trượt giá, trừ phí + trượt giá cả hai chiều (mặc định 0,20%; bản cũ 0,15% và vào ở giá đóng nến cũ).
 2. Mỗi giờ bot thống kê theo nhóm: nguồn tín hiệu, loại trigger, luật lọc, khung giờ, điểm số. Khi một nhóm có đủ mẫu (mặc định 30) **và** kết quả khác 0 có ý nghĩa thống kê (|kỳ vọng| / sai số chuẩn ≥ `LEARN_MIN_T` = 1.3; so sánh cách thoát / mức TP1 theo từng cặp trên cùng tín hiệu, TP1 cần ≥ 40 mẫu), bot điều chỉnh:
    - bật/tắt luật chặn trong danh mục cố định (vd. "short khi RSI 1h < 32") – chặn ở bộ lọc thì không tốn lượt AI;
    - trọng số từng trigger (0,6 – 1,4);

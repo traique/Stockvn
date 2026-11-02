@@ -16,13 +16,20 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.2.1"
-RELEASED = "2026-10-29"
-RELEASE_BUILD = "e737954"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.3.0"
+RELEASED = "2026-11-02"
+RELEASE_BUILD = "8fa0794"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.3.0", "2026-11-02", (
+        "Chạy ảo vào lệnh ở giá last lúc quyết định (+ trượt giá), không ở giá đóng nến 15m cũ vài phút; giá đã chạy quá xa thì bỏ, ghi lý do",
+        "Chạy thật: khối lượng tính theo giá mới; khớp xong rủi ro thật vượt kế hoạch 20% thì cắt bớt hợp đồng hoặc đóng và báo",
+        "SL/TP1/trailing xét mọi nến 1 phút giá last đã đóng từ lần kiểm tra trước – không còn sót râu chạm SL; chạy thật cũng theo giá last thay giá mark",
+        "Chốt TP1 làm tròn theo lot của sàn (1 hợp đồng thì giữ cả); cột phí ghi đủ hai chiều; risk_mult là rủi ro thật",
+        "Tín hiệu bóng và bộ tự học dùng cùng giá vào và phí 0,20% với lệnh chạy ảo (trước: giá đóng nến cũ, phí 0,15%)",
+    )),
     ("3.2.1", "2026-10-29", (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",
         "Live: SIGTERM (server khởi động lại) rơi giữa lúc đặt lệnh trên sàn và lúc ghi DB không còn bỏ dở: ghi DB, báo tin, dời SL sau chốt TP1 xong rồi mới tắt",
