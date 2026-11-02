@@ -4,6 +4,7 @@ is read, no real database is touched, the network is blocked (_common in the chi
 altcoin/check_db.py reads the .env/bot.env beside it (ALT_DATABASE_URL first), never the stock .env
 above it nor the process DATABASE_URL (the stock's), only ALT_DATABASE_URL from the environment."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -65,5 +66,14 @@ t.ok("check_db.py: ALT_DATABASE_URL of the bot.env beside it first (local addres
 code, out = run([str(tree / "altcoin" / "check_db.py")], tree)
 t.ok("check_db.py: else DATABASE_URL of the .env beside it (a <...> placeholder in bot.env is skipped)",
      "Kiểm tra DATABASE_URL (từ .env)" in out, out[-800:])
+
+# The templates leave the learner mode empty: on the first 3.3 start a paper bot is then in "auto" and puts the learned
+# parameters of the old statistics (pullback weight 0.82) back to the defaults once. A preset "suggest" (Altcoin 3.3.0
+# phase C) only queued a "Khôi phục" proposal and kept 0.82 for the whole 4-week measurement.
+for path, key in ((ALT / "botkeep.env", "LEARN_MODE"), (ALT / ".env.example", "LEARN_MODE"),
+                  (_common.REPO / ".env.example", "ALT_LEARN_MODE")):
+    values = re.findall(rf"^{key}=(.*)$", path.read_text(encoding="utf-8"), re.M)
+    t.ok(f"{path.relative_to(_common.REPO).as_posix()}: {key} not preset (set suggest after the first 3.3 start)",
+         all(not v.split("#")[0].strip() for v in values), values)
 
 t.done()

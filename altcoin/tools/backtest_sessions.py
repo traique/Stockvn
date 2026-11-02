@@ -34,13 +34,13 @@ os.environ.setdefault("MODE", "paper")
 os.environ.setdefault("TIMEZONE", "Asia/Ho_Chi_Minh")
 
 from bot.config import cfg  # noqa: E402
-from bot import strategy, exits  # noqa: E402
+from bot import strategy, exits, costs  # noqa: E402
 from bot.indicators import to_frame, enrich, atr as atr_fn, Frame  # noqa: E402
 
 API = "https://www.okx.com/api/v5"
 M5 = 300_000
 VN = 7 * 3600
-COST = 2 * cfg.TAKER_FEE + cfg.SLIPPAGE
+COST = costs.round_trip_cost()     # vào ở giá đóng nến chưa trượt → phí + trượt giá cả hai chiều (như paper)
 
 
 # ============================================================ dữ liệu
@@ -381,7 +381,7 @@ def run_bot(inst, c5, btc5):
         row = {"inst": inst, "ts": t / 1000, "day": day_of(t / 1000), "side": sig.side, "score": sig.score,
                "passed": not why, "setup": sig.context.get("setup"), "triggers": sig.triggers,
                "vn": vn_bucket(t / 1000), "session": session(t / 1000),
-               "blocked": sorted(strategy.matching_rules(sig.side, sig.context))}
+               "blocked": sorted(strategy.matching_rules(sig.side, strategy.rule_ctx(sig)))}
         if is_range:
             row["r_fixed"] = sim_mode(sig.side, sig.price, sig.sl, sig.atr, "fixed", t, c5, tp_fixed=sig.tp)
             row["r_hybrid"] = row["r_trail"] = row["r_fixed"]

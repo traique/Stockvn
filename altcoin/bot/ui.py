@@ -161,7 +161,7 @@ h3{font:600 11px/1 "Be Vietnam Pro",sans-serif;letter-spacing:.14em;text-transfo
 .out{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;letter-spacing:.04em;white-space:nowrap}
 .out.TP{background:var(--up-soft);color:var(--up)}.out.SL{background:var(--down-soft);color:var(--down)}
 .out.TRAIL{background:var(--brand-soft);color:var(--brand-text)}
-.out.TIMEOUT,.out.PENDING,.out.NODATA{background:var(--neutral-soft);color:var(--ink-2)}
+.out.TIMEOUT,.out.PENDING,.out.NODATA,.out.DUP{background:var(--neutral-soft);color:var(--ink-2)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--up);margin-right:6px;vertical-align:1px}
 .dot.off{background:var(--muted)}.dot.warn{background:var(--warn)}
 /* alerts */

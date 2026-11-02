@@ -9,13 +9,32 @@ Ba cách thoát:
 
 Mọi hàm ở đây thuần tính toán (không gọi sàn), để engine và learner dùng y hệt nhau
 → kết quả mô phỏng bóng phản ánh đúng cách bot giao dịch thật.
+
+v3.3: mọi quyết định thoát dùng giá LAST (nến 1m/5m thường, không phải giá mark) – cùng loại giá mà SL/TP trên sàn
+kích hoạt (slTriggerPxType/tpTriggerPxType = last), mà mô phỏng bóng và backtest dùng. Nến mở cửa đã vượt SL
+(giá nhảy cóc) thì lệnh stop khớp quanh giá mở, không phải đúng mức SL.
 """
 from .config import cfg
+from .costs import after_fill_cost
 
 MODES = ("fixed", "hybrid", "trail")
 
 
 TP1_CANDIDATES = (1.0, 1.3, 1.6, 2.0, 2.5)   # các mức TP1 (R) bộ tự học thử song song trên dữ liệu bóng
+
+# v3.3: biến thể so sánh A/B trên CÙNG tín hiệu bóng (cột signals.r_sl25_trail): SL rộng 2.5 ATR + bám sóng toàn bộ – phương
+# án tốt nhất của backtest 88 ngày (+0.08R so với cách hiện tại cả kỳ, ngoài mẫu chỉ +0.04 ± 0.07 – chưa xác nhận). Chỉ để
+# theo dõi: bot KHÔNG tự chuyển sang (đổi SL là đổi chiến lược), bộ tự học không chọn nó.
+ALT_SL_ATR = 2.5
+ALT_MODE = "trail"
+ALT_NAME = "SL 2,5 ATR + bám sóng toàn bộ"
+
+
+def alt_sl(side, price, sl, atr, k=ALT_SL_ATR):
+    """SL của biến thể: như strategy._levels với ATR_SL_MULT = k – xa hơn trong hai mức k × ATR từ giá đóng nến tín hiệu
+    `price` và SL cấu trúc. `sl` là SL của tín hiệu (= mức xa hơn của ATR_SL_MULT × ATR và đáy/đỉnh 6 nến ∓ 0.15 ATR), nên
+    min/max với nó cho đúng SL cấu trúc khi cấu trúc xa hơn k × ATR (giống backtest: sl_for(side, price, atr, swing, 2.5))."""
+    return min(price - k * atr, sl) if side == "long" else max(price + k * atr, sl)
 
 
 def current_tp1_r():
@@ -40,8 +59,32 @@ def levels(side, entry, sl, atr, mode, tp1_r=None, tp_fixed=None):
     return tp, tp1
 
 
+def describe_plan(side, entry, sl, atr, mode, tp, tp1):
+    """Kế hoạch thoát lệnh bot THẬT SỰ dùng (cho AI – v3.3: bản cũ gửi AI TP của cách thoát fixed dù bot chạy hybrid).
+    Trả về (mục tiêu chốt lời đầu tiên hoặc None, R tới mục tiêu đó hoặc None, dict mô tả)."""
+    risk = abs(entry - sl)
+    r_of = (lambda px: round(abs(px - entry) / risk, 2)) if risk else (lambda px: None)
+    trail = (f"SL bám sóng = đỉnh/đáy kể từ lúc vào ∓ {cfg.TRAIL_ATR_MULT:g} ATR (siết {cfg.TRAIL_ATR_MULT_TIGHT:g} ATR khi "
+             f"lời ≥ {cfg.TRAIL_TIGHTEN_R:g}R, không dưới hoà vốn), thoát nếu {cfg.STALL_HOURS:g}h không lập đỉnh/đáy mới, "
+             f"giữ tối đa {cfg.RUNNER_MAX_HOLD_HOURS:g}h")
+    if mode == "hybrid" and tp1 is not None:
+        return tp1, r_of(tp1), {
+            "mode": "hybrid", "tp1": tp1, "tp1_r": r_of(tp1), "tp1_close_pct": round(cfg.TP1_FRACTION * 100),
+            "after_tp1": f"chốt {cfg.TP1_FRACTION * 100:.0f}% tại TP1, SL về hoà vốn; phần còn lại không có TP gần – " + trail,
+            "far_safety_tp": tp}
+    if mode == "trail":
+        return None, None, {
+            "mode": "trail", "first_target": None,
+            "trailing": f"không chốt phần đầu; lời ≥ {cfg.TRAIL_ACTIVATE_R:g}R thì toàn bộ vị thế bám sóng – " + trail,
+            "far_safety_tp": tp}
+    return tp, r_of(tp), {
+        "mode": "fixed", "tp": tp, "tp_r": r_of(tp),
+        "protect": f"lời ≥ {cfg.TRAIL_ACTIVATE_R:g}R thì kéo SL về hoà vốn rồi bám cách giá 1R; giữ tối đa {cfg.MAX_HOLD_HOURS:g}h"}
+
+
 def breakeven(side, entry):
-    return entry * (1 + 3 * cfg.TAKER_FEE) if side == "long" else entry * (1 - 3 * cfg.TAKER_FEE)
+    """Hoà vốn thật: giá khớp vào + phí hai chiều + trượt giá chiều ra (cùng mô hình chi phí với costs.py)."""
+    return entry * (1 + after_fill_cost()) if side == "long" else entry * (1 - after_fill_cost())
 
 
 def trail_stop(side, entry, peak, atr, risk, r_now):
@@ -51,6 +94,28 @@ def trail_stop(side, entry, peak, atr, risk, r_now):
         mult = cfg.TRAIL_ATR_MULT_TIGHT
     dist = max(mult * atr, 0.5 * risk)          # không siết chặt hơn 0.5R
     return peak - dist if side == "long" else peak + dist
+
+
+def held_hit(side, sl, tp, hi, lo, op=None):
+    """Nến lúc bot KHÔNG theo dõi (tắt, mất leader): chỉ lệnh SL/TP đang nằm trên sàn có thể khớp – sàn tự khớp, bot
+    không chốt TP1 / dời SL / thoát vì sóng đuối được. SL trước (thận trọng); nến mở vượt SL khớp ở giá mở."""
+    long = side == "long"
+    if (lo <= sl) if long else (hi >= sl):
+        gap = op is not None and (op < sl if long else op > sl)
+        return [("SL", op if gap else sl)]
+    if (hi >= tp) if long else (lo <= tp):
+        return [("TP", tp)]
+    return []
+
+
+def held_path(side, sl, tp, bars):
+    """Lần chạm đầu tiên của SL/TP đang đặt trên chuỗi nến [ts_ms, o, h, l, c, …] theo thứ tự thời gian (nến 1 giây của
+    phút vào lệnh – engine._entry_minute và mô phỏng bóng dùng chung): [(kind, price)] hoặc []. Mỗi nến như held_hit."""
+    for b in bars or ():
+        out = held_hit(side, sl, tp, float(b[2]), float(b[3]), float(b[1]))
+        if out:
+            return out
+    return []
 
 
 class ExitState:
@@ -67,15 +132,18 @@ class ExitState:
     def better(self, a, b):
         return a > b if self.side == "long" else a < b
 
-    def step(self, ts, hi, lo, close, risk0):
+    def step(self, ts, hi, lo, close, risk0, op=None):
         """Xử lý 1 nến (hoặc 1 tick: hi=lo=close). Trả về danh sách sự kiện:
            ("SL", price) | ("TP", price) | ("TP1", price) | ("STALL", price) | ("TIMEOUT", price) | ("SL_MOVE", new_sl)
-        Thứ tự thận trọng: SL trước, rồi TP/TP1, rồi cập nhật đỉnh & trailing."""
+        Thứ tự thận trọng: SL trước, rồi TP/TP1, rồi cập nhật đỉnh & trailing. SL dời trong nến này chỉ được xét
+        từ nến sau (như backtest). op: giá mở cửa của nến – chỉ truyền khi nến mở SAU lúc vào lệnh; nến mở đã vượt SL
+        thì giá thoát là giá mở (giá nhảy cóc qua SL, lệnh stop không khớp đúng mức SL)."""
         ev = []
         long = self.side == "long"
         hit_sl = lo <= self.sl if long else hi >= self.sl
         if hit_sl:
-            return [("SL", self.sl)]
+            gap = op is not None and (op < self.sl if long else op > self.sl)
+            return [("SL", op if gap else self.sl)]
         hit_tp = hi >= self.tp if long else lo <= self.tp
         if hit_tp:
             return [("TP", self.tp)]
@@ -119,8 +187,16 @@ class ExitState:
         return ev
 
 
-def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=None, tp1_r=None, tp_fixed=None):
-    """Mô phỏng 1 tín hiệu trên nến (list [ts_ms,o,h,l,c,v]) theo cách thoát `mode`.
+def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=None, tp1_r=None, tp_fixed=None,
+             first=None, secs=None):
+    """Mô phỏng 1 tín hiệu trên nến 5m (list [ts_ms,o,h,l,c,v]) theo cách thoát `mode`.
+    entry: GIÁ KHỚP VÀO (đã trượt – costs.entry_fill); cost_frac: chi phí còn lại sau khi vào (costs.after_fill_cost).
+    first: nến 1m của khung 5m chứa lúc vào (t0). Có thì khung đó được xét bằng các nến 1m mở SAU phút chứa lúc vào – y
+    như lệnh paper (engine._track bỏ nến 1m chứa lúc vào) – rồi mới tới các nến 5m từ khung sau: râu TRƯỚC lúc vào không bị
+    tính, phần sau lúc vào không bị bỏ (OKX trả nến từ `since` = lúc vào, nên nến 5m chứa lúc vào thường không có).
+    Không có (None) thì như cũ: nến 5m chứa lúc vào nếu có được dùng cả (gồm giá trước lúc vào).
+    secs: nến 1 giây từ giây sau lúc vào tới hết phút chứa lúc vào – xét TRƯỚC mọi nến khác, chỉ SL/TP đang đặt, y như lệnh
+    paper (engine._entry_minute) và SL/TP gắn kèm lệnh live nằm trên sàn từ lúc khớp.
     Trả về (outcome, R) – R đã trừ phí+trượt giá; None nếu chưa kết thúc."""
     risk = abs(entry - sl)
     if risk <= 0:
@@ -134,14 +210,28 @@ def simulate(side, entry, sl, atr, mode, t0, candles, cost_frac, max_wait_hours=
     def r_of(price):
         return ((price - entry) if side == "long" else (entry - price)) / risk
 
-    last_close = None
-    for c in candles:
-        ts = c[0] / 1000
-        if ts + 300 <= t0:
-            continue
-        hi, lo, cl = float(c[2]), float(c[3]), float(c[4])
-        last_close = cl
-        for kind, price in st.step(ts + 300, hi, lo, cl, risk):
+    def bars():
+        """(giờ đóng, o|None, h, l, c) theo thứ tự thời gian."""
+        b_end = None
+        if first is not None:
+            b_end = int(t0 // 300) * 300 + 300
+            m1 = int(t0 // 60) * 60 + 60            # nến 1m đầu tiên mở sau phút chứa lúc vào
+            for b in first:
+                bts = b[0] / 1000
+                if m1 <= bts < b_end:
+                    yield bts + 60, float(b[1]), float(b[2]), float(b[3]), float(b[4])
+        for c in candles:
+            ts = c[0] / 1000
+            if ts + 300 <= t0 or (b_end is not None and ts < b_end):
+                continue
+            op = float(c[1]) if ts >= t0 else None      # nến chứa lúc vào: giá mở là trước khi vào
+            yield ts + 300, op, float(c[2]), float(c[3]), float(c[4])
+
+    for kind, price in held_path(side, st.sl, st.tp, secs):
+        return kind, round(r_of(price) - cost_r, 3)
+
+    for end, op, hi, lo, cl in bars():
+        for kind, price in st.step(end, hi, lo, cl, risk, op=op):
             if kind == "TP1":
                 realized += r_of(price) * cfg.TP1_FRACTION
                 frac = 1 - cfg.TP1_FRACTION
