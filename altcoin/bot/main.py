@@ -36,6 +36,13 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 
+def learned_changes(L):
+    """Tham số tự học đang khác mặc định, dạng "k=v, ..." (hoặc "chưa có") cho log khởi động. Chỉ các tham số
+    (Learner.DEFAULTS) – "schema" là phiên bản định dạng, không phải điều bot học được (bản cũ in "schema=3" trên DB mới
+    như thể đã học)."""
+    return ", ".join(f"{k}={L.get(k)}" for k in Learner.DEFAULTS if L.get(k) not in (None, [], {})) or "chưa có"
+
+
 class Bot:
     def __init__(self):
         self.started_at = time.time()
@@ -533,8 +540,7 @@ class Bot:
                  cfg.RISK_MIN_MULT, cfg.RISK_MAX_MULT, cfg.MAX_TOTAL_RISK * 100, cfg.MAX_OPEN_POSITIONS, cfg.TOP_N_COINS,
                  cfg.AI_MIN_CONFIDENCE, cfg.AI_WEAK_CONFIDENCE, current_veto_conf(), cfg.LEARN_MIN_SAMPLES, cfg.LEARN_MIN_T,
                  ",".join(sorted(strat.active_blocks())) or "-")
-        log.info("Tự học đã đổi so với mặc định: %s",
-                 ", ".join(f"{k}={v}" for k, v in L.items() if v not in (None, [], {})) or "chưa có")
+        log.info("Tự học đã đổi so với mặc định: %s", learned_changes(L))
         log.info("Phiên bản %s · bản dựng %s · %s | Instance %s | storage %s | leader TTL %ss", VERSION, ver.build(),
                  ver.status_line(), self.instance, "Postgres" if self.store.pg else "SQLite", cfg.LEADER_TTL)
         last_eq_log = 0

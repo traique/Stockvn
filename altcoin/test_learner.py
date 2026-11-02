@@ -533,5 +533,36 @@ def _():
         assert st.get("learned")["trigger_w"] == {} and st.get("learn_last") == {}, tag
 
 
+@section("kiểm tra cuối: log khởi động 'Tự học đã đổi so với mặc định' chỉ liệt kê tham số học được, không có 'schema'")
+def _():
+    from bot import main as M
+    fresh_l = {"min_score": None, "trigger_w": {}, "blocks": [], "unblocked": [], "exit_mode": None, "ai_veto_conf": None,
+               "tp1_r": None, "schema": 3}
+    assert M.learned_changes(fresh_l) == "chưa có", M.learned_changes(fresh_l)     # bản cũ: "schema=3" trên DB mới
+    got = M.learned_changes(dict(fresh_l, trigger_w={"pullback": 0.82}, blocks=["weak_adx"]))
+    assert "pullback" in got and "weak_adx" in got and "schema" not in got, got
+
+
+@section("kiểm tra cuối: khởi động lại giữa nến không ghi bóng lần hai cùng tín hiệu, cùng nguồn (CRV short bị chặn 2 dòng)")
+def _():
+    fresh()
+    t0 = time.time() - 600
+    candle = (t0 // 900) * 900 - 900
+
+    def blocked_sig(c=candle, ts=t0):
+        s = Signal("CRV/USDT:USDT", "short", 5.0, 0.2734, 0.0013, 0.27598, 0.26875, [],
+                   {"setup": "trend", "hour": 17}, triggers=["pullback"], candle_ts=c)
+        s.ref_price, s.ref_ts = 0.2728, ts
+        return s
+    assert st.log_signal(blocked_sig(), None, False, source="blocked")
+    # tiến trình mới (shadow_seen trống): lượt quét đầu, cùng nến 15m → không ghi thêm (bản cũ: dòng thứ hai, tự học đếm 2 lần)
+    assert st.log_signal(blocked_sig(ts=t0 + 150), None, False, source="blocked") is None
+    rows = st.db.run("SELECT source FROM signals WHERE symbol='CRV/USDT:USDT'", fetch=True)
+    assert [r["source"] for r in rows] == ["blocked"], rows
+    assert st.log_signal(blocked_sig(c=candle + 900, ts=t0 + 900), None, False, source="blocked")   # nến sau: tín hiệu mới
+    assert st.log_signal(blocked_sig(ts=t0 + 200), None, False, source="below_score")   # nguồn khác (điểm đổi theo dòng tiền)
+    assert len(st.db.run("SELECT sid FROM signals WHERE symbol='CRV/USDT:USDT'", fetch=True)) == 3
+
+
 assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"
 print("TẤT CẢ OK")

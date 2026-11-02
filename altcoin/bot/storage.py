@@ -274,9 +274,14 @@ class Store:
         đếm dòng hỏi AI; ghi bóng lại tín hiệu đã có dòng → bỏ. Trả sid của dòng mới, hoặc None nếu không ghi."""
         import uuid
         ts = getattr(sig, "ref_ts", None) or time.time()
-        same = self._same_signal(sig, ts) if source in self.SHADOW_SOURCES + self.AI_SOURCES else []
+        same = self._same_signal(sig, ts)
         if source in self.SHADOW_SOURCES and any(r["source"] in self.SHADOW_SOURCES + self.AI_SOURCES for r in same):
             log.debug("bỏ ghi bóng %s %s (%s): tín hiệu đã có dòng", sig.symbol, sig.side, source)
+            return None
+        if source not in self.AI_SOURCES and any(r["source"] == source for r in same):
+            # dòng bóng (luật chặn / điểm thấp / breakout tắt…) của CÙNG tín hiệu, cùng nguồn đã có – bot vừa khởi động lại
+            # hay đổi instance giữa nến (bộ nhớ shadow_seen 1h mất) thì lượt quét đầu ghi lại → bộ tự học đếm hai lần
+            log.debug("bỏ ghi bóng %s %s (%s): đã có dòng cùng nguồn của nến này", sig.symbol, sig.side, source)
             return None
         feats = {k: v for k, v in (sig.context or {}).items() if k != "last_candles"}
         feats["triggers"] = list(getattr(sig, "triggers", []) or [])
