@@ -7,6 +7,12 @@ from .config import cfg
 
 log = logging.getLogger("exchange")
 
+# v3.3: OKX ghi loại tài sản gốc của mỗi hợp đồng ở trường instCategory (thông tin công khai /public/instruments, ccxt để ở
+# market["info"]): "1" = crypto, "3" = cổ phiếu (SKHY, SOXS, UNITREE, TSLA…), "4" = hàng hoá (CL, BZ, XAU…) – kiểm tra
+# trực tiếp 02/11/2026. instFamily (SKHY-USDT…) không phân biệt được. Chỉ quét hợp đồng crypto; danh sách tên EXCLUDE
+# vẫn giữ làm lớp lọc thêm (BTC/ETH, stablecoin, mã OKX chưa ghi instCategory).
+CRYPTO_CATEGORIES = ("1",)
+
 
 class OKX:
     def __init__(self):
@@ -24,6 +30,8 @@ class OKX:
             self.ex.set_sandbox_mode(True)
         self._markets = None
         self._markets_ts = 0
+        self.last_filtered = set()     # mã bị loại vì instCategory không phải crypto ở lượt lấy danh sách gần nhất
+        self._no_category = set()      # mã OKX không ghi instCategory (chỉ lọc theo tên) – báo một lần
 
     # ------------------------------------------------------------ public
     def markets(self, force=False):
@@ -35,8 +43,16 @@ class OKX:
     def market(self, symbol):
         return self.markets()[symbol]
 
+    @staticmethod
+    def is_crypto(m):
+        """Hợp đồng có tài sản gốc là crypto theo instCategory của OKX. OKX không ghi trường này → coi là crypto (lọc
+        theo tên EXCLUDE vẫn áp dụng) để danh sách quét không bị rỗng khi sàn đổi định dạng."""
+        cat = str((m.get("info") or {}).get("instCategory") or "").strip()
+        return not cat or cat in CRYPTO_CATEGORIES
+
     def top_altcoins(self, n=25):
-        """Lấy n cặp USDT-SWAP có volume 24h (USD) cao nhất, loại BTC/ETH/stable."""
+        """Lấy n cặp USDT-SWAP crypto có volume 24h (USD) cao nhất: loại hợp đồng cổ phiếu / hàng hoá theo instCategory
+        của OKX (v3.3 – bản cũ chỉ lọc theo tên, 9/50 mã trong danh sách là cổ phiếu / dầu), rồi BTC/ETH/stable theo tên."""
         mk = self.markets()
         tickers = None
         for attempt in range(3):
@@ -51,11 +67,16 @@ class OKX:
                 log.warning("Dùng tạm danh sách coin của lượt quét trước")
                 return self._top_cache[:n]
             raise RuntimeError("không lấy được danh sách coin từ OKX (mạng)")
-        rows = []
+        rows, filtered, no_cat = [], set(), set()
         for sym, t in tickers.items():
             m = mk.get(sym)
             if not m or not m.get("swap") or m.get("quote") != "USDT" or not m.get("active", True):
                 continue
+            if not self.is_crypto(m):
+                filtered.add(m["base"])
+                continue
+            if not str((m.get("info") or {}).get("instCategory") or "").strip():
+                no_cat.add(m["base"])
             if m["base"].upper() in cfg.EXCLUDE:
                 continue
             info = t.get("info", {})
@@ -69,6 +90,14 @@ class OKX:
                 continue
             rows.append((sym, vol_usd, t.get("percentage") or 0))
         rows.sort(key=lambda r: r[1], reverse=True)
+        if filtered != self.last_filtered:
+            log.info("Loại %d hợp đồng không phải crypto (cổ phiếu / hàng hoá theo instCategory của OKX): %s",
+                     len(filtered), ", ".join(sorted(filtered)[:40]) + (" …" if len(filtered) > 40 else ""))
+        if no_cat - self._no_category:
+            log.warning("OKX không ghi instCategory cho %d mã (chỉ lọc theo tên EXCLUDE): %s", len(no_cat - self._no_category),
+                        ", ".join(sorted(no_cat - self._no_category)[:20]))
+            self._no_category |= no_cat
+        self.last_filtered = filtered
         self._top_cache = rows
         return rows[:n]
 

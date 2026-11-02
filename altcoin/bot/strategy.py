@@ -89,13 +89,27 @@ def active_blocks():
     return learned | {r for r in cfg.DEFAULT_BLOCKS if r in RULES and r not in unblocked}
 
 
-def blocked_by(sig):
-    """Luật đang chặn tín hiệu này (sau khi đã có đủ dữ liệu BTC/OI). Trả về mô tả hoặc ''."""
+def block_origin(rule):
+    """'learned' nếu bộ tự học chặn luật này, 'default' nếu là luật chặn sẵn (DEFAULT_BLOCKS)."""
+    return "learned" if rule in set(LEARNED.get("blocks") or []) - NEVER_BLOCK else "default"
+
+
+BLOCK_LABELS = {"default": "luật chặn sẵn", "learned": "luật tự học"}
+
+
+def blocking_rule(sig):
+    """Mã luật đang chặn tín hiệu này (sau khi đã có đủ dữ liệu BTC/OI), hoặc ''."""
     blocks = active_blocks()
     for rule in matching_rules(sig.side, sig.context):
         if rule in blocks:
-            return RULES[rule][0]
+            return rule
     return ""
+
+
+def blocked_by(sig):
+    """Mô tả luật đang chặn tín hiệu này, hoặc ''."""
+    rule = blocking_rule(sig)
+    return RULES[rule][0] if rule else ""
 
 
 def _v(c, k, default):
@@ -253,18 +267,34 @@ def _gates(r, side, trend, market=None, chg1h=None):
     return ""
 
 
+def trigger_group_weights(keys, tw=None):
+    """Trọng số từng NHÓM trigger của một tín hiệu (v3.3 – luật cho tín hiệu nhiều trigger):
+      * MACD cắt & EMA9 cắt là một nhóm (động lượng trễ, tương quan cao); Pullback EMA21 & bật/gãy tại VWAP là một
+        nhóm (cùng cấu trúc "hồi về giá trị rồi bật"); mỗi trigger khác là một nhóm riêng;
+      * trọng số nhóm = TRUNG BÌNH trọng số học được của các trigger trong nhóm mà tín hiệu có (mỗi mã tính một lần);
+      * điểm trigger = 1.5 × tổng trọng số của tối đa 2 nhóm có trọng số cao nhất.
+    Mọi trọng số mặc định 1.0 → điểm y như trước. Bản cũ lấy MAX trong nhóm: trọng số pullback 0.82 bị bỏ qua ở mọi
+    tín hiệu có cả bật VWAP (1.0) – gần một nửa số tín hiệu pullback. Trung bình: trọng số học được của mỗi trigger luôn
+    có tác dụng (tăng / giảm) trên mọi tín hiệu có trigger đó."""
+    tw = (LEARNED.get("trigger_w") or {}) if tw is None else tw
+    keys = list(dict.fromkeys(keys))
+
+    def mean(ks):
+        return sum(tw.get(k, 1.0) for k in ks) / len(ks)
+
+    mom = [k for k in keys if k in MOMENTUM_TRIGGERS]
+    pb = [k for k in keys if k in PULLBACK_TRIGGERS]
+    struct = [k for k in keys if k not in MOMENTUM_TRIGGERS and k not in PULLBACK_TRIGGERS]
+    groups = ([mean(mom)] if mom else []) + ([mean(pb)] if pb else []) + [tw.get(k, 1.0) for k in struct]
+    return sorted(groups, reverse=True)[:2]
+
+
 def _score(df, htf, side, triggers, funding, change24h):
     r = df.row(-1)
     h = htf.row(-1)
     s, why = 0.0, []
-    tw = LEARNED.get("trigger_w") or {}
-    # MACD cắt & EMA9 cắt cùng là chỉ báo động lượng trễ (tương quan cao) → chỉ tính 1 cái mạnh nhất.
-    # Pullback EMA21 & bật tại VWAP cùng một cấu trúc → cũng chỉ tính 1. Tối đa 2 nhóm trigger được cộng điểm.
-    keys = [trig_key(t) for t in triggers]
-    mom = [tw.get(k, 1.0) for k in keys if k in MOMENTUM_TRIGGERS]
-    pb = [tw.get(k, 1.0) for k in keys if k in PULLBACK_TRIGGERS]
-    struct = [tw.get(k, 1.0) for k in keys if k not in MOMENTUM_TRIGGERS and k not in PULLBACK_TRIGGERS]
-    weights = sorted(([max(mom)] if mom else []) + ([max(pb)] if pb else []) + struct, reverse=True)[:2]
+    # Tối đa 2 nhóm trigger được cộng điểm; luật gộp nhóm & trọng số học được: trigger_group_weights
+    weights = trigger_group_weights([trig_key(t) for t in triggers])
     s += sum(1.5 * w for w in weights); why += triggers
     # EMA stack đồng bộ
     if (side == "long" and r.ema9 > r.ema21 > r.ema50) or (side == "short" and r.ema9 < r.ema21 < r.ema50):
@@ -313,7 +343,9 @@ def _score(df, htf, side, triggers, funding, change24h):
 
 def _levels(df, side, price, a):
     """SL theo cấu trúc (đáy/đỉnh 6 nến) – KHÔNG bao giờ kéo SL vào giữa vùng râu nến.
-    Cấu trúc quá xa → diagnose() bỏ tín hiệu thay vì đặt SL sai chỗ."""
+    Cấu trúc quá xa → diagnose() bỏ tín hiệu thay vì đặt SL sai chỗ.
+    TP (cách thoát fixed) ≥ 1.2 × MIN_RR × R theo cách dựng → R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR: MIN_RR là
+    mức sàn của TP cố định, không phải một cổng lọc (v3.3 – xem min_rr_for)."""
     if side == "long":
         swing = min(df.low[-6:])
         sl = min(price - cfg.ATR_SL_MULT * a, swing - 0.15 * a)
@@ -481,7 +513,19 @@ def _range_setup(symbol, df, htf, funding, change24h, market, info):
 
 
 def min_rr_for(sig):
-    return cfg.RANGE_MIN_RR if (sig.context or {}).get("setup") == "range" else cfg.MIN_RR
+    """Ngưỡng R:R tối thiểu tới TP THẬT sẽ dùng, hoặc None khi setup không có cổng R:R.
+    v3.3: chỉ setup range có cổng (RANGE_MIN_RR, TP = dải giữa Bollinger – cổng này thực sự loại tín hiệu ở
+    _range_setup và ở engine.fill_check khi FILL_RECHECK=true). Setup xu hướng: TP cố định dựng ≥ 1.2 × MIN_RR × R
+    (_levels, exits.levels) nên "RR ≥ MIN_RR" luôn đúng; hybrid/trail chốt TP1 ở TP1_R (mặc định 1R) rồi bám sóng không
+    có TP gần – so TP1 với MIN_RR sẽ chặn MỌI tín hiệu (đổi chiến lược). Bản cũ vẫn so sig.rr ≥ MIN_RR ở 5 chỗ, không
+    lần nào chặn được → bỏ, MIN_RR chỉ còn là mức sàn TP cố định."""
+    return cfg.RANGE_MIN_RR if (sig.context or {}).get("setup") == "range" else None
+
+
+def rr_ok(sig):
+    """Tín hiệu qua cổng R:R (tính ở giá đóng nến tín hiệu): setup không có cổng → luôn qua."""
+    need = min_rr_for(sig)
+    return need is None or sig.rr >= need - 1e-9
 
 
 def min_score_for(sig):
@@ -494,8 +538,8 @@ def min_score_for(sig):
 def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=None):
     """Trả về (signal, lý do loại, số liệu tóm tắt).
     - lý do == ""          → tín hiệu đạt, gửi AI
-    - signal != None + lý do → tín hiệu "suýt đạt" (điểm thấp / RR thấp / bị luật tự học chặn) – vẫn được
-      ghi lại để theo dõi kết quả bóng, giúp bộ tự học biết ngưỡng có quá chặt không.
+    - signal != None + lý do → tín hiệu "suýt đạt" (điểm thấp) – vẫn được ghi lại để theo dõi kết quả bóng, giúp bộ tự
+      học biết ngưỡng có quá chặt không. Luật chặn (sẵn / tự học) xét sau, ở main.scan, khi đã có dữ liệu dòng tiền.
     - signal == None       → bị loại ở cổng bắt buộc."""
     if len(ohlcv_ltf) < 120 or len(ohlcv_htf) < 80:
         return None, "thiếu dữ liệu", {}
@@ -536,9 +580,7 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     if score < min_score:
         sig.rejected = f"điểm thấp ({score} < {min_score})"
         return (sig if score >= min_score - 1.5 else None), sig.rejected, info
-    if sig.rr < cfg.MIN_RR:
-        sig.rejected = f"RR thấp ({sig.rr:.2f})"
-        return None, sig.rejected, info
+    # v3.3: không còn cổng "RR thấp" cho setup xu hướng – TP dựng ≥ 1.2 × MIN_RR × R nên cổng không bao giờ chặn (min_rr_for)
     return sig, "", info
 
 

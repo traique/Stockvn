@@ -113,7 +113,8 @@ def fill_check(sig, entry, ref=None):
     phía giá khớp, hoặc setup range (TP cố định = dải giữa) mà giá đã vượt TP – sàn không nhận SL/TP như vậy.
     FILL_RECHECK=true bật thêm các cổng CHIẾN LƯỢC xét lại ở giá last (đổi tập lệnh được vào – người dùng tự quyết):
       * giá không được chạy ngược về phía SL quá MAX_FILL_DRIFT_R (theo R kế hoạch, từ giá đóng nến tín hiệu);
-      * SL cách giá ≤ MAX_SL_ATR ATR (range: RANGE_MAX_SL_ATR) và R:R tới TP thật sẽ dùng ≥ MIN_RR (range: RANGE_MIN_RR)."""
+      * SL cách giá ≤ MAX_SL_ATR ATR (range: RANGE_MAX_SL_ATR) và – setup range – R:R tới TP thật (dải giữa) ≥ RANGE_MIN_RR.
+        Setup xu hướng không có cổng R:R (strategy.min_rr_for): TP dựng lại từ giá khớp, luôn ≥ 1.2 × MIN_RR × R."""
     ref = entry if ref is None else ref
     sign = 1 if sig.side == "long" else -1
     if (entry - sig.sl) * sign <= 0 or (ref - sig.sl) * sign <= 0:
@@ -132,11 +133,12 @@ def fill_check(sig, entry, ref=None):
     max_atr = cfg.RANGE_MAX_SL_ATR if is_range else cfg.MAX_SL_ATR
     if sig.atr and risk > max_atr * sig.atr + 1e-12:
         return f"giá đã chạy xa: SL cách giá {risk / sig.atr:.1f} ATR > {max_atr:g}"
-    _, tp, _ = plan_exit(sig, ref)
-    rr = sign * (tp - ref) / risk
     need = strategy.min_rr_for(sig)
-    if rr < need - 1e-9:
-        return f"R:R từ giá hiện tại còn {rr:.2f} < {need:g}"
+    if need is not None:
+        _, tp, _ = plan_exit(sig, ref)
+        rr = sign * (tp - ref) / risk
+        if rr < need - 1e-9:
+            return f"R:R từ giá hiện tại còn {rr:.2f} < {need:g}"
     return ""
 
 

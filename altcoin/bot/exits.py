@@ -22,6 +22,20 @@ MODES = ("fixed", "hybrid", "trail")
 
 TP1_CANDIDATES = (1.0, 1.3, 1.6, 2.0, 2.5)   # các mức TP1 (R) bộ tự học thử song song trên dữ liệu bóng
 
+# v3.3: biến thể so sánh A/B trên CÙNG tín hiệu bóng (cột signals.r_sl25_trail): SL rộng 2.5 ATR + bám sóng toàn bộ – phương
+# án tốt nhất của backtest 88 ngày (+0.08R so với cách hiện tại cả kỳ, ngoài mẫu chỉ +0.04 ± 0.07 – chưa xác nhận). Chỉ để
+# theo dõi: bot KHÔNG tự chuyển sang (đổi SL là đổi chiến lược), bộ tự học không chọn nó.
+ALT_SL_ATR = 2.5
+ALT_MODE = "trail"
+ALT_NAME = "SL 2,5 ATR + bám sóng toàn bộ"
+
+
+def alt_sl(side, price, sl, atr, k=ALT_SL_ATR):
+    """SL của biến thể: như strategy._levels với ATR_SL_MULT = k – xa hơn trong hai mức k × ATR từ giá đóng nến tín hiệu
+    `price` và SL cấu trúc. `sl` là SL của tín hiệu (= mức xa hơn của ATR_SL_MULT × ATR và đáy/đỉnh 6 nến ∓ 0.15 ATR), nên
+    min/max với nó cho đúng SL cấu trúc khi cấu trúc xa hơn k × ATR (giống backtest: sl_for(side, price, atr, swing, 2.5))."""
+    return min(price - k * atr, sl) if side == "long" else max(price + k * atr, sl)
+
 
 def current_tp1_r():
     """TP1 (R) đang dùng: bộ tự học chọn mức cho lợi nhuận kỳ vọng cao nhất, mặc định cfg.TP1_R."""

@@ -269,14 +269,18 @@ class Bot:
                      f"Vốn: {self.engine.equity(self.last_prices):.4f} USDT")
 
     def scan(self):
+        """Quét coin, chấm tín hiệu, hỏi AI tối đa AI_CANDIDATES_PER_SCAN ứng viên (vào được 1 lệnh thì dừng).
+        v3.3: đủ MAX_OPEN_POSITIONS lệnh mở vẫn quét (bản cũ ngừng im lặng – mất log quét và dữ liệu bóng ~9% thời gian):
+        không hỏi AI, không vào lệnh, ứng viên đạt được ghi bóng nguồn "max_positions". Ứng viên xếp sau ứng viên vừa vào
+        lệnh (bản cũ bỏ mất, không hỏi AI cũng không ghi) được ghi bóng nguồn "slot_taken"."""
         opens = self.store.open_trades()
-        if len(opens) >= cfg.MAX_OPEN_POSITIONS:
-            return
+        full = len(opens) >= cfg.MAX_OPEN_POSITIONS
         open_syms = {t["symbol"] for t in opens}
         coins = self.okx.top_altcoins(cfg.TOP_N_COINS)
         btc = mkt.btc_context(self.okx)
         self.last_btc = btc
-        log.info("Quét %d coin... %s", len(coins), mkt.describe(btc))
+        log.info("Quét %d coin... %s%s", len(coins), mkt.describe(btc),
+                 f" | đủ {len(opens)} lệnh mở – chỉ ghi tín hiệu bóng, không hỏi AI" if full else "")
         candidates, reasons, near = [], Counter(), []
         for sym, vol, chg in coins:
             if sym in open_syms or self.cooldown.get(sym, 0) > time.time():
@@ -293,11 +297,15 @@ class Bot:
                     why = strat.apply_flow(sig)
                     info["score"] = sig.score
                 if sig and not why:
-                    blk = strat.blocked_by(sig)
-                    if blk:
-                        sig.rejected = f"luật tự học: {blk}"
-                        reasons["luật tự học chặn"] += 1
-                        log.info("%s %s bị luật tự học chặn: %s", sym, sig.side, blk)
+                    rule = strat.blocking_rule(sig)
+                    if rule:
+                        # v3.3: ghi đúng nguồn gốc luật – bản cũ luôn ghi "luật tự học" dù hầu hết là luật chặn sẵn
+                        origin = strat.block_origin(rule)
+                        label = strat.BLOCK_LABELS[origin]
+                        sig.rejected = f"{label}: {strat.RULES[rule][0]}"
+                        sig.context.update(blocked_rule=rule, block_origin=origin)
+                        reasons[f"{label} chặn"] += 1
+                        log.info("%s %s bị %s chặn: %s", sym, sig.side, label, strat.RULES[rule][0])
                         self._shadow(sig, "blocked")
                         continue
                     candidates.append(sig)
@@ -305,7 +313,7 @@ class Bot:
                     if sig is not None:   # suýt đạt (điểm thấp) → ghi lại để theo dõi kết quả bóng
                         self._shadow(sig, "below_score")
                     reasons[why.split("(")[0].strip()] += 1
-                    if "trigger" in why or "điểm thấp" in why or "RR thấp" in why:
+                    if "trigger" in why or "điểm thấp" in why:
                         near.append(f"{sym.split('/')[0]} ({why[:30]})")
             except Exception as e:
                 log.warning("phân tích %s lỗi: %s", sym, e)
@@ -317,17 +325,22 @@ class Bot:
             log.info("Tín hiệu: %s", ", ".join(f"{s.symbol} {s.side} {s.score}" for s in candidates[:5]))
         self.last_scan_summary = {"ts": time.time(), "scanned": len(coins), "passed": len(candidates),
                                   "reasons": dict(reasons.most_common(8)), "near": near[:6],
-                                  "top": [f"{s.symbol.split('/')[0]} {s.side} {s.score}" for s in candidates[:3]]}
+                                  "top": [f"{s.symbol.split('/')[0]} {s.side} {s.score}" for s in candidates[:3]],
+                                  "n_open": len(opens) if full else 0}
         self.store.set("last_scan", self.last_scan_summary)
         try:
             self.store.add_scan(self.last_scan_summary)
         except Exception as e:
             log.debug("add_scan: %s", e)
+        if full:                            # đủ lệnh mở: không hỏi AI, không vào lệnh – chỉ theo dõi kết quả bóng
+            for sig in candidates:
+                self._shadow(sig, "max_positions")
+            return
         k = max(1, cfg.AI_CANDIDATES_PER_SCAN)
         for sig in candidates[k:]:          # đạt nhưng xếp sau → không hỏi AI, vẫn theo dõi kết quả
             self._shadow(sig, "not_sent")
 
-        for sig in candidates[:k]:          # hỏi AI lần lượt tối đa k ứng viên tốt nhất; vào được 1 lệnh thì dừng
+        for i, sig in enumerate(candidates[:k]):   # hỏi AI lần lượt tối đa k ứng viên tốt nhất (điểm cao trước); vào được 1 lệnh thì dừng
             log.info("Gửi AI: %s %s điểm %s | %s", sig.symbol, sig.side, sig.score, mkt.describe(sig.context))
             ai = self.ai.analyze(sig)
             taken = False
@@ -345,18 +358,18 @@ class Bot:
             if ai is None:
                 pass
             elif ai.get("fallback"):
-                if sig.rr >= strat.min_rr_for(sig):
+                if strat.rr_ok(sig):
                     t = self.engine.open(sig, ai)
                     taken = t is not None
             elif ai["decision"] == sig.side.upper() and ai["confidence"] >= cfg.AI_MIN_CONFIDENCE:
                 # SL/TP giữ nguyên theo cấu trúc ATR của strategy – AI không được chỉnh
-                if sig.rr >= strat.min_rr_for(sig):
+                if strat.rr_ok(sig):
                     t = self.engine.open(sig, ai)
                     taken = t is not None
             elif ai["decision"] == sig.side.upper():
                 # AI cùng hướng nhưng chưa chắc: ≥ AI_WEAK_CONFIDENCE → vẫn vào với rủi ro giảm (risk.quality_mult),
                 # thấp hơn nữa mới bỏ. (v3.1: trên dữ liệu đã có, AI chọn lọc không tốt hơn ngẫu nhiên → bỏ lệnh = bỏ lãi)
-                if ai["confidence"] >= cfg.AI_WEAK_CONFIDENCE and sig.rr >= strat.min_rr_for(sig):
+                if ai["confidence"] >= cfg.AI_WEAK_CONFIDENCE and strat.rr_ok(sig):
                     log.info("AI đồng ý nhưng chưa chắc %s: %s%% < %s%% [%s] – vào với rủi ro giảm. %s", sig.symbol,
                              ai["confidence"], cfg.AI_MIN_CONFIDENCE, ai.get("model"), ai.get("reason"))
                     ai = dict(ai, reason=f"[AI chưa chắc {ai['confidence']}%<{cfg.AI_MIN_CONFIDENCE}%] " + str(ai.get("reason", "")),
@@ -368,7 +381,7 @@ class Bot:
                              cfg.AI_WEAK_CONFIDENCE, ai.get("model"), ai.get("reason"))
             else:
                 veto = current_veto_conf()
-                if ai["confidence"] < veto and sig.score >= cfg.AI_OVERRIDE_MIN_SCORE and sig.rr >= strat.min_rr_for(sig):
+                if ai["confidence"] < veto and sig.score >= cfg.AI_OVERRIDE_MIN_SCORE and strat.rr_ok(sig):
                     # AI phản đối nhưng không đủ chắc → tín hiệu kỹ thuật mạnh vẫn được vào (bộ tự học theo dõi kết quả)
                     log.info("AI phản đối yếu %s: %s (%s%% < ngưỡng %s%%) [%s] – điểm KT %s ≥ %s nên vẫn vào. Lý do AI: %s",
                              sig.symbol, ai["decision"], ai["confidence"], veto, ai.get("model"), sig.score,
@@ -395,6 +408,8 @@ class Bot:
             self.shadow_seen[(sig.symbol, sig.side)] = time.time()
             self.cooldown[sig.symbol] = time.time() + (3600 if not taken else 7200)
             if taken:
+                for rest in candidates[i + 1:k]:     # đã vào 1 lệnh: các ứng viên còn lại không hỏi AI, vẫn theo dõi bóng
+                    self._shadow(rest, "slot_taken")
                 break
 
     def _shadow(self, sig, source):
@@ -416,7 +431,7 @@ class Bot:
     def learn_text(self):
         st = self.learner.public_state()
         p, s = st["params"], st.get("stats") or {}
-        lines = [f"🧬 TỰ HỌC | chế độ {st['mode']} | cần ≥{st['min_samples']} mẫu",
+        lines = [f"🧬 TỰ HỌC | chế độ {st['mode']} | cần ≥{st['min_samples']} mẫu trong ≥{st.get('min_days', 7)} ngày",
                  f"Ngưỡng điểm: {p['min_score']} (mặc định {p['min_score_default']})",
                  "Luật đang chặn: " + (", ".join(st['rules'][b] for b in p['blocks']) or "không"),
                  "Trọng số trigger: " + (", ".join(f"{st['trigger_names'].get(k,k)} {v}" for k, v in p['trigger_w'].items()) or "mặc định")]
@@ -426,6 +441,10 @@ class Bot:
             av = s.get("ai_veto") or {}
             if av.get("veto_accuracy") is not None:
                 lines.append(f"AI chặn đúng {av['veto_accuracy']}% ({av['rejected']['n']} lần)")
+            alt = (s.get("exit_compare") or {}).get("alt") or {}
+            if alt.get("n"):
+                lines.append(f"Thử nghiệm {alt['name']}: {alt['exp_r']:+.2f}R so với {alt['cur_exp_r']:+.2f}R của cách đang dùng "
+                             f"(chênh {alt['diff']:+.2f} ± {alt['diff_se']:.2f}R, {alt['n']} tín hiệu / {alt['diff_days']} ngày)")
         pend = [r for r in st["log"] if r["status"] == "pending"]
         if pend:
             lines.append(f"⏳ {len(pend)} đề xuất chờ duyệt – gõ /apply để áp dụng tất cả")

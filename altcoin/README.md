@@ -12,7 +12,7 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 ## 1. Cách bot ra quyết định
 
-**Bước 1 – Quét**: mỗi 5 phút lấy top 25 cặp USDT-SWAP có volume 24h lớn nhất trên OKX (loại BTC, ETH, stablecoin, token hoá cổ phiếu/vàng/dầu).
+**Bước 1 – Quét**: mỗi 5 phút lấy top 50 (`TOP_N_COINS`) cặp USDT-SWAP **crypto** có volume 24h lớn nhất trên OKX. v3.3: hợp đồng cổ phiếu / hàng hoá bị loại theo loại tài sản OKX ghi cho từng hợp đồng (`instCategory`: 1 = crypto, 3 = cổ phiếu, 4 = hàng hoá) – bản cũ chỉ lọc theo tên nên 9/50 mã là cổ phiếu, dầu (SKHY, SOXS, CL, BZ…); BTC, ETH, stablecoin vẫn loại theo tên (`EXCLUDE`, lớp lọc thêm). Đang đủ `MAX_OPEN_POSITIONS` lệnh mở bot vẫn quét và ghi tín hiệu bóng (nguồn `max_positions`, không hỏi AI, không vào lệnh) – bản cũ ngừng quét im lặng, mất ~9% dữ liệu.
 
 **Bước 2 – Cổng bắt buộc** (thiếu một cái là loại ngay, chỉ dùng nến đã đóng):
 
@@ -28,11 +28,11 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 | RSI hợp lý | Long: 45–70, Short: 30–55 |
 | Nến tín hiệu đúng màu | Long phải là nến tăng, Short phải là nến giảm |
 
-**Bước 3 – Trigger** (phải có ít nhất 1 sự kiện trong 3 nến gần nhất): MACD cắt, EMA9 cắt EMA21, breakout đỉnh/đáy 20 nến kèm volume ×1.5, pullback về EMA21 rồi bật, nến nhấn chìm.
+**Bước 3 – Trigger** (phải có ít nhất 1 sự kiện trong 3 nến gần nhất): MACD cắt, EMA9 cắt EMA21, breakout đỉnh/đáy 20 nến kèm volume ×1.5, pullback về EMA21 rồi bật, bật/gãy tại VWAP, nến nhấn chìm. Trigger chia nhóm: MACD & EMA9 là một nhóm (động lượng), Pullback EMA21 & VWAP là một nhóm (hồi về giá trị), mỗi trigger khác một nhóm; tối đa 2 nhóm được cộng 1,5 × trọng số. v3.3: trọng số nhóm = **trung bình** trọng số tự học của các trigger trong nhóm mà tín hiệu có (bản cũ lấy số lớn nhất, nên trọng số pullback 0,82 bị bỏ qua ở mọi tín hiệu có cả VWAP).
 
-**Bước 4 – Chấm điểm hợp lưu**: EMA 9/21/50 xếp đúng thứ tự, đúng phía EMA200 và VWAP, ADX mạnh, MACD+RSI khung 1h đồng thuận, volume, nến đóng dứt khoát, funding; trừ điểm nếu coin đã chạy > 20% trong 24h. Cần ≥ 5 điểm và tỉ lệ lời/lỗ ≥ 1.5.
+**Bước 4 – Chấm điểm hợp lưu**: EMA 9/21/50 xếp đúng thứ tự, đúng phía EMA200 và VWAP, ADX mạnh, MACD+RSI khung 1h đồng thuận, volume, nến đóng dứt khoát, funding; trừ điểm nếu coin đã chạy > 20% trong 24h. Cần ≥ 5 điểm. v3.3: setup xu hướng không còn cổng "tỉ lệ lời/lỗ ≥ `MIN_RR`" – TP cố định được dựng ≥ 1,2 × `MIN_RR` × R nên cổng đó không bao giờ chặn; `MIN_RR` chỉ là mức sàn của TP cố định. Setup range vẫn cần R:R tới dải giữa ≥ `RANGE_MIN_RR`.
 
-**Bước 5 – AI lần 1 (phân tích)**: tối đa 3 **tín hiệu tốt nhất** của lượt quét được gửi lần lượt cho AI, kèm 5 bài học gần nhất. AI đồng ý ≥ 60% → vào lệnh đủ rủi ro; đồng ý nhưng chỉ 50–59% → vẫn vào với **nửa rủi ro** (`AI_WEAK_CONFIDENCE`); phản đối yếu (dưới ngưỡng phủ quyết) với tín hiệu điểm ≥ 6.5 → vào nửa rủi ro; còn lại bỏ. (v3.1: trên dữ liệu đã có, AI từ chối 90% tín hiệu nhưng nhóm bị từ chối không thua nhóm được duyệt – AI điều tiết **khối lượng** thay vì chặn cứng.)
+**Bước 5 – AI lần 1 (phân tích)**: tối đa 3 **tín hiệu tốt nhất** của lượt quét được gửi lần lượt cho AI (điểm cao trước), kèm 5 bài học gần nhất; vào được 1 lệnh thì dừng – v3.3: các ứng viên còn lại được ghi bóng (nguồn `slot_taken`; bản cũ bỏ mất). AI đồng ý ≥ 60% → vào lệnh đủ rủi ro; đồng ý nhưng chỉ 50–59% → vẫn vào với **nửa rủi ro** (`AI_WEAK_CONFIDENCE`); phản đối yếu (dưới ngưỡng phủ quyết) với tín hiệu điểm ≥ 6.5 → vào nửa rủi ro; còn lại bỏ. (v3.1: trên dữ liệu đã có, AI từ chối 90% tín hiệu nhưng nhóm bị từ chối không thua nhóm được duyệt – AI điều tiết **khối lượng** thay vì chặn cứng.)
 
 **Bước 6 – Vào & quản lý lệnh**: SL theo cấu trúc (đáy/đỉnh 6 nến ± 0.15 ATR, tối thiểu 1.5 ATR; xa hơn 2.5 ATR thì bỏ tín hiệu). Khối lượng tính để chạm SL mất `RISK_PER_TRADE` = **3% vốn × hệ số chất lượng** (đã gồm phí + trượt giá): điểm ≥ 7 và AI ≥ 80 được 1.5×, AI chưa chắc / phản đối yếu 0.5×, mỗi lệnh thua liên tiếp (từ lệnh thứ 2) nhân 0.7, kẹp 0.35–1.5×. x10 isolated, tối đa **2 lệnh** nhưng tổng rủi ro đang mở ≤ `MAX_TOTAL_RISK` = 5% vốn; lot tối thiểu của sàn làm rủi ro vượt 2× dự tính thì bỏ tín hiệu. Thoát lệnh: hybrid (chốt 50% ở TP1 do bộ tự học chọn, phần còn lại bám sóng) hoặc cách khác mà bộ tự học chọn.
 
@@ -124,16 +124,18 @@ python run.py
 **Trên web** (cuộn xuống dưới dashboard):
 - Tab **Hoạt động**: toàn bộ log của bot (giống console Botkeep), lọc theo mức INFO/WARNING/ERROR và tìm kiếm. Lưu 14 ngày.
 - Tab **Lịch sử quét**: mỗi lượt quét bao nhiêu coin đạt, loại vì lý do gì. Lưu 30 ngày.
-- Tab **Tín hiệu & AI**: mỗi tín hiệu kèm nguồn (đã vào lệnh / AI từ chối / không gửi AI / suýt đạt / bị luật chặn) và **kết quả thật** sau đó (TP / SL / hết giờ, tính bằng R).
+- Tab **Lịch sử quét** (v3.3): lượt quét lúc đang đủ lệnh mở có nhãn "đủ N lệnh – chỉ ghi bóng".
+- Tab **Tín hiệu & AI**: mỗi tín hiệu kèm nguồn (đã vào lệnh / AI từ chối / không gửi AI – xếp sau, lượt quét đã vào lệnh khác, đang đủ lệnh mở / suýt đạt / bị luật chặn sẵn hoặc luật tự học) và **kết quả thật** sau đó (TP / SL / hết giờ, tính bằng R).
 - Thẻ **Tải dữ liệu**: tải CSV (mở được bằng Excel / Google Sheets, đúng tiếng Việt) hoặc sao lưu toàn bộ JSON.
 
 **Tự học hoạt động thế nào:**
 1. Mọi tín hiệu đã qua bộ lọc kỹ thuật, kể cả tín hiệu không vào lệnh, đều được theo dõi "bóng": bot xem nến 5 phút sau đó để biết nếu vào thì sẽ chạm TP hay SL trước. Kết quả tính bằng R (1R = khoảng cách tới SL), đã trừ phí. v3.3: cùng giá và phí với lệnh chạy ảo – vào ở giá last lúc quyết định cộng trượt giá, trừ phí + trượt giá cả hai chiều (mặc định 0,20%; bản cũ 0,15% và vào ở giá đóng nến cũ); bỏ phút chứa lúc vào như lệnh chạy ảo (khung 5 phút chứa lúc vào được xét bằng nến 1 phút). Kết quả bóng của bản trước 3.3 không được dùng để thống kê và tự điều chỉnh – sau khi nâng cấp, bộ tự học chờ đủ mẫu mới.
-2. Mỗi giờ bot thống kê theo nhóm: nguồn tín hiệu, loại trigger, luật lọc, khung giờ, điểm số. Khi một nhóm có đủ mẫu (mặc định 30) **và** kết quả khác 0 có ý nghĩa thống kê (|kỳ vọng| / sai số chuẩn ≥ `LEARN_MIN_T` = 1.3; so sánh cách thoát / mức TP1 theo từng cặp trên cùng tín hiệu, TP1 cần ≥ 40 mẫu), bot điều chỉnh:
+2. Mỗi giờ bot thống kê theo nhóm: nguồn tín hiệu, loại trigger, luật lọc, khung giờ, điểm số. Khi một nhóm có đủ mẫu (mặc định 30) trải trên ≥ `LEARN_MIN_DAYS` = 7 ngày khác nhau **và** kết quả khác 0 có ý nghĩa thống kê (|kỳ vọng| / sai số chuẩn ≥ `LEARN_MIN_T` = 2,0; so sánh cách thoát / mức TP1 theo từng cặp trên cùng tín hiệu, TP1 cần ≥ 40 mẫu), bot điều chỉnh:
    - bật/tắt luật chặn trong danh mục cố định (vd. "short khi RSI 1h < 32") – chặn ở bộ lọc thì không tốn lượt AI;
    - trọng số từng trigger (0,6 – 1,4);
    - ngưỡng điểm MIN_SCORE (4,0 – 7,0, mỗi lần ±0,5).
-   Mỗi tham số chỉ đổi tối đa 1 lần/48h (`LEARN_COOLDOWN_H`). v3.2: `LEARN_MIN_T` = 2,0; không bao giờ chặn cả một phía (long_side/short_side chỉ để thống kê); cách thoát lệnh cần ≥ `LEARN_EXIT_MIN_SAMPLES` = 60 cặp. Luật đã chặn vẫn được theo dõi bóng, nên nếu nhóm đó tốt lên bot sẽ tự bỏ chặn. (v3.1: trước đây 13–20 mẫu đã đổi, trọng số trigger nhảy qua lại trong 1 ngày – nay không còn.)
+   Mỗi tham số chỉ đổi tối đa 1 lần/48h (`LEARN_COOLDOWN_H`). v3.2: `LEARN_MIN_T` = 2,0; không bao giờ chặn cả một phía (long_side/short_side chỉ để thống kê); cách thoát lệnh cần ≥ `LEARN_EXIT_MIN_SAMPLES` = 60 cặp.
+   v3.3: sai số chuẩn **gom cụm theo ngày** (tín hiệu cùng ngày là cùng một nhịp thị trường, không độc lập – bản cũ coi chúng độc lập nên t quá lớn); trọng số trigger và ngưỡng điểm chỉ học từ tín hiệu **không bị luật đang chặn** (tín hiệu bị chặn không vào lệnh được dù điểm thế nào; trọng số pullback 0,82 của bản cũ học từ 32 tín hiệu, 22 trong đó đã bị luật chặn sẵn). Lần đầu chạy 3.3 bot đưa mọi tham số tự học của bản cũ về mặc định **một lần** (ghi log, lịch sử tự học và báo qua Telegram/Zoom). Luật đã chặn vẫn được theo dõi bóng, nên nếu nhóm đó tốt lên bot sẽ tự bỏ chặn. (v3.1: trước đây 13–20 mẫu đã đổi, trọng số trigger nhảy qua lại trong 1 ngày – nay không còn.)
 3. Mỗi sáng (7h) AI đọc thống kê, viết nhận xét và gợi ý – **không tự áp dụng**, anh bấm "Áp dụng" nếu đồng ý. Tốn 1 lượt AI/ngày.
 4. Chạy ảo: tự áp dụng. Chạy thật: chỉ đề xuất, anh duyệt trên web hoặc gõ `/apply` trên Telegram. Nút "Khôi phục mặc định" đưa mọi thứ về ban đầu.
 
@@ -150,7 +152,9 @@ Ba cách, chọn bằng `EXIT_MODE` (mặc định `auto` = bộ tự học ch�
 | `hybrid` | Chốt 50% khi lời 2R (khoá lợi nhuận, SL về hoà vốn); 50% còn lại **bám sóng**: SL = đỉnh/đáy kể từ khi vào ∓ 2,5 ATR, siết còn 1,5 ATR khi lời ≥ 4R; thoát nếu 4h không lập đỉnh mới | Sóng mạnh kéo dài |
 | `trail` | Toàn bộ vị thế bám sóng, không chốt trước | Xu hướng rất mạnh, chấp nhận trả lại lãi |
 
-Bot mô phỏng **song song cả 3 cách** trên mọi tín hiệu (bằng nến 5 phút thật sau tín hiệu), hiển thị so sánh trong thẻ "Tự học" → "So sánh cách thoát lệnh". Với `EXIT_MODE=auto`, khi có ≥ 20 tín hiệu và một cách hơn cách đang dùng ≥ 0,25R/tín hiệu thì bot tự chuyển (tối đa 1 lần/24h, có lịch sử, khôi phục được).
+Bot mô phỏng **song song cả 3 cách** trên mọi tín hiệu (bằng nến 5 phút thật sau tín hiệu), hiển thị so sánh trong thẻ "Tự học" → "So sánh cách thoát lệnh". Với `EXIT_MODE=auto`, khi có ≥ 60 tín hiệu trải trên ≥ 7 ngày và một cách hơn cách đang dùng ≥ 0,25R/tín hiệu có ý nghĩa thống kê thì bot tự chuyển (tối đa 1 lần/48h, có lịch sử, khôi phục được).
+
+v3.3 – **thử nghiệm A/B "SL 2,5 ATR + bám sóng toàn bộ"**: mỗi tín hiệu bóng setup xu hướng còn được mô phỏng với SL rộng hơn (xa hơn trong hai mức 2,5 ATR và SL cấu trúc – như đặt `ATR_SL_MULT=2.5`), cùng giá vào và phí, bám sóng toàn bộ; kết quả ở cột `r_sl25_trail` và hàng "thử nghiệm" của bảng so sánh, kèm chênh lệch với cách đang dùng trên cùng tín hiệu (sai số chuẩn theo ngày). Backtest 88 ngày cho phương án này +0,08R cả kỳ nhưng ngoài mẫu chỉ +0,04 ± 0,07 – chưa xác nhận, nên bot **không tự chuyển**; đổi SL là quyết định của anh/chị khi đủ dữ liệu.
 
 Lưu ý thật lòng: không cách nào "ăn trọn" sóng. Trailing đổi tỉ lệ thắng lấy những lệnh thắng lớn; gặp sóng giật mạnh rồi mới chạy tiếp (như STRK ngày 17/10: hồi về EMA21 rồi mới giảm thêm 3R) thì trailing vẫn bị chốt sớm. Vì vậy hãy để dữ liệu quyết định thay vì tin cảm giác.
 

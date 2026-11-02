@@ -117,4 +117,232 @@ ts_ = S.Signal("X/USDT:USDT", "long", 5, 100, 1, 98, 104, [], {"setup": "trend"}
 m, tp, tp1 = plan_exit(ts_, 100)
 assert tp1 is None or abs(tp1 - (100 + 2 * __import__("bot.exits", fromlist=["x"]).current_tp1_r())) < 1e-9
 print("✓ setup range thoát fixed tại dải giữa; trend dùng TP1 tự học")
+
+# ======================================================================= v3.3 phần B: quét, luật chặn, trọng số, danh sách coin
+# Mỗi phần chạy riêng (lỗi một phần không che phần sau) – phần nào đỏ trên code cũ thì in ✗ rồi cả file thoát mã lỗi.
+import json, logging, shutil, time, traceback
+FAILED = []
+
+
+def section(name):
+    def run(fn):
+        try:
+            fn()
+            print("✓", name)
+        except Exception:
+            FAILED.append(name)
+            print("✗", name, "\n" + traceback.format_exc(limit=3))
+        return fn
+    return run
+
+
+S.LEARNED.update({"min_score": None, "trigger_w": {}, "blocks": [], "unblocked": []})
+cfg.DATA_DIR = "/tmp/okx_test_strategy/scan"
+shutil.rmtree(cfg.DATA_DIR, ignore_errors=True)
+from bot.storage import Store
+from bot import main as M
+STORE = Store()
+
+
+class ScanOKX:
+    """Sàn giả cho Bot.scan: danh sách coin cố định, nến rỗng (diagnose được thay bằng kết quả dựng sẵn)."""
+    def __init__(self, syms): self.syms = syms
+    def top_altcoins(self, n): return [(s, 1e6 * (len(self.syms) - i), 0.0) for i, s in enumerate(self.syms)]
+    def ohlcv(self, *a, **k): return []
+    def price(self, s): return 100.0
+    class ex:
+        def __getattr__(self, k): raise RuntimeError("không có mạng")
+    ex = ex()
+
+
+class FakeAI:
+    def __init__(self): self.asked = []
+    def analyze(self, sig):
+        self.asked.append(sig.symbol)
+        return {"decision": sig.side.upper(), "confidence": 80, "model": "fake", "reason": "ok"}
+
+
+class FakeEngine:
+    def __init__(self, take=True): self.opened, self.take = [], take
+    def open(self, sig, ai):
+        self.opened.append(sig.symbol)
+        return {"id": len(self.opened)} if self.take else None
+
+
+def trend_sig(sym, score, side="long", **ctx):
+    c = {"setup": "trend", "hour": 21, "adx": 30, "vol_ratio": 1.1, "atr_pct": 0.6, **ctx}
+    return S.Signal(sym, side, score, 100.0, 0.6, 98.8 if side == "long" else 101.2, 103.6 if side == "long" else 96.4,
+                    ["t"], c, triggers=["pullback"])
+
+
+def make_bot(results, opens=0, ai=None, engine=None):
+    """Bot rút gọn chỉ đủ cho scan(): diagnose trả kết quả dựng sẵn theo mã (sig, lý do)."""
+    STORE.db.run("DELETE FROM signals"); STORE.db.run("DELETE FROM scans"); STORE.db.run("DELETE FROM trades")
+    for i in range(opens):
+        STORE.open_trade(dict(mode="paper", symbol=f"OPEN{i}/USDT:USDT", side="long", entry=1.0, sl=0.9, tp=1.2,
+                              notional=5.0, status="open", opened_at=time.time()))
+    b = M.Bot.__new__(M.Bot)
+    b.store, b.okx = STORE, ScanOKX(list(results))
+    b.ai, b.engine = ai or FakeAI(), engine or FakeEngine()
+    b.cooldown, b.shadow_seen, b.last_btc, b.last_scan_summary = {}, {}, {}, None
+    M.diagnose = lambda sym, *a, **k: (results[sym][0], results[sym][1], {"score": results[sym][0].score if results[sym][0] else 0})
+    return b
+
+
+def rows():
+    out = {}
+    for r in STORE.db.run("SELECT * FROM signals ORDER BY rowid", fetch=True):
+        out[r["symbol"].split("/")[0]] = (r["source"], json.loads(r["features"]))
+    return out
+
+
+class Grab(logging.Handler):
+    def __init__(self): super().__init__(); self.msgs = []
+    def emit(self, rec): self.msgs.append(rec.getMessage())
+
+
+GRAB = Grab()
+logging.getLogger("main").addHandler(GRAB)
+
+
+@section("bug 6: đủ lệnh mở vẫn quét, ghi log quét và tín hiệu bóng max_positions – không hỏi AI, không vào lệnh")
+def _():
+    a, b2 = trend_sig("AAA/USDT:USDT", 7.0), trend_sig("BBB/USDT:USDT", 6.0)
+    blk = trend_sig("EEE/USDT:USDT", 6.5, hour=15)              # phiên 13h–19h: luật chặn sẵn
+    low = trend_sig("FFF/USDT:USDT", 4.5); low.rejected = "điểm thấp (4.5 < 5.0)"
+    ai, eng = FakeAI(), FakeEngine()
+    bot = make_bot({"AAA/USDT:USDT": (a, ""), "BBB/USDT:USDT": (b2, ""), "EEE/USDT:USDT": (blk, ""),
+                    "FFF/USDT:USDT": (low, low.rejected)}, opens=cfg.MAX_OPEN_POSITIONS, ai=ai, engine=eng)
+    bot.scan()
+    got = rows()
+    assert {k: v[0] for k, v in got.items()} == {"AAA": "max_positions", "BBB": "max_positions", "EEE": "blocked",
+                                                 "FFF": "below_score"}, got
+    assert ai.asked == [] and eng.opened == [], (ai.asked, eng.opened)
+    sc = STORE.scans(5)
+    assert len(sc) == 1 and sc[0]["passed"] == 2 and sc[0]["n_open"] == cfg.MAX_OPEN_POSITIONS, sc
+    assert bot.last_scan_summary["n_open"] == cfg.MAX_OPEN_POSITIONS
+
+
+@section("bug 7: ứng viên xếp sau ứng viên vừa vào lệnh được ghi bóng slot_taken; hỏi AI theo thứ tự điểm")
+def _():
+    sigs = {"CCC/USDT:USDT": trend_sig("CCC/USDT:USDT", 5.5), "AAA/USDT:USDT": trend_sig("AAA/USDT:USDT", 7.0),
+            "BBB/USDT:USDT": trend_sig("BBB/USDT:USDT", 6.0), "DDD/USDT:USDT": trend_sig("DDD/USDT:USDT", 5.2)}
+    ai, eng = FakeAI(), FakeEngine(take=True)
+    bot = make_bot({k: (v, "") for k, v in sigs.items()}, opens=0, ai=ai, engine=eng)
+    _k, cfg.AI_CANDIDATES_PER_SCAN = cfg.AI_CANDIDATES_PER_SCAN, 3
+    try:
+        bot.scan()
+    finally:
+        cfg.AI_CANDIDATES_PER_SCAN = _k
+    got = {k: v[0] for k, v in rows().items()}
+    assert ai.asked == ["AAA/USDT:USDT"] and eng.opened == ["AAA/USDT:USDT"], (ai.asked, eng.opened)
+    assert got == {"AAA": "taken", "BBB": "slot_taken", "CCC": "slot_taken", "DDD": "not_sent"}, got
+    # ứng viên #1 AI từ chối → hỏi tiếp #2 (thiết kế cũ giữ nguyên), #2 vào lệnh → #3 slot_taken
+    class Picky(FakeAI):
+        def analyze(self, sig):
+            self.asked.append(sig.symbol)
+            ok = sig.symbol != "AAA/USDT:USDT"
+            return {"decision": sig.side.upper() if ok else "SKIP", "confidence": 80 if ok else 90, "model": "f", "reason": "x"}
+    ai = Picky()
+    bot = make_bot({k: (v, "") for k, v in sigs.items()}, opens=0, ai=ai, engine=FakeEngine(take=True))
+    bot.scan()
+    got = {k: v[0] for k, v in rows().items()}
+    assert ai.asked == ["AAA/USDT:USDT", "BBB/USDT:USDT"], ai.asked
+    assert got == {"AAA": "ai_rejected", "BBB": "taken", "CCC": "slot_taken", "DDD": "not_sent"}, got
+
+
+@section("bug 9: log & tín hiệu bóng ghi đúng luật chặn sẵn / luật tự học")
+def _():
+    blk = trend_sig("EEE/USDT:USDT", 6.5, hour=15)                 # luật chặn sẵn: phiên chiều
+    lrn = trend_sig("WWW/USDT:USDT", 6.5, adx=22)                  # weak_adx – chỉ bộ tự học chặn
+    S.LEARNED["blocks"] = ["weak_adx"]
+    try:
+        GRAB.msgs.clear()
+        bot = make_bot({"EEE/USDT:USDT": (blk, ""), "WWW/USDT:USDT": (lrn, "")})
+        bot.scan()
+    finally:
+        S.LEARNED["blocks"] = []
+    got = rows()
+    line_e = [m for m in GRAB.msgs if m.startswith("EEE/USDT:USDT")]
+    line_w = [m for m in GRAB.msgs if m.startswith("WWW/USDT:USDT")]
+    assert line_e and "luật chặn sẵn" in line_e[0] and "tự học" not in line_e[0], line_e
+    assert line_w and "luật tự học" in line_w[0], line_w
+    assert got["EEE"][1].get("block_origin") == "default" and got["EEE"][1].get("blocked_rule") == "afternoon_session", got["EEE"]
+    assert got["WWW"][1].get("block_origin") == "learned" and got["WWW"][1]["rejected"].startswith("luật tự học"), got["WWW"]
+    sc = STORE.scans(1)[0]["reasons"]
+    assert sc.get("luật chặn sẵn chặn") == 1 and sc.get("luật tự học chặn") == 1, sc
+
+
+@section("bug 9: trọng số trigger học được áp dụng cả khi tín hiệu có trigger cùng nhóm (pullback + VWAP)")
+def _():
+    r_ = NS(ema9=3, ema21=2, ema50=1, close=1, ema200=5, adx=10, vol_ratio=1, close_pos=0.5, body_pct=0.3, vwap=9)
+    h_ = NS(di_plus=0, di_minus=1, macd_hist=-1, rsi=40, adx=20)
+    fr_, hf_ = NS(row=lambda i: r_), NS(row=lambda i: h_)
+    both = ["Pullback EMA21 + nến bật", "Bật tại VWAP"]
+    S.LEARNED["trigger_w"] = {}
+    s0, _w = S._score(fr_, hf_, "long", both, 0, 0)
+    S.LEARNED["trigger_w"] = {"pullback": 0.82}
+    try:
+        s1, _w = S._score(fr_, hf_, "long", both, 0, 0)
+        s_pb, _w = S._score(fr_, hf_, "long", both[:1], 0, 0)
+        S.LEARNED["trigger_w"] = {"pullback": 1.2}
+        s_up, _w = S._score(fr_, hf_, "long", both, 0, 0)
+    finally:
+        S.LEARNED["trigger_w"] = {}
+    # trọng số nhóm = trung bình (0.82 + 1.0) / 2 = 0.91 → điểm trigger 1.5 × 0.91; bản cũ max(0.82, 1.0) = 1.0 → bỏ qua
+    assert abs(s1 - (s0 - 1.5 * (1 - 0.91))) < 0.011, (s0, s1)
+    assert abs(s_pb - (s0 - 1.5 * (1 - 0.82))) < 0.011, (s0, s_pb)
+    assert s_up > s0, (s0, s_up)                                     # tăng trọng số cũng có tác dụng
+    S.LEARNED["trigger_w"] = {}
+    assert S._score(fr_, hf_, "long", both + ["MACD cắt lên"], 0, 0)[0] == S._score(fr_, hf_, "long", both[:1] + ["MACD cắt lên"], 0, 0)[0]
+
+
+@section("bug 10: danh sách coin lọc theo instCategory của OKX (cổ phiếu / hàng hoá bị loại dù tên không trong EXCLUDE)")
+def _():
+    from bot.exchange import OKX
+    mk = {}
+    tick = {}
+    for base, cat, vol in (("SOL", "1", 9), ("SKHY", "3", 8), ("CL", "4", 7), ("NEWC", None, 6), ("BTC", "1", 10),
+                           ("UNITREE", "3", 5), ("PEPE", "1", 4)):
+        sym = f"{base}/USDT:USDT"
+        info = {"instCategory": cat} if cat else {}
+        mk[sym] = {"swap": True, "quote": "USDT", "active": True, "base": base, "info": info}
+        tick[sym] = {"last": 1.0, "percentage": 1.0, "info": {"volCcy24h": vol * 1e6}}
+
+    class Ex:
+        def fetch_tickers(self, params=None): return tick
+    o = OKX.__new__(OKX)
+    o.ex, o._markets, o._markets_ts, o.last_filtered, o._no_category = Ex(), mk, time.time(), set(), set()
+    got = [s.split("/")[0] for s, _, _ in o.top_altcoins(10)]
+    assert got == ["SOL", "NEWC", "PEPE"], got                  # BTC: loại theo tên; NEWC: sàn không ghi loại → giữ
+    assert o.last_filtered == {"SKHY", "CL", "UNITREE"}, o.last_filtered
+
+
+@section("MIN_RR: setup xu hướng không có cổng R:R (TP dựng ≥ 1.2 × MIN_RR × R), range giữ cổng RANGE_MIN_RR")
+def _():
+    import random as _r
+    _r.seed(3)
+    worst = 99
+    for _i in range(2000):                                      # cổng cũ "RR ≥ MIN_RR" không bao giờ chặn được
+        a = _r.uniform(0.1, 5); p = _r.uniform(10, 1000)
+        lows = [p - _r.uniform(0, 4) * a for _ in range(6)]
+        highs = [p + _r.uniform(0, 4) * a for _ in range(6)]
+        for side in ("long", "short"):
+            sl, tp = S._levels(NS(low=lows, high=highs), side, p, a)
+            worst = min(worst, abs(tp - p) / abs(p - sl))
+    assert worst >= 1.2 * cfg.MIN_RR - 1e-9, worst
+    tsig = S.Signal("X/USDT:USDT", "long", 6, 100, 1, 98, 101, [], {"setup": "trend"})          # RR 0.5 – cổng không áp dụng
+    rsig = S.Signal("X/USDT:USDT", "long", 6, 100, 1, 99, 101, [], {"setup": "range"})          # RR 1.0 < RANGE_MIN_RR
+    assert S.min_rr_for(tsig) is None and S.rr_ok(tsig)
+    assert S.min_rr_for(rsig) == cfg.RANGE_MIN_RR and not S.rr_ok(rsig)
+    from bot.engine import fill_check
+    _fr = cfg.FILL_RECHECK; cfg.FILL_RECHECK = True
+    try:
+        assert "R:R" in fill_check(S.Signal("X/USDT:USDT", "long", 6, 100, 1, 99, 101.1, [], {"setup": "range"}), 100.1, 100.1)
+        assert fill_check(tsig, 100.0, 100.0) == ""
+    finally:
+        cfg.FILL_RECHECK = _fr
+
+
+assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"
 print("TẤT CẢ OK")

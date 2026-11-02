@@ -9,9 +9,11 @@
    - Bật/tắt các luật lọc trong strategy.RULES khi nhóm tín hiệu đó lỗ/lãi ổn định.
    - Trọng số từng loại trigger (0.6 – 1.4).
    - Ngưỡng điểm tối thiểu MIN_SCORE (4.0 – 7.0, mỗi lần ±0.5).
-   Mỗi thay đổi cần đủ mẫu (LEARN_MIN_SAMPLES) VÀ khác 0 có ý nghĩa thống kê (|kỳ vọng|/sai số chuẩn ≥ LEARN_MIN_T –
-   v3.1, chống việc "học" từ nhiễu rồi nhảy qua lại), mỗi tham số chỉ đổi tối đa 1 lần/LEARN_COOLDOWN_H giờ,
-   có lưu lịch sử, khôi phục mặc định được. LEARN_MODE=auto (tự áp dụng) | suggest (chờ duyệt trên web/Telegram) | off.
+   Mỗi thay đổi cần đủ mẫu (LEARN_MIN_SAMPLES) trải trên ≥ LEARN_MIN_DAYS ngày khác nhau VÀ khác 0 có ý nghĩa thống kê
+   (|kỳ vọng|/sai số chuẩn ≥ LEARN_MIN_T, sai số chuẩn gom cụm theo ngày – v3.3: tín hiệu cùng ngày là cùng một nhịp thị
+   trường, không độc lập), mỗi tham số chỉ đổi tối đa 1 lần/LEARN_COOLDOWN_H giờ, có lưu lịch sử, khôi phục mặc định được.
+   Trọng số trigger và ngưỡng điểm chỉ học từ tín hiệu KHÔNG bị luật đang chặn (v3.3: tín hiệu luật chặn không vào lệnh
+   được dù điểm thế nào). LEARN_MODE=auto (tự áp dụng) | suggest (chờ duyệt trên web/Telegram) | off.
 
 3) AI tổng kết chiến lược 1 lần/ngày: đọc số liệu thống kê, viết nhận xét + gợi ý (không tự áp dụng).
 """
@@ -28,11 +30,15 @@ from . import costs
 
 log = logging.getLogger("learner")
 
-TECH_SOURCES = ("taken", "ai_weak", "ai_override", "ai_rejected", "ai_error", "skipped", "not_sent", "blocked")
+TECH_SOURCES = ("taken", "ai_weak", "ai_override", "ai_rejected", "ai_error", "skipped", "not_sent", "slot_taken",
+                "max_positions", "blocked")
 EXIT_NAMES = {"fixed": "TP cố định", "hybrid": "Ăn sóng (chốt 1 phần + bám sóng)", "trail": "Bám sóng toàn bộ"}
 SOURCE_NAMES = {"taken": "Đã vào lệnh", "ai_weak": "Vào (AI đồng ý nhưng chưa chắc, rủi ro giảm)", "ai_override": "Vào dù AI phản đối yếu", "ai_rejected": "AI từ chối", "ai_error": "AI lỗi / hết lượt",
                 "skipped": "AI duyệt nhưng không vào được (giá đã chạy / vốn / lot)",
-                "not_sent": "Không gửi AI (xếp sau)", "blocked": "Bị luật tự học chặn", "below_score": "Suýt đạt (điểm thấp)"}
+                "not_sent": "Không gửi AI (xếp sau)",
+                "slot_taken": "Không gửi AI (lượt quét đã vào lệnh khác)",
+                "max_positions": "Không gửi AI (đang đủ lệnh mở)",
+                "blocked": "Bị luật chặn (chặn sẵn hoặc tự học)", "below_score": "Suýt đạt (điểm thấp)"}
 
 SYSTEM_DAILY = """Bạn là quản lý rủi ro của một bot giao dịch futures altcoin. Bạn nhận thống kê kết quả THẬT
 (đo bằng R, 1R = khoảng cách tới stop-loss, đã trừ phí) của mọi tín hiệu bot tạo ra, chia theo nhóm.
@@ -43,14 +49,31 @@ TRẢ LỜI DUY NHẤT bằng JSON:
 Mã luật hợp lệ cho block/unblock: %s. min_score trong khoảng 4.0-7.0. Không có gợi ý nào thì để mảng rỗng."""
 
 
-def _tstat(vals):
-    """(sai số chuẩn, t = trung bình / sai số chuẩn). t kẹp ±99 (mẫu đồng nhất → se = 0)."""
+def _day(ts):
+    """Ngày (theo TIMEZONE của bot) của một tín hiệu – đơn vị gom cụm của sai số chuẩn."""
+    return time.strftime("%Y-%m-%d", time.localtime(float(ts or 0)))
+
+
+def _tstat(vals, days=None):
+    """(sai số chuẩn, t = trung bình / sai số chuẩn) của trung bình `vals`. t kẹp ±99 (mẫu đồng nhất → se = 0).
+    days: ngày của từng giá trị → sai số chuẩn GOM CỤM theo ngày (CR1: G/(G-1) × Σ_ngày (Σ phần dư)² / n²). Tín hiệu cùng
+    ngày tương quan (cùng nhịp BTC, cùng phiên) nên coi chúng độc lập làm sai số chuẩn quá nhỏ, t quá lớn. Mỗi giá trị một
+    ngày thì bằng đúng sai số chuẩn thường. Cần ≥ 2 ngày."""
     n = len(vals)
     if n < 2:
         return 0.0, 0.0
     m = sum(vals) / n
-    var = sum((x - m) ** 2 for x in vals) / (n - 1)
-    se = math.sqrt(var / n)
+    if days is None:
+        var = sum((x - m) ** 2 for x in vals) / (n - 1) / n
+    else:
+        sums = defaultdict(float)
+        for x, d in zip(vals, days):
+            sums[d] += x - m
+        g = len(sums)
+        if g < 2:
+            return 0.0, 0.0
+        var = g / (g - 1) * sum(v * v for v in sums.values()) / (n * n)
+    se = math.sqrt(max(var, 0.0))
     if se <= 1e-12:
         return 0.0, (99.0 if m > 0 else -99.0 if m < 0 else 0.0)
     return se, max(-99.0, min(99.0, m / se))
@@ -64,21 +87,23 @@ def _ref_r(row):
     return v if v is not None else (row.get("outcome_r") or 0)
 
 
-def _agg(rows):
+def _agg(rows, value=None):
+    """Thống kê một nhóm tín hiệu: n, thắng, kỳ vọng (R), sai số chuẩn & t gom cụm theo ngày, số ngày khác nhau."""
     n = len(rows)
     if not n:
-        return {"n": 0, "win": 0, "winrate": 0, "exp_r": 0, "sum_r": 0, "se": 0, "t": 0}
-    rs = [_ref_r(r) for r in rows]
+        return {"n": 0, "win": 0, "winrate": 0, "exp_r": 0, "sum_r": 0, "se": 0, "t": 0, "days": 0}
+    rs = [(value or _ref_r)(r) for r in rows]
+    days = [_day(r.get("ts")) for r in rows]
     wins = sum(1 for x in rs if x > 0)
-    se, t = _tstat(rs)
+    se, t = _tstat(rs, days)
     return {"n": n, "win": wins, "winrate": round(100 * wins / n, 1), "exp_r": round(sum(rs) / n, 3),
-            "sum_r": round(sum(rs), 2), "se": round(se, 3), "t": round(t, 2)}
+            "sum_r": round(sum(rs), 2), "se": round(se, 3), "t": round(t, 2), "days": len(set(days))}
 
 
 def _confident(a, thr, n_min):
-    """Nhóm `a` đủ mẫu, kỳ vọng vượt ngưỡng `thr` (thr > 0: tốt hơn; thr < 0: tệ hơn) VÀ khác 0 có ý nghĩa
-    thống kê (|t| ≥ LEARN_MIN_T). Mẫu nhỏ nhiễu lớn → không hành động."""
-    if a["n"] < n_min:
+    """Nhóm `a` đủ mẫu trải trên ≥ LEARN_MIN_DAYS ngày, kỳ vọng vượt ngưỡng `thr` (thr > 0: tốt hơn; thr < 0: tệ hơn)
+    VÀ khác 0 có ý nghĩa thống kê (|t| ≥ LEARN_MIN_T, t gom cụm theo ngày). Mẫu nhỏ / dồn vài ngày → không hành động."""
+    if a["n"] < n_min or a.get("days", 0) < cfg.LEARN_MIN_DAYS:
         return False
     if thr >= 0 and a["exp_r"] <= thr:
         return False
@@ -87,14 +112,19 @@ def _confident(a, thr, n_min):
     return abs(a.get("t", 0)) >= cfg.LEARN_MIN_T
 
 
-def _paired(diffs, thr, n_min):
-    """So sánh 2 cách trên CÙNG tập tín hiệu (hiệu từng cặp): trung bình hiệu ≥ thr và có ý nghĩa thống kê."""
-    n = len(diffs)
-    if n < n_min:
-        return False, 0.0
+def _paired(pairs, thr, n_min):
+    """So sánh 2 cách trên CÙNG tập tín hiệu: pairs = [(ts, hiệu của cặp)]. Đạt khi đủ mẫu trải trên ≥ LEARN_MIN_DAYS
+    ngày, trung bình hiệu ≥ thr và t (gom cụm theo ngày) ≥ LEARN_MIN_T. Trả về (đạt, trung bình hiệu, se, t, số ngày)."""
+    n = len(pairs)
+    if not n:
+        return False, 0.0, 0.0, 0.0, 0
+    diffs = [d for _, d in pairs]
+    days = [_day(ts) for ts, _ in pairs]
     m = sum(diffs) / n
-    _, t = _tstat(diffs)
-    return (m >= thr and t >= cfg.LEARN_MIN_T), round(m, 3)
+    se, t = _tstat(diffs, days)
+    g = len(set(days))
+    ok = n >= n_min and g >= cfg.LEARN_MIN_DAYS and m >= thr and t >= cfg.LEARN_MIN_T
+    return ok, round(m, 3), round(se, 3), round(t, 2), g
 
 
 def _feat(row):
@@ -102,6 +132,25 @@ def _feat(row):
         return json.loads(row.get("features") or "{}")
     except Exception:
         return {}
+
+
+def _describe_param(k, v):
+    """Mô tả ngắn một tham số tự học đang khác mặc định (cho log / thông báo)."""
+    if k == "trigger_w":
+        return "trọng số " + ", ".join(f"{strategy.TRIGGER_NAMES.get(t, t)} {w:g} → 1" for t, w in v.items())
+    if k == "blocks":
+        return "chặn " + ", ".join(v)
+    if k == "unblocked":
+        return "gỡ chặn sẵn " + ", ".join(v)
+    if k == "min_score":
+        return f"ngưỡng điểm {v:g} → {cfg.MIN_SCORE:g}"
+    if k == "exit_mode":
+        return f"cách thoát {v} → mặc định"
+    if k == "tp1_r":
+        return f"TP1 {v:g}R → {cfg.TP1_R:g}R"
+    if k == "ai_veto_conf":
+        return f"ngưỡng phủ quyết AI {v} → mặc định"
+    return f"{k}={v}"
 
 
 def current_veto_conf():
@@ -127,15 +176,63 @@ class Learner:
         self.last_learn = 0
         self._first = {}        # sid → nến 1m của khung 5m chứa lúc vào (không đổi nữa sau khi khung đóng)
 
-    LEARNED_SCHEMA = 2
+    LEARNED_SCHEMA = 3
+    RESET_FLAG = "learn_reset_3_3"      # kv: đã chạy lần đưa tham số tự học về mặc định của v3.3 (chỉ một lần)
+    NOTICE_KEY = "learn_notice"         # kv: thông báo chờ leader gửi (lúc khởi tạo bot chưa là leader → Notifier bỏ tin)
+    DEFAULTS = {"min_score": None, "trigger_w": {}, "blocks": [], "unblocked": [], "exit_mode": None,
+                "ai_veto_conf": None, "tp1_r": None}
 
     def _migrate(self):
-        """v3.2: tham số do bản cũ học với ngưỡng t ≥ 1.3 (học nhiễu) được đưa về mặc định một lần:
+        """v3.2 (schema < 2): tham số do bản cũ học với ngưỡng t ≥ 1.3 (học nhiễu) được đưa về mặc định một lần:
         bỏ chặn cả phía (short_side/long_side), bỏ chặn luật học được, trả cách thoát / ngưỡng điểm / trọng số trigger
-        về mặc định. Giữ ngưỡng phủ quyết AI (được học nhất quán cả 2 lần) và TP1."""
+        về mặc định. Giữ ngưỡng phủ quyết AI (được học nhất quán cả 2 lần) và TP1.
+        v3.3 (cờ kv RESET_FLAG): mọi tham số tự học trước 3.3 về mặc định – xem _reset_v33."""
         L = strategy.LEARNED
-        if int(L.get("schema") or 1) >= self.LEARNED_SCHEMA:
-            return
+        if int(L.get("schema") or 1) < 2:
+            self._migrate_v32(L)
+        if not self.store.get(self.RESET_FLAG):
+            self._reset_v33(L)
+
+    def _reset_v33(self, L):
+        """Một lần (cờ kv RESET_FLAG, dùng chung khi nhiều instance chung DB): đưa MỌI tham số tự học về mặc định, xoá thời
+        gian chờ, bỏ các đề xuất đang chờ duyệt. Chúng được học bằng thống kê sai của bản trước 3.3: tín hiệu luật chặn sẵn
+        đã chặn vẫn được tính cho trọng số trigger (pullback 0.82: 22/32 tín hiệu đã bị chặn sẵn), sai số chuẩn coi tín hiệu
+        cùng ngày là độc lập (32 tín hiệu của 3 ngày, t ≈ -2.04), không cần số ngày tối thiểu, trọng số pullback bị bỏ qua
+        ở nửa số tín hiệu, giá vào cũ và phí 0.15%. Ghi log, lịch sử tự học, và thông báo (leader gửi ở tick đầu tiên)."""
+        old = {k: L.get(k) for k in self.DEFAULTS}
+        changed = {k: v for k, v in old.items() if v not in (None, [], {})}
+        L.update({k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+                  for k, v in self.DEFAULTS.items()})
+        L["schema"] = self.LEARNED_SCHEMA
+        self.store.set("learned", L)
+        self.store.set("learn_last", {})
+        dropped = 0
+        for r in self.store.learn_log(500):
+            if r["status"] == "pending":
+                self.store.set_learn_status(r["ts"], "rejected")
+                dropped += 1
+        if changed or dropped:
+            what = ", ".join(_describe_param(k, v) for k, v in changed.items()) or "không có tham số nào đang khác mặc định"
+            reason = (f"v3.3: đưa tham số tự học về mặc định ({what}"
+                      + (f"; bỏ {dropped} đề xuất chờ duyệt" if dropped else "") + "). Chúng được học bằng thống kê cũ: "
+                      "tính cả tín hiệu luật chặn sẵn đã chặn, coi tín hiệu cùng ngày là độc lập, phí 0,15% và giá vào cũ. "
+                      f"Từ nay mỗi thay đổi cần ≥ {cfg.LEARN_MIN_SAMPLES} mẫu trải trên ≥ {cfg.LEARN_MIN_DAYS} ngày, "
+                      f"t ≥ {cfg.LEARN_MIN_T:g} tính theo ngày.")
+            self.store.add_learn("migrate", "v3.3", old, self.DEFAULTS, reason, 0, 0, "applied")
+            self.store.set(self.NOTICE_KEY, "🧬 TỰ HỌC – " + reason)
+            log.info("Tự học: %s", reason)
+        else:
+            log.info("Tự học v3.3: tham số tự học đang ở mặc định – không cần đưa về")
+        self.store.set(self.RESET_FLAG, time.time())
+
+    def _flush_notice(self):
+        """Gửi thông báo đang chờ (lần đưa về mặc định v3.3) qua kênh thông báo thường – chỉ leader gọi tick()."""
+        msg = self.store.get(self.NOTICE_KEY)
+        if msg:
+            self.store.set(self.NOTICE_KEY, None)
+            self.notify(msg)
+
+    def _migrate_v32(self, L):
         old = {k: L.get(k) for k in ("blocks", "unblocked", "exit_mode", "min_score", "trigger_w")}
         changed = any(old[k] for k in old)
         L.update({"blocks": [], "unblocked": [], "exit_mode": None, "min_score": None, "trigger_w": {},
@@ -175,8 +272,8 @@ class Learner:
                     continue            # chưa đọc được nến 1m lúc vào – để lượt sau, không mô phỏng lẫn giá trước lúc vào
                 res = self._simulate_all(it, candles, cost_frac, first)
                 if res:
-                    outcome, r, rf, rh, rt, rv = res
-                    self.store.set_outcome(it["sid"], outcome, r, rf, rh, rt, rv)
+                    outcome, r, rf, rh, rt, rv, ra = res
+                    self.store.set_outcome(it["sid"], outcome, r, rf, rh, rt, rv, ra)
                     self._first.pop(it["sid"], None)
                     done += 1
         if done:
@@ -201,36 +298,42 @@ class Learner:
 
     @staticmethod
     def _simulate_all(it, candles, cost_frac, first=None):
-        """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1. Kết quả chính (outcome/R) theo cách bot đang dùng.
-        Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ thoát kiểu fixed.
+        """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1 + biến thể A/B "SL 2.5 ATR + bám sóng toàn bộ" (exits.ALT_*).
+        Kết quả chính (outcome/R) theo cách bot đang dùng. Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ
+        thoát kiểu fixed, không có biến thể (SL/TP của range là một setup khác).
         v3.3 – cùng giá & phí với lệnh paper: vào ở it["entry"] (giá last lúc quyết định) trượt SLIPPAGE, 1R/TP1 tính
-        từ giá khớp đó, trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper.
-        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate)."""
+        từ giá khớp đó, trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper. ATR là ATR
+        đúng của tín hiệu (features.atr, như lệnh paper); tín hiệu ghi trước khi có trường này dùng atr_pct (đã làm tròn).
+        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate).
+        Trả về (outcome, R, R fixed, R hybrid, R trail, {TP1: R}, R biến thể) hoặc None nếu chưa kết thúc."""
         side, sl = it["side"], it["sl"]
         if not it["entry"] or not sl:
-            return "NODATA", 0.0, None, None, None, None
+            return "NODATA", 0.0, None, None, None, None, None
         sign = 1 if side == "long" else -1
         entry = costs.entry_fill(side, it["entry"])
         if (entry - sl) * sign <= 0:        # giá khớp đã vượt SL – không vào được (engine.fill_check)
-            return "NODATA", 0.0, None, None, None, None
+            return "NODATA", 0.0, None, None, None, None, None
         try:
             f = json.loads(it.get("features") or "{}")
         except Exception:
             f = {}
-        atr = (f.get("atr_pct") or 0) / 100 * entry
+        atr = float(f.get("atr") or 0) or (f.get("atr_pct") or 0) / 100 * entry
         if atr <= 0:
             atr = abs(entry - sl) / cfg.ATR_SL_MULT
         is_range = f.get("setup") == "range"
         tp_fixed = it.get("tp") if is_range else None
         if is_range and tp_fixed and ((tp_fixed - entry) * sign <= 0 or (tp_fixed - it["entry"]) * sign <= 0):
-            return "NODATA", 0.0, None, None, None, None    # giá đã vượt TP cố định – paper cũng không vào
+            return "NODATA", 0.0, None, None, None, None, None    # giá đã vượt TP cố định – paper cũng không vào
         jobs = {m: dict(mode=("fixed" if is_range else m), tp_fixed=tp_fixed) for m in exits.MODES}
         if not is_range:
             for v in exits.TP1_CANDIDATES:
                 jobs[f"tp1:{v}"] = dict(mode="hybrid", tp1_r=v)
+            # biến thể A/B: SL từ giá đóng nến tín hiệu như strategy._levels với 2.5 ATR, vào cùng giá khớp, bám sóng toàn bộ
+            jobs["alt"] = dict(mode=exits.ALT_MODE,
+                               sl=exits.alt_sl(side, float(f.get("signal_close") or it["entry"]), sl, atr))
         res = {}
         for k, j in jobs.items():
-            res[k] = exits.simulate(side, entry, sl, atr, j["mode"], it["ts"], candles, cost_frac,
+            res[k] = exits.simulate(side, entry, j.get("sl", sl), atr, j["mode"], it["ts"], candles, cost_frac,
                                     tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"), first=first)
         # hết dữ liệu mà chưa kết thúc → sau RUNNER_MAX_HOLD_HOURS + 1h thì đóng theo giá cuối
         age = time.time() - it["ts"]
@@ -239,15 +342,15 @@ class Learner:
             if age <= cfg.RUNNER_MAX_HOLD_HOURS * 3600 + 3600 or not candles:
                 return None
             last = float(candles[-1][4])
-            risk = abs(entry - sl)
-            move = ((last - entry) if side == "long" else (entry - last)) / risk - cost_frac * entry / risk
             for k in unfinished:
+                risk = abs(entry - jobs[k].get("sl", sl))
+                move = ((last - entry) if side == "long" else (entry - last)) / risk - cost_frac * entry / risk
                 res[k] = ("TIMEOUT", round(move, 3))
         rv = {k.split(":")[1]: res[k][1] for k in res if k.startswith("tp1:")} or None
         from .engine import current_exit_mode
         main = current_exit_mode()
         o, r = res["fixed"] if is_range else res[main]
-        return o, r, res["fixed"][1], res["hybrid"][1], res["trail"][1], rv
+        return o, r, res["fixed"][1], res["hybrid"][1], res["trail"][1], rv, (res["alt"][1] if "alt" in res else None)
 
     # ================================================================ 2. thống kê
     def compute_stats(self):
@@ -260,11 +363,17 @@ class Learner:
         cur = [r for r in rows if "entry_ref" in _feat(r)]
         legacy, rows = len(rows) - len(cur), cur
         tech = [r for r in rows if r["source"] in TECH_SOURCES]
+        ab = strategy.active_blocks()
+        # v3.3: trọng số trigger và ngưỡng điểm chỉ đổi điểm của tín hiệu KHÔNG bị luật đang chặn – tín hiệu luật chặn (sẵn
+        # hoặc tự học) không vào lệnh được dù điểm thế nào, nên không được quyết định chúng (bản cũ: pullback 0.82 từ 32 tín
+        # hiệu, 22 trong đó vốn đã bị luật chặn sẵn). Thống kê theo luật (chặn / gỡ chặn) vẫn dùng mọi tín hiệu.
+        open_ = [r for r in tech if not (set(strategy.matching_rules(r["side"], _feat(r))) & ab)]
         st = {"ts": time.time(), "window_days": cfg.LEARN_WINDOW_DAYS, "legacy_excluded": legacy,
-              "total": _agg(rows), "tech": _agg(tech),
+              "min_days": cfg.LEARN_MIN_DAYS, "total": _agg(rows), "tech": _agg(tech),
+              "trigger_blocked_excluded": len(tech) - len(open_),
               "pending": len(self.store.pending_signals(500)), "by_source": {}, "by_side": {},
               "by_trigger": {}, "by_rule": {}, "by_score": {}, "by_session": {}}
-        for src in list(TECH_SOURCES) + ["below_score"]:
+        for src in list(TECH_SOURCES) + ["below_score"]:     # mọi nguồn, kể cả slot_taken / max_positions (v3.3)
             sub = [r for r in rows if r["source"] == src]
             if sub:
                 st["by_source"][src] = {**_agg(sub), "name": SOURCE_NAMES.get(src, src)}
@@ -274,10 +383,11 @@ class Learner:
         rule = defaultdict(list)
         sess = defaultdict(list)
         score = defaultdict(list)
+        for r in open_:
+            for k in dict.fromkeys(_feat(r).get("triggers") or []):
+                trig[k].append(r)
         for r in tech:
             f = _feat(r)
-            for k in f.get("triggers") or []:
-                trig[k].append(r)
             for k in strategy.matching_rules(r["side"], f):
                 rule[k].append(r)
             h = f.get("hour", 12)
@@ -288,7 +398,6 @@ class Learner:
                 score[f"{math.floor((r['score'] or 0) * 2) / 2:.1f}"].append(r)
         st["by_trigger"] = {k: {**_agg(v), "name": strategy.TRIGGER_NAMES.get(k, k),
                                 "weight": (strategy.LEARNED.get("trigger_w") or {}).get(k, 1.0)} for k, v in trig.items()}
-        ab = strategy.active_blocks()
         st["by_rule"] = {k: {**_agg(v), "name": strategy.RULES[k][0], "blocked": k in ab}
                          for k, v in rule.items()}
         for k in ab:
@@ -298,14 +407,23 @@ class Learner:
         # So sánh cách thoát lệnh trên cùng tập tín hiệu kỹ thuật
         both = [r for r in tech if r.get("r_fixed") is not None and r.get("r_hybrid") is not None and r.get("r_trail") is not None]
         from .engine import current_exit_mode
-        st["exit_compare"] = {"n": len(both), "current": current_exit_mode(), "configured": cfg.EXIT_MODE,
+        cur_mode = current_exit_mode()
+        st["exit_compare"] = {"n": len(both), "current": cur_mode, "configured": cfg.EXIT_MODE,
                               "modes": {m: {"exp_r": round(sum(r[f"r_{m}"] for r in both) / len(both), 3) if both else 0,
                                             "sum_r": round(sum(r[f"r_{m}"] for r in both), 2),
                                             "winrate": round(100 * sum(1 for r in both if r[f"r_{m}"] > 0) / len(both), 1) if both else 0,
                                             "best": round(max((r[f"r_{m}"] for r in both), default=0), 2)}
                                         for m in exits.MODES}}
+        # v3.3: biến thể A/B "SL 2.5 ATR + bám sóng toàn bộ" trên CÙNG tín hiệu (setup xu hướng có kết quả biến thể) –
+        # chỉ để so sánh, bộ tự học không chuyển sang. Hiệu từng cặp với cách đang dùng, sai số chuẩn gom cụm theo ngày.
+        alt = [r for r in both if r.get("r_sl25_trail") is not None]
+        _, d_m, d_se, d_t, d_days = _paired([(r["ts"], r["r_sl25_trail"] - r[f"r_{cur_mode}"]) for r in alt], 0, 1)
+        st["exit_compare"]["alt"] = {**_agg(alt, value=lambda r: r["r_sl25_trail"]), "name": exits.ALT_NAME,
+                                     "best": round(max((r["r_sl25_trail"] for r in alt), default=0), 2),
+                                     "cur_exp_r": round(sum(r[f"r_{cur_mode}"] for r in alt) / len(alt), 3) if alt else 0,
+                                     "diff": d_m, "diff_se": d_se, "diff_t": d_t, "diff_days": d_days}
         # So sánh các mức TP1 (hybrid) – chọn theo LỢI NHUẬN KỲ VỌNG, không chỉ tỉ lệ thắng
-        tv = self._tp1_vals(tech)
+        tv = [d for _, d in self._tp1_vals(tech)]
         lv = {}
         for x in exits.TP1_CANDIDATES:
             vals = [d[str(x)] for d in tv if d.get(str(x)) is not None]
@@ -327,6 +445,7 @@ class Learner:
 
     @staticmethod
     def _tp1_vals(tech):
+        """[(ts, {mức TP1: R})] của các tín hiệu có kết quả hybrid theo từng mức TP1."""
         out = []
         for r in tech:
             try:
@@ -334,7 +453,7 @@ class Learner:
             except Exception:
                 v = None
             if v:
-                out.append(v)
+                out.append((r["ts"], v))
         return out
 
     # ================================================================ 3. tự điều chỉnh
@@ -351,6 +470,11 @@ class Learner:
         if self.mode == "off":
             return []
         st, rows, tech = self.compute_stats()
+        ab = strategy.active_blocks()
+
+        def unblocked(r):
+            return not (set(strategy.matching_rules(r["side"], _feat(r))) & ab)
+
         N = cfg.LEARN_MIN_SAMPLES
         L = strategy.LEARNED
         proposals = []
@@ -365,12 +489,15 @@ class Learner:
                 continue
             if k not in blocks and _confident(v, -0.25, need):
                 proposals.append(dict(kind="block", key=k, old=False, new=True, n=v["n"], exp=v["exp_r"],
-                                      reason=f"Nhóm \"{v['name']}\": {v['n']} tín hiệu, kỳ vọng {v['exp_r']:+.2f}R, thắng {v['winrate']}% → chặn"))
+                                      reason=f"Nhóm \"{v['name']}\": {v['n']} tín hiệu / {v['days']} ngày, kỳ vọng {v['exp_r']:+.2f}R "
+                                             f"(t {v['t']:+.1f}), thắng {v['winrate']}% → chặn"))
             elif k in blocks and _confident(v, 0.1, need):
                 proposals.append(dict(kind="unblock", key=k, old=True, new=False, n=v["n"], exp=v["exp_r"],
-                                      reason=f"Nhóm \"{v['name']}\" đã cải thiện: {v['n']} tín hiệu, kỳ vọng {v['exp_r']:+.2f}R → bỏ chặn"))
+                                      reason=f"Nhóm \"{v['name']}\" đã cải thiện: {v['n']} tín hiệu / {v['days']} ngày, kỳ vọng "
+                                             f"{v['exp_r']:+.2f}R (t {v['t']:+.1f}) → bỏ chặn"))
 
-        # b) trọng số trigger
+        # b) trọng số trigger – by_trigger chỉ gồm tín hiệu không bị luật đang chặn (compute_stats); áp dụng theo
+        # strategy.trigger_group_weights (trung bình trong nhóm) nên trọng số học được luôn có tác dụng
         tw = dict(L.get("trigger_w") or {})
         for k, v in st["by_trigger"].items():
             if v["n"] < N or self._cool("trig:" + k):
@@ -383,13 +510,14 @@ class Learner:
             new = round(cur + max(-0.2, min(0.2, target - cur)), 2)
             if abs(new - cur) >= 0.1:
                 proposals.append(dict(kind="trigger_w", key=k, old=cur, new=new, n=v["n"], exp=v["exp_r"],
-                                      reason=f"Trigger \"{v['name']}\": {v['n']} tín hiệu, kỳ vọng {v['exp_r']:+.2f}R → trọng số {cur} → {new}"))
+                                      reason=f"Trigger \"{v['name']}\": {v['n']} tín hiệu không bị luật chặn / {v['days']} ngày, "
+                                             f"kỳ vọng {v['exp_r']:+.2f}R (t {v['t']:+.1f}) → trọng số {cur} → {new}"))
 
-        # c) ngưỡng điểm
+        # c) ngưỡng điểm – chỉ tín hiệu không bị luật đang chặn (ngưỡng không đổi được số phận tín hiệu bị chặn)
         cur = L.get("min_score") or cfg.MIN_SCORE
         if not self._cool("min_score"):
-            below = [r for r in rows if r["source"] == "below_score" and (r["score"] or 0) >= cur - 1]
-            just = [r for r in tech if cur <= (r["score"] or 0) < cur + 1]
+            below = [r for r in rows if r["source"] == "below_score" and (r["score"] or 0) >= cur - 1 and unblocked(r)]
+            just = [r for r in tech if cur <= (r["score"] or 0) < cur + 1 and unblocked(r)]
             a, b = _agg(below), _agg(just)
             if _confident(a, 0.15, N) and cur - 0.5 >= 4.0:
                 proposals.append(dict(kind="min_score", key="min_score", old=cur, new=cur - 0.5, n=a["n"], exp=a["exp_r"],
@@ -407,7 +535,7 @@ class Learner:
         if cfg.EXIT_MODE == "auto" and len(both) >= need_exit and not self._cool("exit_mode"):
             cur = L.get("exit_mode") or "hybrid"
             best = max(exits.MODES, key=lambda m: ec["modes"][m]["exp_r"])
-            ok, _ = _paired([r[f"r_{best}"] - r[f"r_{cur}"] for r in both], 0.25, need_exit)
+            ok = _paired([(r["ts"], r[f"r_{best}"] - r[f"r_{cur}"]) for r in both], 0.25, need_exit)[0]
             if best != cur and ok:
                 proposals.append(dict(kind="exit_mode", key="exit_mode", old=cur, new=best, n=ec["n"], exp=ec["modes"][best]["exp_r"],
                                       reason=f"Cách thoát \"{EXIT_NAMES[best]}\" cho {ec['modes'][best]['exp_r']:+.2f}R/tín hiệu so với \"{EXIT_NAMES[cur]}\" {ec['modes'][cur]['exp_r']:+.2f}R trên {ec['n']} tín hiệu → chuyển"))
@@ -423,8 +551,8 @@ class Learner:
                 best = max(lv, key=lambda k: lv[k]["exp_r"])
                 cur_k = f"{cur:g}"
                 cur_exp = lv.get(cur_k, {}).get("exp_r", -9)
-                pairs = [(d.get(best), d.get(cur_k)) for d in self._tp1_vals(tech)]
-                ok, _ = _paired([a - b for a, b in pairs if a is not None and b is not None], 0.15, max(N, 40))
+                pairs = [(ts, d.get(best), d.get(cur_k)) for ts, d in self._tp1_vals(tech)]
+                ok = _paired([(ts, a - b) for ts, a, b in pairs if a is not None and b is not None], 0.15, max(N, 40))[0]
                 if float(best) != cur and ok:
                     proposals.append(dict(kind="tp1_r", key="tp1_r", old=cur, new=float(best), n=tc["n"], exp=lv[best]["exp_r"],
                                           reason=f"TP1 {best}R cho {lv[best]['exp_r']:+.2f}R/lệnh (thắng {lv[best]['winrate']}%) "
@@ -570,6 +698,7 @@ class Learner:
         L = strategy.LEARNED
         return {
             "mode": self.mode, "min_samples": cfg.LEARN_MIN_SAMPLES, "window_days": cfg.LEARN_WINDOW_DAYS,
+            "min_days": cfg.LEARN_MIN_DAYS, "min_t": cfg.LEARN_MIN_T,
             "params": {"min_score": L.get("min_score") or cfg.MIN_SCORE, "min_score_default": cfg.MIN_SCORE,
                        "trigger_w": L.get("trigger_w") or {}, "blocks": sorted(strategy.active_blocks()),
                        "exit_mode": L.get("exit_mode"), "ai_veto_conf": current_veto_conf(),
@@ -584,6 +713,10 @@ class Learner:
 
     # ================================================================ 6. chu kỳ
     def tick(self):
+        try:
+            self._flush_notice()
+        except Exception as e:
+            log.warning("learn notice: %s", e)
         now = time.time()
         if now - self.last_resolve > 300:
             self.last_resolve = now

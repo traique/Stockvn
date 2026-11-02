@@ -116,7 +116,10 @@ class Store:
         # cột bổ sung (migration nhẹ, an toàn khi chạy lại)
         self._add_cols("signals", [("sid", "TEXT"), ("source", "TEXT"), ("entry", real), ("sl", real), ("tp", real),
                                    ("features", "TEXT"), ("outcome", "TEXT"), ("outcome_r", real), ("outcome_ts", real),
-                                   ("r_fixed", real), ("r_hybrid", real), ("r_trail", real), ("r_tp1v", "TEXT")])
+                                   ("r_fixed", real), ("r_hybrid", real), ("r_trail", real), ("r_tp1v", "TEXT"),
+                                   # v3.3: biến thể so sánh A/B "SL 2.5 ATR + bám sóng toàn bộ" trên cùng tín hiệu (exits.ALT_*)
+                                   ("r_sl25_trail", real)])
+        self._add_cols("scans", [("n_open", "INTEGER")])    # v3.3: số lệnh mở khi quét lúc đã đủ lệnh (0 = còn chỗ)
         self._add_cols("trades", [("tp1", real), ("tp1_done", "INTEGER"), ("peak", real), ("peak_ts", real),
                                   ("realized", real), ("atr", real), ("notional0", real), ("exit_mode", "TEXT"),
                                   ("sl0", real), ("risk_mult", real), ("tp1_ts", real),
@@ -237,15 +240,20 @@ class Store:
 
     # ---- signals
     def log_signal(self, sig, ai, taken, source="ai"):
-        """source: taken | ai_weak | ai_override | ai_rejected | ai_error | skipped | not_sent | below_score | blocked
+        """source: taken | ai_weak | ai_override | ai_rejected | ai_error | skipped | not_sent | slot_taken | max_positions |
+        below_score | blocked
         v3.3: entry = giá last MỚI lúc quyết định (sig.ref_price – cùng giá lệnh paper/live vào), ts = lúc lấy giá đó;
-        giá đóng nến 15m tín hiệu giữ ở features.signal_close. Bộ tự học mô phỏng từ entry ± trượt giá như paper."""
+        giá đóng nến 15m tín hiệu giữ ở features.signal_close, ATR đúng (không làm tròn) ở features.atr. Bộ tự học mô phỏng
+        từ entry ± trượt giá như paper. hour = giờ (TIMEZONE) của ts – luật phiên giờ xét theo lúc quyết định."""
         import uuid
+        ts = getattr(sig, "ref_ts", None) or time.time()
         feats = {k: v for k, v in (sig.context or {}).items() if k != "last_candles"}
         feats["triggers"] = list(getattr(sig, "triggers", []) or [])
         feats["reasons"] = sig.reasons
         feats["rr"] = round(sig.rr, 2)
-        feats["hour"] = time.localtime().tm_hour
+        feats["hour"] = time.localtime(ts).tm_hour
+        if getattr(sig, "atr", None):
+            feats["atr"] = sig.atr
         if getattr(sig, "rejected", ""):
             feats["rejected"] = sig.rejected
         ref = getattr(sig, "ref_price", None)
@@ -255,7 +263,7 @@ class Store:
             feats["skip"] = sig.skip
         self.db.run("""INSERT INTO signals(ts, symbol, side, score, ai_decision, ai_conf, ai_reason, ai_model, taken,
                        sid, source, entry, sl, tp, features, outcome) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            getattr(sig, "ref_ts", None) or time.time(), sig.symbol, sig.side, sig.score,
+            ts, sig.symbol, sig.side, sig.score,
             (ai or {}).get("decision"), (ai or {}).get("confidence"),
             (ai or {}).get("reason"), (ai or {}).get("model"), int(taken),
             uuid.uuid4().hex[:12], source, ref or sig.price, sig.sl, sig.tp, json.dumps(feats, ensure_ascii=False),
@@ -265,12 +273,13 @@ class Store:
         return self.db.run("SELECT * FROM signals WHERE outcome='PENDING' AND ts < ? ORDER BY ts LIMIT ?",
                            (time.time() - 300, limit), fetch=True)
 
-    def set_outcome(self, sid, outcome, r, r_fixed=None, r_hybrid=None, r_trail=None, r_tp1v=None):
-        """r_tp1v: {"1.0": R, "1.3": R, ...} – kết quả hybrid với từng mức TP1 (để tự học chọn TP1 lời nhất)."""
-        self.db.run("""UPDATE signals SET outcome=?, outcome_r=?, outcome_ts=?, r_fixed=?, r_hybrid=?, r_trail=?, r_tp1v=?
-                       WHERE sid=?""",
+    def set_outcome(self, sid, outcome, r, r_fixed=None, r_hybrid=None, r_trail=None, r_tp1v=None, r_sl25_trail=None):
+        """r_tp1v: {"1.0": R, "1.3": R, ...} – kết quả hybrid với từng mức TP1 (để tự học chọn TP1 lời nhất).
+        r_sl25_trail: R của biến thể "SL 2.5 ATR + bám sóng toàn bộ" (chỉ để so sánh, không tự áp dụng)."""
+        self.db.run("""UPDATE signals SET outcome=?, outcome_r=?, outcome_ts=?, r_fixed=?, r_hybrid=?, r_trail=?, r_tp1v=?,
+                       r_sl25_trail=? WHERE sid=?""",
                     (outcome, r, time.time(), r_fixed, r_hybrid, r_trail,
-                     json.dumps(r_tp1v) if r_tp1v else None, sid))
+                     json.dumps(r_tp1v) if r_tp1v else None, r_sl25_trail, sid))
 
     def resolved_signals(self, since=0):
         return self.db.run("""SELECT * FROM signals WHERE outcome IS NOT NULL AND outcome NOT IN ('PENDING','NODATA')
@@ -294,9 +303,10 @@ class Store:
 
     # ---- lịch sử quét
     def add_scan(self, s):
-        self.db.run("INSERT INTO scans VALUES(?,?,?,?,?,?)", (s["ts"], s["scanned"], s["passed"],
-                    json.dumps(s["reasons"], ensure_ascii=False), json.dumps(s["near"], ensure_ascii=False),
-                    json.dumps(s["top"], ensure_ascii=False)))
+        self.db.run("INSERT INTO scans(ts, scanned, passed, reasons, near, top, n_open) VALUES(?,?,?,?,?,?,?)",
+                    (s["ts"], s["scanned"], s["passed"], json.dumps(s["reasons"], ensure_ascii=False),
+                     json.dumps(s["near"], ensure_ascii=False), json.dumps(s["top"], ensure_ascii=False),
+                     int(s.get("n_open") or 0)))
 
     def scans(self, limit=100):
         rows = self.db.run("SELECT * FROM scans ORDER BY ts DESC LIMIT ?", (limit,), fetch=True)

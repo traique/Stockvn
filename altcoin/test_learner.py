@@ -31,9 +31,15 @@ print(f"✓ mô phỏng đúng: sóng 6R → TP cố định {rf:+.2f}R, ăn só
 st = Store(); notes = []
 lr = Learner(st, None, None, notes.append)
 random.seed(1)
-def add(side, htf_rsi, trig, score, R, source):
-    sig = Signal("X/USDT:USDT", side, score, 100, 1, 98 if side == "long" else 102, 104 if side == "long" else 96, [], 
-                 {"htf_rsi": htf_rsi, "bb_pos": 0.5, "adx": 30, "change24h": 0, "hour": 15}, triggers=[trig])
+# v3.3: bộ tự học cần mẫu trải trên ≥ LEARN_MIN_DAYS ngày và t gom cụm theo ngày → dữ liệu giả rải đều 10 ngày gần nhất, lúc
+# 21h (giờ của bot) – phiên không bị luật chặn sẵn nào chặn (tín hiệu bị chặn không được tính cho trọng số trigger / ngưỡng)
+DAY0 = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
+_k = [0]
+def add(side, htf_rsi, trig, score, R, source, day=None, hour=21):
+    sig = Signal("X/USDT:USDT", side, score, 100, 1, 98 if side == "long" else 102, 104 if side == "long" else 96, [],
+                 {"htf_rsi": htf_rsi, "bb_pos": 0.5, "adx": 30, "change24h": 0, "hour": hour}, triggers=[trig])
+    k = _k[0]; _k[0] += 1
+    sig.ref_ts = DAY0 - (1 + (k % 10 if day is None else day)) * 86400 + hour * 3600 + k % 3000
     st.log_signal(sig, None, source == "taken", source=source)
     sid = st.db.run("SELECT sid FROM signals ORDER BY rowid DESC LIMIT 1", fetch=True)[0]["sid"]
     st.set_outcome(sid, "TP" if R > 0 else "SL", R)
@@ -178,8 +184,10 @@ want = -1 - (2 * cfg.TAKER_FEE + cfg.SLIPPAGE) * E / (E - 0.997)
 assert abs(row["r_hybrid"] - want) < 1e-3, ("bộ tự học phải dùng cùng giá khớp & phí với paper", row["r_hybrid"], want)
 print(f"✓ v3.3: bộ tự học trừ đủ phí + trượt giá hai chiều ({row['r_hybrid']:+.3f}R khi chạm SL cách 0.5%)")
 
+# (cuối đường giá thủng sâu: biến thể SL 2.5 ATR cũng kết thúc – tín hiệu chỉ có kết quả khi MỌI cách thoát đã xong)
 t, rp, row = paper_vs_shadow("SLX/USDT:USDT", lambda t: [bar(1, 1.002, 1.003, 1.0, 1.001), bar(2, 1.001, 1.002, 0.989, 0.991)] +
-                             [bar(i, 0.991, 0.992, 0.99, 0.991) for i in range(3, 61)])
+                             [bar(i, 0.991, 0.992, 0.99, 0.991) for i in range(3, 50)] +
+                             [bar(i, 0.985, 0.986, 0.98, 0.985) for i in range(50, 61)])
 f = json.loads(row["features"])
 assert row["entry"] == 1.002 and f["signal_close"] == 1.0 and f["entry_ref"] == "last", (row["entry"], f)
 risk = t["entry"] - 0.990
@@ -268,7 +276,7 @@ assert row["outcome"] == "TRAIL" and abs(row["r_hybrid"] - rp) < 0.01, ("râu tr
                                                                           row["r_hybrid"], rp)
 # chạm SL ở phút 4 – SAU lúc vào, cùng khung 5m; OKX chỉ trả nến 5m mở từ lúc vào → phải lấy nến 1m của khung đó
 rows = [m1(k, 1.002, 1.0025, 1.0015, 1.002) for k in range(0, 4)] + [m1(4, 1.002, 1.0025, 0.989, 0.995)] + \
-       [m1(k, 0.995, 0.996, 0.994, 0.995) for k in range(5, 60)]
+       [m1(k, 0.995, 0.996, 0.994, 0.995) for k in range(5, 50)] + [m1(k, 0.985, 0.986, 0.98, 0.985) for k in range(50, 60)]
 t, tr, rp, row = paper_shadow_1m("POST/USDT:USDT", rows, strict=True)
 assert tr["status"] == "closed" and tr["reason_close"] == "Chạm SL", tr
 assert row["outcome"] == "SL" and abs(row["r_hybrid"] - rp) < 0.01, ("SL sau lúc vào trong khung 5m bị bỏ", row["outcome"],
@@ -290,3 +298,141 @@ st.db.run("UPDATE signals SET features=?", (json.dumps({**json.loads(old_f), "en
 props = lr.learn()
 assert any(p["kind"] == "block" and p["key"] == "short_htf_oversold" for p in props), props
 print("✓ review 6: tín hiệu bóng bản trước 3.3 không vào thống kê / đề xuất của bộ tự học (chờ đủ mẫu mới)")
+
+# ======================================================================= v3.3 phần B: thống kê tự học, đưa về mặc định, biến thể A/B
+# Mỗi phần chạy riêng (lỗi một phần không che phần sau) – phần nào đỏ trên code cũ thì in ✗ rồi cả file thoát mã lỗi.
+import traceback
+from bot import learner as LM
+FAILED = []
+
+
+def section(name):
+    def run(fn):
+        try:
+            fn()
+            print("✓", name)
+        except Exception:
+            FAILED.append(name)
+            print("✗", name, "\n" + traceback.format_exc(limit=3))
+        return fn
+    return run
+
+
+def fresh():
+    lr.reset(); lr.mode = "auto"; lr.okx = None
+    st.db.run("DELETE FROM signals"); st.set("learn_last", {})
+
+
+@section("bug 9: t gom cụm theo ngày – 80 tín hiệu dồn theo ngày (t thường -2.2, t theo ngày -0.7) không đổi tham số")
+def _():
+    fresh()
+    for d in range(8):                       # 6 ngày thua cả, 2 ngày thắng cả: chỉ 8 "lần quan sát" độc lập
+        for _i in range(10):
+            add("short", 25, "ema_cross", 6, -1.05 if d < 6 else 1.9, "not_sent", day=d)
+    props = lr.learn()
+    assert not [p for p in props if p["key"] in ("short_htf_oversold", "ema_cross")], props
+    v = lr.last_stats["by_rule"]["short_htf_oversold"]
+    vals = [-1.05] * 60 + [1.9] * 20
+    _, t_iid = LM._tstat(vals)
+    assert t_iid <= -2.0 and v["days"] == 8 and abs(v["t"]) < 1.0, (t_iid, v)
+
+
+@section("bug 9: cần mẫu trải trên ≥ LEARN_MIN_DAYS ngày – 40 tín hiệu thua của 2 ngày không đủ để chặn")
+def _():
+    fresh()
+    for k in range(40):
+        add("short", 25, "ema_cross", 6, -1.05, "not_sent", day=k % 2)
+    props = lr.learn()
+    assert not [p for p in props if p["key"] == "short_htf_oversold"], props
+    v = lr.last_stats["by_rule"]["short_htf_oversold"]
+    assert v["n"] == 40 and v["days"] == 2 and cfg.LEARN_MIN_DAYS > 2, v
+    for k in range(40):                     # cùng dữ liệu trải 10 ngày → đủ điều kiện, chặn
+        add("short", 25, "ema_cross", 6, -1.05, "not_sent", day=2 + k % 8)
+    assert any(p["kind"] == "block" and p["key"] == "short_htf_oversold" for p in lr.learn()), lr.last_stats["by_rule"]
+
+
+@section("bug 9: trọng số trigger & ngưỡng điểm không học từ tín hiệu luật chặn sẵn đã chặn (pullback 0.82: 22/32 bị chặn)")
+def _():
+    fresh()
+    for k in range(30):                      # phiên 13h–19h (chặn sẵn): pullback thua cả
+        add("long", 55, "pullback", 6, -1.05, "blocked", hour=15)
+    for k in range(15):                      # tín hiệu vào lệnh được: pullback hoà vốn
+        add("long", 55, "pullback", 6, [1.9, -1.05, -1.05][k % 3], "not_sent")
+    for k in range(20):                      # suýt đạt nhưng bị chặn sẵn: thắng – hạ ngưỡng cũng không vào được
+        add("long", 55, "macd_cross", 4.5, 1.9, "below_score", hour=15)
+    props = lr.learn()
+    s_ = lr.last_stats
+    assert s_["by_trigger"]["pullback"]["n"] == 15 and s_["trigger_blocked_excluded"] == 30, s_["by_trigger"]
+    assert not [p for p in props if p["kind"] in ("trigger_w", "min_score")], props
+    assert LEARNED["trigger_w"] == {} and LEARNED["min_score"] is None, LEARNED
+
+
+@section("bug 9: một lần đưa tham số học bằng thống kê cũ về mặc định (pullback 0.82) – log, lịch sử, thông báo qua leader")
+def _():
+    fresh()
+    st.db.run("DELETE FROM kv WHERE k IN ('learn_reset_3_3', 'learn_notice')")
+    st.set("learned", {"min_score": None, "trigger_w": {"pullback": 0.82}, "blocks": [], "unblocked": [], "exit_mode": None,
+                       "ai_veto_conf": None, "tp1_r": None, "schema": 2})
+    st.set("learn_last", {"trig:pullback": time.time()})
+    st.add_learn("trigger_w", "vwap_bounce", 1.0, 0.9, "đề xuất cũ", 30, -0.3, "pending")
+    LEARNED.clear(); LEARNED.update(st.get("learned"))
+    notes.clear()
+    lm = Learner(st, None, None, notes.append)
+    assert LEARNED["trigger_w"] == {} and st.get("learned")["trigger_w"] == {} and st.get("learned")["schema"] == 3, LEARNED
+    assert st.get("learn_last") == {} and not [r for r in st.learn_log(50) if r["status"] == "pending"]
+    mig = [r for r in st.learn_log(50) if r["kind"] == "migrate" and r["k"] == "v3.3"]
+    assert len(mig) == 1 and "0.82" in mig[0]["reason"], mig
+    assert not notes, notes                  # lúc khởi tạo bot chưa là leader → chưa gửi, chờ tick của leader
+    lm.tick()
+    assert len([n for n in notes if n.startswith("🧬 TỰ HỌC") and "0.82" in n]) == 1, notes
+    lm2 = Learner(st, None, None, notes.append); lm2.tick()
+    assert len([n for n in notes if "0.82" in n]) == 1 and \
+        len([r for r in st.learn_log(50) if r["kind"] == "migrate" and r["k"] == "v3.3"]) == 1, "chỉ chạy một lần"
+
+
+@section("biến thể A/B: ghi R của 'SL 2.5 ATR + bám sóng' trên mọi tín hiệu bóng xu hướng, so sánh trên trang tự học")
+def _():
+    fresh()
+    E = 1.0 * (1 + cfg.SLIPPAGE)
+    cost = costs.after_fill_cost()
+    up = [1.0 + 0.003 * i for i in range(11)]          # 1.000 → 1.030
+    dip = [bar(1, 1.0, 1.001, 0.9995, 1.0), bar(2, 1.0, 1.0005, 0.9885, 0.995)]  # thủng SL 0.99, chưa tới 0.9875
+    rally = [bar(3 + i, up[i - 1] if i else 0.995, up[i], min(up[i - 1] if i else 0.995, up[i]), up[i]) for i in range(11)]
+    hold = [bar(i, 1.028, 1.03, 1.026, 1.028) for i in range(14, 21)]
+    dn = [1.028 - 0.003 * i for i in range(21)]        # rơi dần (không nhảy cóc qua SL/trailing): 1.028 → 0.968
+    drop = [bar(21 + i, dn[i], dn[i], dn[i + 1], dn[i + 1]) for i in range(20)] + \
+           [bar(i, 0.968, 0.969, 0.966, 0.968) for i in range(41, 61)]
+    path = dip + rally + hold + drop
+    dive = [bar(1, 1.0, 1.001, 0.9995, 1.0), bar(2, 1.0, 1.0, 0.97, 0.975)] + \
+           [bar(i, 0.975, 0.976, 0.97, 0.975) for i in range(3, 61)]      # nến 2 mở trên SL rồi thủng cả hai SL
+
+    def shadow(sym, sl, setup="trend", tp=1.015):
+        g = Signal(sym, "long", 6.0, 1.000, 0.005, sl, tp, ["t"], {"setup": setup, "atr_pct": 0.5})
+        g.ref_price, g.ref_ts = 1.000, T0
+        st.log_signal(g, None, False, source="not_sent")
+
+    shadow("AW/USDT:USDT", 0.990)                     # SL 2 ATR: biến thể SL 1.0 - 2.5 × 0.005 = 0.9875
+    shadow("AR/USDT:USDT", 0.990, setup="range", tp=1.01)
+    for sym, p in (("AW", path), ("AR", path)):
+        o = Okx(1.0); o.candles = p; lr.okx = o; lr.resolve_pending()
+    shadow("AD/USDT:USDT", 0.990)                     # thủng sâu: cả hai SL
+    shadow("AS/USDT:USDT", 0.985)                     # SL cấu trúc 3 ATR xa hơn 2.5 ATR → biến thể giữ SL cấu trúc
+    o = Okx(1.0); o.candles = dive; lr.okx = o; lr.resolve_pending()
+    R = {r["symbol"].split("/")[0]: r for r in st.db.run("SELECT * FROM signals", fetch=True)}
+    assert R["AW"]["r_trail"] < -1 and R["AW"]["r_sl25_trail"] > 0.5, (R["AW"]["r_trail"], R["AW"]["r_sl25_trail"])
+    assert R["AR"]["outcome"] != "PENDING" and R["AR"]["r_sl25_trail"] is None, dict(R["AR"])
+    want = -1 - cost * E / (E - 0.9875)
+    assert abs(R["AD"]["r_sl25_trail"] - want) < 1e-3, (R["AD"]["r_sl25_trail"], want)
+    assert abs(R["AS"]["r_sl25_trail"] - R["AS"]["r_trail"]) < 1e-9, (R["AS"]["r_sl25_trail"], R["AS"]["r_trail"])
+    s_ = lr.compute_stats()[0]
+    a = s_["exit_compare"]["alt"]
+    cur = s_["exit_compare"]["current"]
+    trend = [R[k] for k in ("AW", "AD", "AS")]
+    assert a["n"] == 3 and abs(a["exp_r"] - sum(r["r_sl25_trail"] for r in trend) / 3) < 1e-3, a
+    assert abs(a["diff"] - sum(r["r_sl25_trail"] - r[f"r_{cur}"] for r in trend) / 3) < 1e-3, a
+    from bot.dashboard import APP_JS
+    assert "altRow(ec.alt)" in APP_JS and "altNote(" in APP_JS and "max_positions:" in APP_JS and "slot_taken:" in APP_JS
+
+
+assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"
+print("TẤT CẢ OK")

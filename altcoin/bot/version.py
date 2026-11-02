@@ -18,7 +18,7 @@ from pathlib import Path
 
 VERSION = "3.3.0"
 RELEASED = "2026-11-02"
-RELEASE_BUILD = "b97ec07"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "e982e2a"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
@@ -32,6 +32,12 @@ NOTES = (
         "Chạy thật: SL mới mà sàn chưa nhận thì bot tự giữ và đặt lại mỗi lượt; lỗi đọc vị thế hay lệnh đóng lỗi không còn ghi đóng nhầm; đóng lệnh huỷ cả SL/TP loại oco",
         "Chốt TP1 làm tròn theo lot của sàn (1 hợp đồng thì giữ cả), báo giá khớp thật; cột phí ghi đủ hai chiều; risk_mult là rủi ro thật",
         "Tín hiệu bóng và bộ tự học dùng cùng giá vào, phí 0,20% và cách bỏ phút vào lệnh như lệnh chạy ảo; kết quả bóng bản cũ không dùng để học",
+        "Đủ 2 lệnh mở vẫn quét và ghi tín hiệu bóng (không hỏi AI, không vào lệnh); ứng viên xếp sau lệnh vừa vào cũng được ghi bóng",
+        "Chỉ quét hợp đồng crypto theo loại tài sản OKX ghi (instCategory) – bỏ cổ phiếu, dầu (trước: 9/50 mã)",
+        "Trọng số trigger tự học áp dụng cả khi tín hiệu có Pullback lẫn VWAP; log ghi đúng luật chặn sẵn hay luật tự học",
+        "Tự học: không học từ tín hiệu luật đang chặn, cần mẫu ≥ 7 ngày, t tính theo ngày; tham số học bằng thống kê cũ (pullback 0,82) về mặc định một lần, có báo",
+        "Bỏ cổng R:R của setup xu hướng (TP dựng ≥ 1,8R nên không bao giờ chặn); MIN_RR là mức sàn TP cố định",
+        "Tín hiệu bóng ghi thêm kết quả thử nghiệm SL 2,5 ATR + bám sóng, so trên cùng tín hiệu ở trang Tự học (bot không tự chuyển)",
     )),
     ("3.2.1", "2026-10-29", (
         "Chạy trong Stockvn: mục /altcoin/ trên web, lệnh /alt trên bot Telegram và app Zoom của Cổ phiếu",

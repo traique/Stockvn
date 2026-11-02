@@ -89,7 +89,10 @@ class Config:
     MIN_LOT_RISK_MULT = _f("MIN_LOT_RISK_MULT", 2.0)   # lot tối thiểu của sàn làm rủi ro vượt 2× dự tính → bỏ tín hiệu
     MAX_DAILY_LOSS = _f("MAX_DAILY_LOSS", 0.12)        # dừng ngày nếu lỗ 12% vốn đầu ngày (~4 lệnh thua)
     MAX_DRAWDOWN = _f("MAX_DRAWDOWN", 0.30)            # dừng hẳn bot nếu DD từ đỉnh > 30%, chờ /resume
-    MIN_RR = _f("MIN_RR", 1.5)                         # tỉ lệ lời/lỗ tối thiểu
+    # v3.3: MIN_RR là mức sàn của TP cố định (TP ≥ 1.2 × MIN_RR × R, cách thoát fixed), KHÔNG phải cổng lọc: theo cách dựng
+    # R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR nên cổng "RR ≥ MIN_RR" bản cũ không bao giờ chặn (đã bỏ – strategy.min_rr_for).
+    # Setup range có cổng thật: RANGE_MIN_RR.
+    MIN_RR = _f("MIN_RR", 1.5)
     TAKER_FEE = _f("TAKER_FEE", 0.0005)                # OKX taker 0.05%
     SLIPPAGE = _f("SLIPPAGE", 0.0005)                  # mô phỏng trượt giá (mỗi chiều vào/ra – xem costs.py)
     # v3.3: vào lệnh ở giá last MỚI (nến 15m đã đóng vài phút trước). Mặc định chỉ bỏ khi giá khớp đã vượt SL (hoặc vượt TP
@@ -116,7 +119,9 @@ class Config:
 
     # ---- Quét coin ----
     TOP_N_COINS = _i("TOP_N_COINS", 50)
-    # Loại BTC/ETH, stablecoin và các "token hoá" cổ phiếu / hàng hoá / chỉ số mà OKX niêm yết (không phải altcoin)
+    # v3.3: chỉ quét hợp đồng crypto theo instCategory của OKX (exchange.CRYPTO_CATEGORIES – cổ phiếu, dầu, vàng bị loại theo
+    # dữ liệu sàn, không theo tên). Danh sách tên dưới đây là lớp lọc THÊM: BTC/ETH, stablecoin, và các mã cổ phiếu / hàng hoá
+    # phòng khi OKX không ghi instCategory.
     _DEFAULT_EXCLUDE = (
         "BTC,ETH,USDC,USDT,DAI,TUSD,FDUSD,USDE,"
         "XAU,XAG,XPT,XPD,WTI,BRENT,NATGAS,"
@@ -220,6 +225,10 @@ class Config:
     LEARN_EXIT_MIN_SAMPLES = _i("LEARN_EXIT_MIN_SAMPLES", 60)  # đổi cách thoát lệnh cần ≥ 60 tín hiệu so theo cặp
     LEARN_COOLDOWN_H = _f("LEARN_COOLDOWN_H", 48)             # mỗi tham số đổi tối đa 1 lần / 48h (chống nhảy qua lại)
     LEARN_WINDOW_DAYS = _i("LEARN_WINDOW_DAYS", 21)           # chỉ học từ dữ liệu N ngày gần nhất
+    # v3.3: tín hiệu dồn cụm theo ngày (cùng một nhịp thị trường) – mỗi thay đổi cần mẫu trải trên ≥ LEARN_MIN_DAYS ngày
+    # khác nhau, và t tính bằng sai số chuẩn gom cụm theo ngày (bản cũ coi mọi tín hiệu độc lập: trọng số pullback 0.82
+    # học từ 32 tín hiệu của 3 ngày với t ≈ -2.04)
+    LEARN_MIN_DAYS = _i("LEARN_MIN_DAYS", 7)
 
     # ---- Telegram ----
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
