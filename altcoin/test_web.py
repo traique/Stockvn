@@ -48,8 +48,21 @@ assert ver.update_notice(f"{ver.VERSION} {ver.build()}") is None
 assert ver.update_notice("2.9.7 abc1234").startswith("🆕 Bot đã cập nhật: v2.9.7 → v" + ver.VERSION)
 assert "vừa đổi" in ver.update_notice(f"{ver.VERSION} 0000000")
 assert len(ver.build()) == 7 and ver.NOTES[0][0] == ver.VERSION
-# lệnh phienban (/alt phienban qua bot Cổ phiếu) vừa MỘT tin Telegram (bot Cổ phiếu cắt ở 3900 ký tự), chừa chỗ cho thời gian chạy
-assert len(ver.text()) <= 3800, len(ver.text())
+# lệnh phienban (/alt phienban qua bot Cổ phiếu) vừa MỘT tin: bot Cổ phiếu (vnbot.altcoin_bridge) gửi
+# "🪙 Altcoin › phienban\n" + trả lời và cắt mỗi PART = 3500 ký tự (bản 3.3.0 trước sửa: 3714–3768 ký tự → 2 tin)
+try:
+    from vnbot.altcoin_bridge import PART, PREFIX, parts, rewrite
+except ImportError:                     # chạy thẳng trong altcoin/ của Stockvn: vnbot ở thư mục trên
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from vnbot.altcoin_bridge import PART, PREFIX, parts, rewrite
+    except ImportError:                 # bot chạy độc lập, không có Stockvn
+        PART, PREFIX, parts, rewrite = 3500, "🪙 Altcoin › ", None, str
+reply = f"{PREFIX}phienban\n{rewrite(ver.text())}"
+assert len(reply) <= PART - 60, (len(reply), PART)              # chừa chỗ: thời gian chạy, trạng thái bản dựng dài hơn
+assert parts is None or len(parts(reply)) == 1, [len(p) for p in parts(reply)]
+assert all(f"• {n}" in ver.text(limit=0) for n in ver.NOTES[0][2])   # bản mới nhất luôn đủ, bản cũ hơn chỉ khi còn chỗ
+assert f"v{ver.NOTES[1][0]} (" not in ver.text(limit=0) and f"v{ver.NOTES[1][0]} (" in ver.text(limit=10 ** 6)
 print("✓ phiên bản & thông báo cập nhật:", ver.label())
 
 html = ui.page("Thử", ui.hero("Tiêu đề", "mô tả", eyebrow="Nhóm"), active="home")

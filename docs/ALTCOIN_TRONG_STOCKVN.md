@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `b77eb32`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `e7b7082`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -136,7 +136,7 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_OPENROUTER_API_KEY` | trống | Khoá OpenRouter riêng của Altcoin |
 | `ALT_NINEROUTER_BASE_URL`, `ALT_NINEROUTER_API_KEY`, `ALT_NINEROUTER_MODELS` | trống | 9Router riêng của Altcoin |
 | `ALT_CUSTOM_*` | trống | Nhà cung cấp AI tự chọn của Altcoin (không dùng chung với Cổ phiếu) |
-| `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo sau 3.3.0** (mục 10.1) |
+| `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo, đặt sau lần khởi động 3.3.0 đầu tiên** (mục 10.1) |
 
 ### 4.3 AI dùng chung khi thiếu khoá riêng
 
@@ -229,7 +229,7 @@ python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
 python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.3.0.zip
 ```
 
-Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng b77eb32 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng e7b7082 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -292,8 +292,8 @@ Mục đích: thử trên đúng server Botkeep những điểm không thử đ�
 
    Không đặt `ALT_MODE` (paper) và **không** đặt `ALT_DATABASE_URL` (SQLite tạm). Thông báo của canary tới chat của anh/chị với tiêu đề `🪙 Altcoin ›`; muốn im thì tắt **Altcoin · thông báo** trên `/ai#kenh`.
 3. Kiểm tra trong 15–30 phút:
-   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (b77eb32)`. Không có lỗi múi giờ hay "thiếu thư viện".
-   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `b77eb32`, `dropped_secrets` rỗng.
+   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (e7b7082)`. Không có lỗi múi giờ hay "thiếu thư viện".
+   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `e7b7082`, `dropped_secrets` rỗng.
    - [ ] `/health` chỉ có `"altcoin": {"state": "running"}`.
    - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.3.0 "đúng bản phát hành".
    - [ ] Telegram `/alt status`; Zoom `alt status` (1:1) và `/vnbot alt status` (trong kênh) đều được trả lời.
@@ -320,9 +320,9 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 5. Đặt **`ALTCOIN_ENABLED=1`** rồi khởi động lại server Cổ phiếu.
    - Nếu `hub.json` báo `waiting` với "instance khác đang chạy: crypto@<host cũ>": heartbeat của server cũ còn mới (dưới 90 giây). Altcoin tự chạy sau khoảng 100 giây. Nếu vẫn chờ mãi: server cũ (hoặc Render) chưa thật sự dừng.
 6. **Kiểm tra chấp nhận:**
-   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `b77eb32`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
+   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `e7b7082`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
    - [ ] `/health` chỉ có `altcoin.state`.
-   - [ ] `/altcoin/phienban`: 3.3.0, `b77eb32`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
+   - [ ] `/altcoin/phienban`: 3.3.0, `e7b7082`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
    - [ ] `/alt status` được trả lời trên Telegram và trên Zoom (`alt status`, `/vnbot alt status`); `/trangthai` của Cổ phiếu vẫn chạy.
    - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.2.1 → v3.3.0" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
    - [ ] `/alt status` dòng "Instances": chỉ `crypto` còn sống. Dòng cũ (`render`, hoặc `crypto` của server cũ) hiện "(mất liên lạc)": chỉ là hiển thị.
@@ -343,12 +343,13 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 
 ### 10.1 Bốn tuần đo sau 3.3.0 và tiêu chí quyết định
 
-Chẩn đoán 02/11/2026 (đợt lỗ 10 → 9,52 USDT, 30/10–02/11): sổ sách, cỡ lệnh, đòn bẩy đúng; lỗ chủ yếu do một đoạn thị trường xấu cho kiểu vào lệnh hồi về EMA21/VWAP. Nhưng backtest 88 ngày (50 coin, 706 lệnh, code của bot, phí + trượt giá 0,20%/vòng) cho **−0,01R ± 0,07 mỗi lệnh**: chiến lược gần như không có lợi thế sau phí (+0,14R trước phí, phí ≈ 0,15R/lệnh). 1.335 tổ hợp tham số không tổ hợp nào dương ngoài mẫu một cách chắc chắn, và xếp hạng trong mẫu / ngoài mẫu tương quan ngược (−0,56): chỉnh tham số theo dữ liệu gần đây nhiều khả năng gây hại. Bản 3.3.0 chỉ sửa lỗi (giá vào, theo dõi SL/TP1, phí, cỡ lệnh live, quét, tự học, AI) để số liệu đo được là thật; tham số chiến lược giữ nguyên. Trigger breakout được sửa nhưng **giữ tắt** (`BREAKOUT_ENABLED=false`: backtest chỉ có 2 tín hiệu trong 88 ngày, 0 ngoài mẫu – `altcoin/README.md` mục 12).
+Chẩn đoán 02/11/2026 (đợt lỗ 10 → 9,52 USDT, 30/10–02/11): sổ sách, cỡ lệnh, đòn bẩy đúng; lỗ chủ yếu do một đoạn thị trường xấu cho kiểu vào lệnh hồi về EMA21/VWAP. Nhưng backtest 88 ngày (50 coin, 706 lệnh, code của bot, phí + trượt giá 0,20%/vòng) cho **−0,01R ± 0,07 mỗi lệnh**: chiến lược gần như không có lợi thế sau phí (+0,14R trước phí, phí ≈ 0,15R/lệnh). 1.335 tổ hợp tham số không tổ hợp nào dương ngoài mẫu một cách chắc chắn, và xếp hạng trong mẫu / ngoài mẫu tương quan ngược (−0,56): chỉnh tham số theo dữ liệu gần đây nhiều khả năng gây hại. Bản 3.3.0 chỉ sửa lỗi (giá vào, theo dõi SL/TP1, phí, cỡ lệnh live, quét, tự học, AI) để số liệu đo được là thật; tham số chiến lược giữ nguyên. Trigger breakout được sửa nhưng **giữ tắt** (`BREAKOUT_ENABLED=false`: backtest chỉ có 2 tín hiệu trong 88 ngày, 0 ngoài mẫu – `altcoin/README.md` mục 12); tín hiệu chỉ có breakout vẫn được ghi bóng nguồn "Breakout (tắt – chỉ đo)" để có số liệu ngoài mẫu.
 
 **Trong 4 tuần đo:**
 
 - [ ] `ALT_MODE=paper`, không khai thông số giao dịch nào trên panel (xoá `ALT_RISK_PER_TRADE`, `ALT_MIN_SCORE`… nếu còn).
-- [ ] **`ALT_LEARN_MODE=suggest`** trên panel Cổ phiếu, rồi khởi động lại: bộ tự học chỉ đề xuất, không tự đổi tham số trong lúc đo. Cách gọn: lên 3.3.0 trước với `ALT_LEARN_MODE` trống (paper → `auto`: tham số tự học cũ – trọng số pullback 0,82 – tự về mặc định một lần, có tin "🧬 TỰ HỌC – v3.3: …"), rồi mới đặt `suggest`. Nếu đặt `suggest` trước: duyệt đề xuất "Khôi phục" bằng `/alt apply` → `/alt apply xacnhan`.
+- [ ] Lên 3.3.0 với `ALT_LEARN_MODE` **trống** (paper → `auto`: tham số tự học cũ – trọng số pullback 0,82 – tự về mặc định một lần, có tin "🧬 TỰ HỌC – v3.3: …"). `.env.example` để trống sẵn.
+- [ ] **Sau** lần khởi động 3.3.0 đầu tiên đó: đặt **`ALT_LEARN_MODE=suggest`** trên panel Cổ phiếu, rồi khởi động lại: bộ tự học chỉ đề xuất, không tự đổi tham số trong lúc đo. Lỡ đặt `suggest` trước: tham số cũ vẫn chạy, có một đề xuất "Khôi phục" chờ duyệt – duyệt ngay bằng `/alt apply` → `/alt apply xacnhan` (lệnh này duyệt **mọi** đề xuất đang chờ, nên làm ngay khi đó là đề xuất duy nhất – `/alt learn` để xem).
 - [ ] Không duyệt đề xuất tự học nào khác trong 4 tuần (`/alt learn` xem; đề xuất chỉ để tham khảo).
 - [ ] Mục tiêu: ≥ 150 tín hiệu bóng **mới** (sau 3.3.0) và ≥ 30 lệnh paper; tính sai số chuẩn **theo ngày** (tín hiệu dồn cụm). Trang Tự học có bảng so sánh "SL 2,5 ATR + bám sóng" trên cùng tín hiệu (chỉ để so, bot không tự chuyển).
 
@@ -359,7 +360,7 @@ Chẩn đoán 02/11/2026 (đợt lỗ 10 → 9,52 USDT, 30/10–02/11): sổ sá
 3. ≥ 150 tín hiệu bóng sau 3.3.0, R trung bình dương.
 4. Backtest walk-forward (chọn tham số trên đoạn trước, thử trên đoạn sau, lặp lại) dương ngoài mẫu và vượt 2 lần sai số chuẩn.
 
-Với vốn 10 USDT, 1% rủi ro thường nhỏ hơn 1 lot (UNI: 1 hợp đồng ≈ 1,2% vốn), nên nhiều lệnh sẽ không vào được – cần vốn lớn hơn để mức 1% có nghĩa.
+Với vốn 10 USDT, 1% rủi ro thường nhỏ hơn 1 lot (UNI: 1 hợp đồng ≈ 1,2% vốn). Khi đó Altcoin **vẫn vào 1 lot** nếu rủi ro của lot đó ≤ `ALT_MIN_LOT_RISK_MULT` (mặc định 2) × rủi ro dự tính, chỉ bỏ lệnh khi vượt 2× – nên rủi ro thật mỗi lệnh live có thể tới gần 2% (và gần 2× mức đã giảm khi AI chưa chắc). Muốn rủi ro thật sát 1% trong lần live đầu: đặt thêm `ALT_MIN_LOT_RISK_MULT=1.2` (trần ≈ 1,2%: lot vượt mức đó thì bỏ lệnh, giá khớp trượt làm vượt thì đóng ngay); cần vốn lớn hơn để mức 1% có nghĩa.
 
 **Tạm dừng và thiết kế lại chiến lược nếu một trong hai điều sau xảy ra:**
 

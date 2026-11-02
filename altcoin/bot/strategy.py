@@ -105,15 +105,18 @@ def rule_ctx(sig):
     return {**(sig.context or {}), "triggers": list(sig.triggers or [])}
 
 
-def breakout_confirmed(c):
+def breakout_confirmed(c, enabled=None):
     """v3.3 (bug 8): tín hiệu có trigger breakout ĐANG BẬT (BREAKOUT_ENABLED) → volume nến tín hiệu (≥ BREAKOUT_VOL) là
     xác nhận của chính nến breakout: luật climax_volume và điểm trừ "volume cao trào" không áp dụng. Bản cũ BREAKOUT_VOL =
     CLIMAX_VOL = 1.5 nên mọi tín hiệu breakout bị luật climax_volume (chặn sẵn) chặn – trigger chết im lặng. Tắt (mặc định):
-    diagnose không tính trigger breakout, và dòng cũ có breakout vẫn bị xét cao trào như trước."""
-    return bool(cfg.BREAKOUT_ENABLED) and "breakout" in (c.get("triggers") or [])
+    diagnose không tính trigger breakout, và dòng cũ có breakout vẫn bị xét cao trào như trước.
+    enabled: True/False thay cờ (diagnose chấm tín hiệu chỉ có breakout "như khi bật" để ghi bóng – BREAKOUT_OFF)."""
+    on = cfg.BREAKOUT_ENABLED if enabled is None else enabled
+    return bool(on) and "breakout" in (c.get("triggers") or [])
 
 
 BREAKOUT_OFF = "chỉ có trigger breakout – đang tắt (BREAKOUT_ENABLED=false)"
+BREAKOUT_OFF_SOURCE = "breakout_off"   # nguồn dòng bóng của tín hiệu đó: chỉ đo, không hỏi AI, không vào lệnh, không tự học
 
 
 def blocking_rule(sig):
@@ -311,7 +314,8 @@ def trigger_group_weights(keys, tw=None):
     return sorted(groups, reverse=True)[:2]
 
 
-def _score(df, htf, side, triggers, funding, change24h):
+def _score(df, htf, side, triggers, funding, change24h, breakout_on=None):
+    """breakout_on: chấm như khi trigger breakout bật/tắt (mặc định theo cờ BREAKOUT_ENABLED) – xem breakout_confirmed."""
     r = df.row(-1)
     h = htf.row(-1)
     s, why = 0.0, []
@@ -341,7 +345,7 @@ def _score(df, htf, side, triggers, funding, change24h):
     # Volume: v3.2 – volume cao trào trên nến tín hiệu là dấu hiệu cạn lực, KHÔNG cộng điểm mà trừ
     # (31 tín hiệu bóng vol 1.5–2.5×: -0.68R, thắng 16%). v3.3: trừ nến breakout đang bật – volume là xác nhận của nó.
     if r.vol_ratio >= cfg.CLIMAX_VOL:
-        if breakout_confirmed({"triggers": [trig_key(t) for t in triggers]}):
+        if breakout_confirmed({"triggers": [trig_key(t) for t in triggers]}, breakout_on):
             why.append(f"Volume x{r.vol_ratio:.1f} xác nhận breakout (không tính cao trào)")
         else:
             s -= 1; why.append(f"Volume cao trào x{r.vol_ratio:.1f} (trừ điểm)")
@@ -565,6 +569,8 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     - lý do == ""          → tín hiệu đạt, gửi AI
     - signal != None + lý do → tín hiệu "suýt đạt" (điểm thấp) – vẫn được ghi lại để theo dõi kết quả bóng, giúp bộ tự
       học biết ngưỡng có quá chặt không. Luật chặn (sẵn / tự học) xét sau, ở main.scan, khi đã có dữ liệu dòng tiền.
+    - signal != None + BREAKOUT_OFF → tín hiệu chỉ có trigger breakout khi cờ tắt, chấm như khi bật: main.scan chỉ ghi
+      bóng nguồn BREAKOUT_OFF_SOURCE nếu qua ngưỡng điểm (sau dòng tiền) – không hỏi AI, không vào lệnh.
     - signal == None       → bị loại ở cổng bắt buộc."""
     if len(ohlcv_ltf) < 120 or len(ohlcv_htf) < 80:
         return None, "thiếu dữ liệu", {}
@@ -590,16 +596,19 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     if gate:
         return None, gate, info
     triggers = _triggers(df, side)
+    brk_only = False
     if not cfg.BREAKOUT_ENABLED and any(trig_key(t) == "breakout" for t in triggers):
         # v3.3 (bug 8): trigger breakout tắt rõ ràng (cờ BREAKOUT_ENABLED, mặc định tắt – xem config) – không cộng điểm,
-        # không là trigger; tín hiệu CHỈ có breakout bị loại với lý do riêng (đếm được trong log quét), không im lặng
-        triggers = [t for t in triggers if trig_key(t) != "breakout"]
+        # không là trigger. Tín hiệu CHỈ có breakout bị loại với lý do riêng (đếm được trong log quét), không im lặng,
+        # nhưng vẫn được dựng và chấm NHƯ KHI BẬT để main.scan ghi bóng nguồn "breakout_off" (không hỏi AI, không vào
+        # lệnh, bộ tự học không dùng) – có số liệu ngoài mẫu trước khi quyết định bật (backtest: n = 0 ngoài mẫu).
         info["breakout_off"] = True
-        if not triggers:
-            return None, BREAKOUT_OFF, info
+        rest = [t for t in triggers if trig_key(t) != "breakout"]
+        brk_only = not rest
+        triggers = triggers if brk_only else rest
     if not triggers:
         return None, "không có trigger (MACD/EMA cắt, breakout, pullback, nhấn chìm)", info
-    score, reasons = _score(df, htf, side, triggers, funding, change24h)
+    score, reasons = _score(df, htf, side, triggers, funding, change24h, breakout_on=True if brk_only else None)
     info["score"] = score
 
     price, a = float(r.close), float(r.atr)
@@ -609,8 +618,13 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     ctx = _context(df, htf, trend, funding, change24h, market, a, "trend")
     sig = Signal(symbol, side, score, price, a, sl, tp, reasons, ctx,
                  triggers=sorted({trig_key(t) for t in triggers}), candle_ts=df.ts[-1] / 1000)
+    if info.get("breakout_off"):
+        sig.context["breakout_off"] = True      # có breakout nhưng không tính (cờ tắt) – features ghi lại để đo sau
 
     min_score = min_score_for(sig)
+    if brk_only:
+        sig.rejected = BREAKOUT_OFF
+        return (sig if score >= min_score - 1.5 else None), BREAKOUT_OFF, info
     if score < min_score:
         sig.rejected = f"điểm thấp ({score} < {min_score})"
         return (sig if score >= min_score - 1.5 else None), sig.rejected, info

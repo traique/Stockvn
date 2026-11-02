@@ -90,12 +90,17 @@ def _truthy(v):
     return v is True or (isinstance(v, (int, float)) and v == 1) or str(v).strip().lower() in ("true", "yes", "1", "có")
 
 
+def normalize_verdict(verdict):
+    """Verdict chuẩn: chữ hoa, khoảng trắng → "_", "GOOD"/"BAD" (model viết tắt) → "GOOD_TRADE"/"BAD_TRADE". Dùng lúc
+    ghi (settle_verdict) và lúc đọc lại (storage – bản 3.2.x lưu verdict thô, vd "GOOD TRADE")."""
+    v = str(verdict or "").upper().strip().replace(" ", "_")
+    return v + "_TRADE" if v in ("GOOD", "BAD") else v
+
+
 def settle_verdict(verdict, r, rule_correct=None):
     """(verdict cuối, nhất quán?, ghi chú) cho một tổng kết: GOOD_TRADE cho lệnh thua đủ 1R mà AI nói thua đúng quy tắc →
     UNLUCKY; các trường hợp không khớp khác giữ nguyên verdict của AI (để thấy được) và đánh dấu không nhất quán."""
-    v = str(verdict or "").upper().strip().replace(" ", "_")
-    if v in ("GOOD", "BAD"):                    # model viết tắt
-        v += "_TRADE"
+    v = normalize_verdict(verdict)
     if r is not None and r <= -FULL_LOSS_R and v == "GOOD_TRADE" and _truthy(rule_correct):
         return "UNLUCKY", True, "AI chấm GOOD_TRADE cho lệnh thua đủ 1R, giải thích là thua đúng quy tắc → UNLUCKY"
     if verdict_consistent(v, r):

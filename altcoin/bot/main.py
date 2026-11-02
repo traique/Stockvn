@@ -308,6 +308,17 @@ class Bot:
                 htf = self.okx.ohlcv(sym, cfg.HTF_TIMEFRAME, 120)
                 sig, why, info = diagnose(sym, ltf, htf, funding=0.0, change24h=float(chg or 0), market=btc)
                 min_score = strat.LEARNED.get("min_score") or cfg.MIN_SCORE
+                if why == strat.BREAKOUT_OFF:
+                    # v3.3: chỉ có trigger breakout, cờ tắt – không hỏi AI, không vào lệnh. Khi bật sẽ là ứng viên (qua
+                    # ngưỡng điểm sau dòng tiền) → ghi bóng nguồn riêng để đo ngoài mẫu (bộ tự học không dùng nguồn này)
+                    reasons[why.split("(")[0].strip()] += 1
+                    near.append(f"{sym.split('/')[0]} ({why[:30]})")
+                    if sig is not None and sig.score >= min_score - 1.0:
+                        sig.context.update(mkt.symbol_context(self.okx, sym))
+                        if not strat.apply_flow(sig):
+                            sig.rejected = strat.BREAKOUT_OFF
+                            self._shadow(sig, strat.BREAKOUT_OFF_SOURCE)
+                    continue
                 if sig is not None and (not why or why.startswith("điểm thấp")) and sig.score >= min_score - 1.0:
                     # qua cổng + có trigger → lấy dòng tiền (OI / long-short / funding) và cộng/trừ điểm
                     # TRƯỚC khi xét ngưỡng & xếp hạng → ứng viên gửi AI tốt cả kỹ thuật lẫn dòng tiền

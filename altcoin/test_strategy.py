@@ -416,11 +416,12 @@ def _():
     from bot.config import Config
     assert Config().BREAKOUT_ENABLED is False                     # mặc định tắt (backtest 88 ngày: ngoài mẫu n = 0)
     sig, why, info = diag_with([BRK], False)
-    assert sig is None and why == S.BREAKOUT_OFF and info.get("breakout_off"), (sig, why, info)
+    assert why == S.BREAKOUT_OFF and info.get("breakout_off"), (sig, why, info)
     assert "BREAKOUT_ENABLED=false" in why
     on, _w, _i = diag_with([BRK, "Pullback EMA21 + nến bật"], True)
     off, why, info = diag_with([BRK, "Pullback EMA21 + nến bật"], False)
     assert off is not None and off.triggers == ["pullback"] and info.get("breakout_off"), (off and off.triggers, why)
+    assert off.context.get("breakout_off") is True and "breakout_off" not in on.context   # features ghi: có breakout bị bỏ
     assert not any(t.startswith("Breakout") for t in off.reasons)
     assert sorted(on.triggers) == ["breakout", "pullback"] and on.score > off.score, (on.triggers, on.score, off.score)
     # tắt: dòng cũ có trigger breakout vẫn bị xét cao trào như trước (bộ tự học gỡ climax_volume cũng không mở breakout)
@@ -446,6 +447,46 @@ def _():
         src, f = rows()["BRK"]
         assert src == "taken" and f["triggers"] == ["breakout"], (src, f.get("triggers"))
         assert "climax_volume" not in S.matching_rules("long", f)
+    finally:
+        cfg.BREAKOUT_ENABLED = saved
+
+
+@section("review C 5: tắt breakout – tín hiệu chỉ có breakout vẫn được chấm như khi bật để ghi bóng (đo ngoài mẫu)")
+def _():
+    on, why_on, _i = diag_with([BRK], True)
+    sig, why, info = diag_with([BRK], False)                    # bản trước: (None, BREAKOUT_OFF) – không còn dữ liệu đo
+    assert sig is not None and why == S.BREAKOUT_OFF and sig.rejected == S.BREAKOUT_OFF, (sig, why)
+    assert sig.triggers == ["breakout"] and sig.score == on.score and (sig.sl, sig.tp) == (on.sl, on.tp), \
+        (sig.triggers, sig.score, on.score)
+
+
+@section("review C 5: quét – tín hiệu chỉ có breakout khi cờ tắt: ghi bóng nguồn breakout_off, không hỏi AI, không vào lệnh, "
+         "bộ tự học không dùng")
+def _():
+    saved = getattr(cfg, "BREAKOUT_ENABLED", None)
+    cfg.BREAKOUT_ENABLED = False
+    try:
+        g = trend_sig("BRK/USDT:USDT", 7.0, vol_ratio=1.61)
+        g.triggers, g.rejected = ["breakout"], S.BREAKOUT_OFF
+        lo = trend_sig("LOW/USDT:USDT", 4.6, vol_ratio=1.61)       # dưới ngưỡng cả khi bật → không ghi
+        lo.triggers, lo.rejected = ["breakout"], S.BREAKOUT_OFF
+        ok = trend_sig("OK/USDT:USDT", 6.0)
+        ai, eng = FakeAI(), FakeEngine(take=False)
+        bot = make_bot({"BRK/USDT:USDT": (g, S.BREAKOUT_OFF), "LOW/USDT:USDT": (lo, S.BREAKOUT_OFF),
+                        "OK/USDT:USDT": (ok, "")}, ai=ai, engine=eng)
+        bot.scan()
+        assert ai.asked == ["OK/USDT:USDT"] and eng.opened == ["OK/USDT:USDT"], (ai.asked, eng.opened)
+        got = rows()
+        assert set(got) == {"BRK", "OK"}, got                       # bản trước: BRK ghi nguồn "below_score" (sai nguồn)
+        src, f = got["BRK"]
+        assert src == "breakout_off" and f["triggers"] == ["breakout"] and f["rejected"] == S.BREAKOUT_OFF, (src, f)
+        assert bot.last_scan_summary["reasons"].get(S.BREAKOUT_OFF.split("(")[0].strip()) == 2, bot.last_scan_summary
+        # bộ tự học: không phải tín hiệu kỹ thuật (không đổi trọng số / ngưỡng / luật), chỉ hiện ở bảng theo nguồn
+        for r in STORE.db.run("SELECT sid FROM signals WHERE outcome='PENDING'", fetch=True):
+            STORE.set_outcome(r["sid"], "TP", 1.0, 1.0, 1.0, 1.0)
+        st_, _rows, tech = Learner(STORE, None, None, lambda m: None).compute_stats()
+        assert [r["symbol"] for r in tech] == ["OK/USDT:USDT"], [(r["symbol"], r["source"]) for r in tech]
+        assert st_["by_source"]["breakout_off"]["n"] == 1 and "breakout" not in st_["by_trigger"], st_["by_source"]
     finally:
         cfg.BREAKOUT_ENABLED = saved
 
@@ -551,6 +592,31 @@ def _():
     assert "BEAT/USDT:USDT -1.12R [GOOD_TRADE] ⚠️ không khớp kết quả" in txt and "UNI/USDT:USDT -1.10R [UNLUCKY]\n" in txt, txt
     from bot.dashboard import APP_JS
     assert "x.consistent===false" in APP_JS
+
+
+@section("review C 3, 4: AI_LESSONS_IN_PROMPT=0 tắt bài học; verdict thô của 3.2.x ('GOOD TRADE', 'good') chuẩn hoá lúc đọc")
+def _():
+    STORE.db.run("DELETE FROM reviews"); STORE.db.run("DELETE FROM trades")
+
+    def closed(sym, pnl, verdict, ago):
+        tid = STORE.open_trade(dict(mode="paper", symbol=f"{sym}/USDT:USDT", side="long", entry=100.0, sl=98.0, sl0=98.0,
+                                    tp=110.0, notional=5.0, notional0=5.0, status="closed", pnl=pnl,
+                                    opened_at=time.time() - ago - 600, closed_at=time.time() - ago))
+        STORE.db.run("INSERT INTO reviews VALUES(?,?,?,?,?,?,?,?,?)",          # đúng câu lệnh của bản 3.2.x
+                     (time.time() - ago, tid, f"{sym}/USDT:USDT", "long", pnl, verdict, f"{sym} bài học", "", "m"))
+    closed("PUMP", 0.05, "GOOD TRADE", 30)          # +0.5R – 3.2.x lưu nguyên chữ model viết
+    closed("ARB", 0.04, "good", 20)                 # +0.4R – viết tắt, chữ thường
+    closed("BEAT", -0.11, "GOOD TRADE", 10)         # -1.1R chấm GOOD → vẫn không khớp sau khi chuẩn hoá
+    assert AI.settle_verdict("GOOD TRADE", 0.5)[:2] == ("GOOD_TRADE", True)
+    rv = {r["symbol"].split("/")[0]: r for r in STORE.reviews(10)}
+    assert rv["PUMP"]["consistent"] is True and rv["PUMP"]["verdict"] == "GOOD_TRADE", rv["PUMP"]
+    assert rv["ARB"]["consistent"] is True and rv["ARB"]["verdict"] == "GOOD_TRADE", rv["ARB"]
+    assert rv["BEAT"]["consistent"] is False, rv["BEAT"]
+    got = STORE.recent_lessons(5)
+    assert [x.split()[1].split("/")[0] for x in got] == ["ARB", "PUMP"] and "[GOOD_TRADE]" in got[0], got
+    assert STORE.recent_lessons(0) == [], STORE.recent_lessons(0)       # bản trước: n=0 vẫn trả 1 bài học
+    assert STORE.recent_lessons(-1) == []
+    assert len(STORE.recent_lessons(1)) == 1
 
 
 # ======================================================================= v3.3 sửa sau review phần B

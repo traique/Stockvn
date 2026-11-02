@@ -38,7 +38,8 @@ SOURCE_NAMES = {"taken": "Đã vào lệnh", "ai_weak": "Vào (AI đồng ý nh�
                 "not_sent": "Không gửi AI (xếp sau)",
                 "slot_taken": "Không gửi AI (lượt quét đã vào lệnh khác)",
                 "max_positions": "Không gửi AI (đang đủ lệnh mở)",
-                "blocked": "Bị luật chặn (chặn sẵn hoặc tự học)", "below_score": "Suýt đạt (điểm thấp)"}
+                "blocked": "Bị luật chặn (chặn sẵn hoặc tự học)", "below_score": "Suýt đạt (điểm thấp)",
+                strategy.BREAKOUT_OFF_SOURCE: "Chỉ có breakout – đang tắt (chỉ đo, không vào lệnh)"}
 
 SYSTEM_DAILY = """Bạn là quản lý rủi ro của một bot giao dịch futures altcoin. Bạn nhận thống kê kết quả THẬT
 (đo bằng R, 1R = khoảng cách tới stop-loss, đã trừ phí) của mọi tín hiệu bot tạo ra, chia theo nhóm.
@@ -447,7 +448,7 @@ class Learner:
               "trigger_blocked_excluded": len(tech) - len(open_),
               "pending": len(self.store.pending_signals(500)), "by_source": {}, "by_side": {},
               "by_trigger": {}, "by_rule": {}, "by_score": {}, "by_session": {}}
-        for src in list(TECH_SOURCES) + ["below_score"]:     # mọi nguồn, kể cả slot_taken / max_positions (v3.3)
+        for src in list(TECH_SOURCES) + ["below_score", strategy.BREAKOUT_OFF_SOURCE]:   # mọi nguồn (v3.3)
             sub = [r for r in rows if r["source"] == src]
             if sub:
                 st["by_source"][src] = {**_agg(sub), "name": SOURCE_NAMES.get(src, src)}

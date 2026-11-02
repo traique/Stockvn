@@ -264,7 +264,7 @@ class Store:
 
     def log_signal(self, sig, ai, taken, source="ai"):
         """source: taken | ai_weak | ai_override | ai_rejected | ai_error | skipped | not_sent | slot_taken | max_positions |
-        below_score | blocked
+        below_score | blocked | breakout_off (tín hiệu chỉ có breakout khi cờ BREAKOUT_ENABLED tắt – chỉ đo)
         v3.3: entry = giá last MỚI lúc quyết định (sig.ref_price – cùng giá lệnh paper/live vào), ts = lúc lấy giá đó;
         giá đóng nến 15m tín hiệu giữ ở features.signal_close, ATR đúng (không làm tròn) ở features.atr. Bộ tự học mô phỏng
         từ entry ± trượt giá như paper. hour = giờ (TIMEZONE) mà luật phiên đã được xét (sig.context["hour"], lúc chẩn đoán –
@@ -419,8 +419,9 @@ class Store:
     def _reviews_r(self, limit):
         """Tổng kết mới nhất trước, kèm r = kết quả theo R của lệnh (như facts.result_r lúc AI tổng kết: PnL / rủi ro theo
         khoảng cách SL ban đầu) và consistent = verdict khớp kết quả (ai.verdict_consistent). Bảng reviews giữ nguyên cột
-        (bản 3.2.x ghi INSERT 9 giá trị) – r tính lại từ bảng trades."""
-        from .ai import verdict_consistent
+        (bản 3.2.x ghi INSERT 9 giá trị) – r tính lại từ bảng trades. Verdict được chuẩn hoá như lúc ghi
+        (ai.normalize_verdict): bản 3.2.x lưu verdict thô ("GOOD TRADE", "GOOD") – không chuẩn hoá thì bị coi là lạ."""
+        from .ai import normalize_verdict, verdict_consistent
         rows = self.db.run("""SELECT r.*, t.entry AS t_entry, t.sl0 AS t_sl0, t.sl AS t_sl, t.notional0 AS t_n0,
                               t.notional AS t_n FROM reviews r LEFT JOIN trades t ON t.id = r.trade_id
                               ORDER BY r.ts DESC LIMIT ?""", (limit,), fetch=True)
@@ -432,14 +433,17 @@ class Store:
             n0 = n0 or n
             risk = float(n0) * abs(float(entry) - float(sl0)) / float(entry) if (entry and sl0 is not None and n0) else 0
             r["r"] = round(float(r["pnl"]) / risk, 2) if risk and r.get("pnl") is not None else None
-            r["consistent"] = verdict_consistent(r.get("verdict"), r["r"])
+            r["verdict"] = normalize_verdict(r.get("verdict")) or r.get("verdict")
+            r["consistent"] = verdict_consistent(r["verdict"], r["r"])
             out.append(r)
         return out
 
     def recent_lessons(self, n=5):
         """Bài học đưa lại vào prompt AI: chỉ tổng kết NHẤT QUÁN với kết quả (v3.3 – bản cũ đưa cả "GOOD_TRADE" của lệnh thua
-        đủ 1R vào prompt)."""
+        đủ 1R vào prompt). n ≤ 0 (AI_LESSONS_IN_PROMPT=0) → không bài học nào."""
         out = []
+        if n <= 0:
+            return out
         for r in self._reviews_r(max(4 * n, 20)):
             if not r["consistent"]:
                 continue

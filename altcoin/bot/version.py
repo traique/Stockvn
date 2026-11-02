@@ -18,7 +18,7 @@ from pathlib import Path
 
 VERSION = "3.3.0"
 RELEASED = "2026-11-02"
-RELEASE_BUILD = "b77eb32"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "e7b7082"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
@@ -38,10 +38,10 @@ NOTES = (
         "Chỉ quét hợp đồng crypto theo loại tài sản OKX ghi (instCategory) – bỏ cổ phiếu, dầu (trước: 9/50 mã)",
         "Trọng số trigger tự học áp dụng cả khi tín hiệu có Pullback lẫn VWAP; log ghi đúng luật chặn sẵn hay luật tự học",
         "Tự học: không học từ tín hiệu luật đang chặn, cần mẫu ≥ 7 ngày, t tính theo ngày; luật phiên theo đúng giờ bot đã xét",
-        "Tham số học bằng thống kê cũ (pullback 0,82) về mặc định một lần khi chạy ảo + tự học auto; chạy thật / suggest: đề xuất chờ duyệt",
+        "Tham số học bằng thống kê cũ (pullback 0,82) về mặc định một lần khi chạy ảo + tự học auto (mẫu env để trống); chạy thật / suggest: chờ duyệt",
         "Bỏ cổng R:R của setup xu hướng (TP dựng ≥ 1,8R nên không bao giờ chặn); MIN_RR là mức sàn TP cố định",
         "Tín hiệu bóng ghi thêm thử nghiệm SL 2,5 ATR + bám sóng, so ở trang Tự học (bot không tự chuyển)",
-        "Breakout hết bị luật volume cao trào chặn nhưng vẫn tắt (BREAKOUT_ENABLED): backtest 0 tín hiệu ngoài mẫu",
+        "Breakout hết bị luật volume cao trào chặn nhưng vẫn tắt (BREAKOUT_ENABLED): backtest 0 tín hiệu ngoài mẫu; vẫn ghi bóng để đo",
         "AI nhận kế hoạch thoát thật (TP1 1R + bám sóng); thua đủ 1R không là GOOD_TRADE; bỏ hồ sơ test gắt",
     )),
     ("3.2.1", "2026-10-29", (
@@ -166,15 +166,24 @@ def info():
             "notes": [{"version": v, "day": d, "notes": list(n)} for v, d, n in NOTES]}
 
 
-def text(history=3):
-    """Lệnh `phienban` trên Telegram/Zoom."""
+# /alt phienban qua bot Cổ phiếu: vnbot.altcoin_bridge cắt mỗi tin ở PART = 3500 ký tự, trả lời bắt đầu bằng
+# "🪙 Altcoin › phienban\n" – chừa chỗ cho phần đó và cho độ dài đổi theo thời gian chạy / trạng thái bản dựng
+TEXT_MAX = 3400
+
+
+def text(history=3, limit=TEXT_MAX):
+    """Lệnh `phienban` trên Telegram/Zoom: bản đang chạy và tối đa `history` bản gần nhất – bản cũ hơn bản mới nhất chỉ
+    thêm khi cả tin còn ≤ `limit` ký tự (vừa MỘT tin qua bot Cổ phiếu); đủ lịch sử ở trang Phiên bản."""
     lines = [f"🏷️ OKX Altcoin Bot v{VERSION} (phát hành {ddmmyyyy(RELEASED)})",
              f"Bản dựng {build()} · {status_line()}",
              f"Chạy từ {started_text()} ({uptime()}) · Python {platform.python_version()}"]
-    for v, day, notes in NOTES[:history]:
-        lines += ["", f"{'Có gì mới ở ' if v == VERSION else ''}v{v} ({ddmmyyyy(day)}):"] + [f"• {n}" for n in notes]
-    lines += ["", "Trên web: trang Phiên bản"]
-    return "\n".join(lines)
+    tail = ["", "Trên web: trang Phiên bản"]
+    for i, (v, day, notes) in enumerate(NOTES[:history]):
+        block = ["", f"{'Có gì mới ở ' if v == VERSION else ''}v{v} ({ddmmyyyy(day)}):"] + [f"• {n}" for n in notes]
+        if i and len("\n".join(lines + block + tail)) > limit:
+            break
+        lines += block
+    return "\n".join(lines + tail)
 
 
 def changes_since(previous):
