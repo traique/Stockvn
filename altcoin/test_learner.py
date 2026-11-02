@@ -71,7 +71,10 @@ print("✓ v3.2: không chặn cả phía short dù 55 short thua")
 lr.reset(); assert LEARNED["blocks"] == [] and LEARNED["min_score"] is None and LEARNED["schema"] == Learner.LEARNED_SCHEMA
 print("✓ khôi phục mặc định")
 
-# 4b) v3.2: tham số bản cũ (schema 1) được đưa về mặc định khi khởi động, giữ ngưỡng phủ quyết AI
+# 4b) v3.2: tham số bản cũ (schema 1) được đưa về mặc định khi khởi động, giữ ngưỡng phủ quyết AI.
+# CHỈ phần v3.2: cờ learn_reset_3_3 đặt sẵn (như DB đã chạy 3.3) để lần đưa về mặc định v3.3 không chạy – đường nâng cấp
+# thật từ schema 1 lên 3.3 (cả hai bước) ở 4c.
+st.set("learn_reset_3_3", time.time())
 st.set("learned", {"min_score": 5.5, "trigger_w": {"pullback": 1.2}, "blocks": ["short_side", "weak_adx"],
                    "unblocked": [], "exit_mode": "trail", "ai_veto_conf": 55, "tp1_r": None})
 st.set("learn_last", {"rule:short_side": time.time(), "exit_mode": time.time(), "ai_veto_conf": time.time()})
@@ -83,6 +86,17 @@ assert "exit_mode" not in st.get("learn_last") and "ai_veto_conf" in st.get("lea
 assert st.learn_log(1)[0]["kind"] == "migrate"
 lr3 = Learner(st, None, None, notes.append); assert st.learn_log(1)[0]["kind"] == "migrate" and len([r for r in st.learn_log(50) if r["kind"] == "migrate"]) == 1
 print("✓ v3.2: tham số bản cũ về mặc định 1 lần, giữ ai_veto_conf")
+
+# 4c) review B 10: nâng cấp thật từ schema 1 (chưa có cờ v3.3), chạy ảo + LEARN_MODE=auto: bước v3.2 rồi bước v3.3 – mọi
+# tham số về mặc định (cả ai_veto_conf), hai dòng migrate
+st.db.run("DELETE FROM kv WHERE k IN ('learn_reset_3_3', 'learn_notice')"); st.db.run("DELETE FROM learn_log")
+st.set("learned", {"min_score": 5.5, "trigger_w": {"pullback": 1.2}, "blocks": ["short_side", "weak_adx"],
+                   "unblocked": [], "exit_mode": "trail", "ai_veto_conf": 55, "tp1_r": None})
+LEARNED.clear(); LEARNED.update(st.get("learned"))
+Learner(st, None, None, notes.append)
+assert LEARNED["ai_veto_conf"] is None and LEARNED["blocks"] == [] and LEARNED["trigger_w"] == {} and LEARNED["schema"] == 3, LEARNED
+assert sorted(r["k"] for r in st.learn_log(50) if r["kind"] == "migrate") == ["v3.2", "v3.3"], st.learn_log(50)
+print("✓ review B 10: nâng cấp thật schema 1 → 3.3: hai bước, mọi tham số (cả ai_veto_conf) về mặc định")
 
 # 5) chế độ suggest: tạo đề xuất chờ duyệt, áp dụng qua apply_pending
 st.set("learn_last", {}); lr.mode = "suggest"
@@ -184,12 +198,12 @@ want = -1 - (2 * cfg.TAKER_FEE + cfg.SLIPPAGE) * E / (E - 0.997)
 assert abs(row["r_hybrid"] - want) < 1e-3, ("bộ tự học phải dùng cùng giá khớp & phí với paper", row["r_hybrid"], want)
 print(f"✓ v3.3: bộ tự học trừ đủ phí + trượt giá hai chiều ({row['r_hybrid']:+.3f}R khi chạm SL cách 0.5%)")
 
-# (cuối đường giá thủng sâu: biến thể SL 2.5 ATR cũng kết thúc – tín hiệu chỉ có kết quả khi MỌI cách thoát đã xong)
+# (giá nằm trên SL của biến thể SL 2.5 ATR: biến thể còn chạy, không được giữ kết quả chính – review B 5)
 t, rp, row = paper_vs_shadow("SLX/USDT:USDT", lambda t: [bar(1, 1.002, 1.003, 1.0, 1.001), bar(2, 1.001, 1.002, 0.989, 0.991)] +
-                             [bar(i, 0.991, 0.992, 0.99, 0.991) for i in range(3, 50)] +
-                             [bar(i, 0.985, 0.986, 0.98, 0.985) for i in range(50, 61)])
+                             [bar(i, 0.991, 0.992, 0.99, 0.991) for i in range(3, 61)])
 f = json.loads(row["features"])
 assert row["entry"] == 1.002 and f["signal_close"] == 1.0 and f["entry_ref"] == "last", (row["entry"], f)
+assert row["outcome"] == "SL" and row["r_sl25_trail"] is None and row["alt_open"] == 1, dict(row)   # biến thể còn chạy
 risk = t["entry"] - 0.990
 assert abs(row["r_hybrid"] - (-1 - costs.after_fill_cost() * t["entry"] / risk)) < 1e-3, row["r_hybrid"]
 assert abs(row["r_hybrid"] - rp) < 0.01, ("R bóng phải bằng R lệnh paper", row["r_hybrid"], rp)
@@ -276,7 +290,7 @@ assert row["outcome"] == "TRAIL" and abs(row["r_hybrid"] - rp) < 0.01, ("râu tr
                                                                           row["r_hybrid"], rp)
 # chạm SL ở phút 4 – SAU lúc vào, cùng khung 5m; OKX chỉ trả nến 5m mở từ lúc vào → phải lấy nến 1m của khung đó
 rows = [m1(k, 1.002, 1.0025, 1.0015, 1.002) for k in range(0, 4)] + [m1(4, 1.002, 1.0025, 0.989, 0.995)] + \
-       [m1(k, 0.995, 0.996, 0.994, 0.995) for k in range(5, 50)] + [m1(k, 0.985, 0.986, 0.98, 0.985) for k in range(50, 60)]
+       [m1(k, 0.995, 0.996, 0.994, 0.995) for k in range(5, 60)]
 t, tr, rp, row = paper_shadow_1m("POST/USDT:USDT", rows, strict=True)
 assert tr["status"] == "closed" and tr["reason_close"] == "Chạm SL", tr
 assert row["outcome"] == "SL" and abs(row["r_hybrid"] - rp) < 0.01, ("SL sau lúc vào trong khung 5m bị bỏ", row["outcome"],
@@ -370,7 +384,7 @@ def _():
 @section("bug 9: một lần đưa tham số học bằng thống kê cũ về mặc định (pullback 0.82) – log, lịch sử, thông báo qua leader")
 def _():
     fresh()
-    st.db.run("DELETE FROM kv WHERE k IN ('learn_reset_3_3', 'learn_notice')")
+    st.db.run("DELETE FROM kv WHERE k IN ('learn_reset_3_3', 'learn_notice')"); st.db.run("DELETE FROM learn_log")
     st.set("learned", {"min_score": None, "trigger_w": {"pullback": 0.82}, "blocks": [], "unblocked": [], "exit_mode": None,
                        "ai_veto_conf": None, "tp1_r": None, "schema": 2})
     st.set("learn_last", {"trig:pullback": time.time()})
@@ -432,6 +446,91 @@ def _():
     assert abs(a["diff"] - sum(r["r_sl25_trail"] - r[f"r_{cur}"] for r in trend) / 3) < 1e-3, a
     from bot.dashboard import APP_JS
     assert "altRow(ec.alt)" in APP_JS and "altNote(" in APP_JS and "max_positions:" in APP_JS and "slot_taken:" in APP_JS
+
+
+@section("review B 5: biến thể A/B còn chạy không giữ kết quả chính; ghi R biến thể sau (30 phút/lần) hoặc hết giờ")
+def _():
+    fresh()
+    E = 1.0 * (1 + cfg.SLIPPAGE)
+    cost = costs.after_fill_cost()
+    calls = []
+
+    class CountEx(Ex):
+        def fetch_ohlcv(self, s, tf, since=None, limit=None):
+            calls.append((s, tf)); return super().fetch_ohlcv(s, tf, since, limit)
+
+    def shadow(sym, ts):
+        g = Signal(sym, "long", 6.0, 1.000, 0.005, 0.990, 1.015, ["t"], {"setup": "trend", "atr_pct": 0.5})
+        g.ref_price, g.ref_ts = 1.000, ts
+        st.log_signal(g, None, False, source="not_sent")
+
+    def get(sym):
+        return st.db.run("SELECT * FROM signals WHERE symbol=?", (sym,), fetch=True)[0]
+    # SL 0.990 thủng ở nến 2 (mọi cách thoát đang có kết thúc), giá nằm 0.991 – trên SL biến thể 0.9875 → biến thể còn chạy
+    shadow("ALT1/USDT:USDT", T0)
+    o = Okx(1.0); o.ex = CountEx(o)
+    o.candles = [bar(1, 1.0, 1.001, 0.9995, 1.0), bar(2, 1.0, 1.0005, 0.989, 0.991)] + \
+                [bar(i, 0.991, 0.992, 0.99, 0.991) for i in range(3, 31)]
+    lr.okx, lr.last_alt = o, 0
+    lr.resolve_pending()
+    r = get("ALT1/USDT:USDT")
+    assert r["outcome"] == "SL" and r["r_hybrid"] is not None and r["r_sl25_trail"] is None and r["alt_open"] == 1, dict(r)
+    assert st.pending_signals(50) == [] and len(st.alt_pending_signals()) == 1
+    # trong 30 phút: mã không còn tín hiệu chờ kết quả chính → không đọc lại 300 nến 5m chỉ để xét biến thể
+    o.candles += [bar(i, 0.991, 0.992, 0.98, 0.985) for i in range(31, 41)]       # giá thủng SL biến thể 0.9875
+    n0 = len(calls); lr.resolve_pending()
+    assert len(calls) == n0 and get("ALT1/USDT:USDT")["alt_open"] == 1, calls[n0:]
+    lr.last_alt = time.time() - lr.ALT_RECHECK_S
+    lr.resolve_pending()
+    r = get("ALT1/USDT:USDT")
+    want = -1 - cost * E / (E - 0.9875)
+    assert r["alt_open"] is None and abs(r["r_sl25_trail"] - want) < 1e-3 and r["outcome"] == "SL", (dict(r), want)
+    # biến thể không kết thúc sau RUNNER_MAX_HOLD_HOURS + 1h → TIMEOUT theo giá cuối, kết quả chính không chờ
+    T26 = CUR - int((cfg.RUNNER_MAX_HOLD_HOURS + 2) * 3600)
+    shadow("ALT2/USDT:USDT", T26 + 10)
+    o2 = Okx(1.0)
+    o2.candles = [[(T26 + 60 * i) * 1000, 1.0, 1.001, 0.9995, 1.0, 1] for i in range(1, 2)] + \
+                 [[(T26 + 60 * 2) * 1000, 1.0, 1.0005, 0.989, 0.991, 1]] + \
+                 [[(T26 + 60 * i) * 1000, 0.991, 0.992, 0.99, 0.991, 1] for i in range(3, 61)]
+    lr.okx = o2
+    lr.resolve_pending()
+    r = get("ALT2/USDT:USDT")
+    want = (0.991 - E) / (E - 0.9875) - cost * E / (E - 0.9875)
+    assert r["outcome"] == "SL" and r["alt_open"] is None and abs(r["r_sl25_trail"] - want) < 1e-3, (dict(r), want)
+
+
+@section("review B 3: chạy thật / LEARN_MODE suggest, off – v3.3 không tự đổi tham số tự học, ghi đề xuất Khôi phục chờ duyệt")
+def _():
+    user = {"min_score": 5.5, "trigger_w": {"pullback": 0.82}, "blocks": ["weak_adx"], "unblocked": ["afternoon_session"],
+            "exit_mode": None, "ai_veto_conf": 55, "tp1_r": 1.3, "schema": 3}
+    for mode, lmode in (("live", "auto"), ("live", ""), ("paper", "suggest"), ("paper", "off")):
+        fresh()
+        st.db.run("DELETE FROM kv WHERE k IN ('learn_reset_3_3', 'learn_notice')"); st.db.run("DELETE FROM learn_log")
+        st.set("learned", user); st.set("learn_last", {"rule:weak_adx": 123.0})
+        st.add_learn("min_score", "min_score", 5.0, 5.5, "đề xuất cũ", 30, 0.2, "pending")
+        LEARNED.clear(); LEARNED.update(st.get("learned"))
+        notes.clear()
+        m0, l0 = cfg.MODE, cfg.LEARN_MODE
+        cfg.MODE, cfg.LEARN_MODE = mode, lmode
+        try:
+            lm = Learner(st, None, None, notes.append)
+        finally:
+            cfg.MODE, cfg.LEARN_MODE = m0, l0
+        tag = f"{mode}/{lmode or 'mặc định'}"
+        assert {k: LEARNED.get(k) for k in user} == user and st.get("learned") == user, (tag, dict(LEARNED))
+        assert st.get("learn_last") == {"rule:weak_adx": 123.0}, tag
+        log_ = st.learn_log(50)
+        pend = [r for r in log_ if r["status"] == "pending"]
+        assert len(pend) == 1 and pend[0]["kind"] == "reset" and pend[0]["k"] == "v3.3" and "0.82" in pend[0]["reason"], (tag, log_)
+        assert [r["status"] for r in log_ if r["kind"] == "min_score"] == ["rejected"], (tag, log_)
+        lm.tick()
+        assert len([n for n in notes if "chờ duyệt" in n and "0.82" in n]) == 1, (tag, notes)
+        Learner(st, None, None, notes.append)                       # chỉ một lần
+        assert len([r for r in st.learn_log(50) if r["kind"] == "reset" and r["k"] == "v3.3"]) == 1, tag
+        assert lm.apply_pending() == 1                              # người dùng duyệt → về mặc định
+        assert LEARNED["trigger_w"] == {} and LEARNED["blocks"] == [] and LEARNED["unblocked"] == [] and \
+            LEARNED["ai_veto_conf"] is None and LEARNED["tp1_r"] is None and LEARNED["min_score"] is None, (tag, dict(LEARNED))
+        assert st.get("learned")["trigger_w"] == {} and st.get("learn_last") == {}, tag
 
 
 assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"

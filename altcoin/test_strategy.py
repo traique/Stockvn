@@ -163,16 +163,22 @@ class FakeAI:
 
 
 class FakeEngine:
-    def __init__(self, take=True): self.opened, self.take = [], take
+    def __init__(self, take=True): self.opened, self.take, self.monitored = [], take, []
     def open(self, sig, ai):
         self.opened.append(sig.symbol)
         return {"id": len(self.opened)} if self.take else None
+    def monitor(self): self.monitored.append(M.time.time())
+
+
+CANDLE = int(time.time() // 900) * 900 - 900       # nến 15m tín hiệu (đã đóng) – như diagnose ghi vào sig.candle_ts
 
 
 def trend_sig(sym, score, side="long", **ctx):
     c = {"setup": "trend", "hour": 21, "adx": 30, "vol_ratio": 1.1, "atr_pct": 0.6, **ctx}
-    return S.Signal(sym, side, score, 100.0, 0.6, 98.8 if side == "long" else 101.2, 103.6 if side == "long" else 96.4,
-                    ["t"], c, triggers=["pullback"])
+    g = S.Signal(sym, side, score, 100.0, 0.6, 98.8 if side == "long" else 101.2, 103.6 if side == "long" else 96.4,
+                 ["t"], c, triggers=["pullback"])
+    g.candle_ts = CANDLE
+    return g
 
 
 def make_bot(results, opens=0, ai=None, engine=None):
@@ -342,6 +348,142 @@ def _():
         assert fill_check(tsig, 100.0, 100.0) == ""
     finally:
         cfg.FILL_RECHECK = _fr
+
+
+# ======================================================================= v3.3 sửa sau review phần B
+from bot.learner import Learner, TECH_SOURCES
+
+
+def tech_n():
+    """Bộ tự học: số tín hiệu kỹ thuật (mọi dòng chưa có kết quả được gán kết quả giả +1R)."""
+    for r in STORE.db.run("SELECT sid FROM signals WHERE outcome='PENDING'", fetch=True):
+        STORE.set_outcome(r["sid"], "TP", 1.0, 1.0, 1.0, 1.0)
+    lrn = Learner(STORE, None, None, lambda m: None)
+    st_, rows_, tech = lrn.compute_stats()
+    return st_["tech"]["n"], sorted((r["symbol"].split("/")[0], r["source"]) for r in tech)
+
+
+def all_rows():
+    return [(r["symbol"].split("/")[0], r["source"], r["outcome"])
+            for r in STORE.db.run("SELECT * FROM signals ORDER BY rowid", fetch=True)]
+
+
+@section("review B 1: đủ lệnh → max_positions; trống một chỗ → lượt sau vào lệnh cùng tín hiệu; bộ tự học đếm 1 lần")
+def _():
+    ai, eng = FakeAI(), FakeEngine()
+    bot = make_bot({"ARB/USDT:USDT": (trend_sig("ARB/USDT:USDT", 6.0), "")}, opens=cfg.MAX_OPEN_POSITIONS, ai=ai, engine=eng)
+    bot.scan()
+    STORE.db.run("DELETE FROM trades WHERE symbol=?", ("OPEN0/USDT:USDT",))      # một lệnh đóng → trống một chỗ
+    M.diagnose = lambda sym, *a, **k: (trend_sig(sym, 6.0), "", {"score": 6.0})  # lượt sau: cùng nến 15m, tín hiệu mới
+    bot.scan()
+    got = all_rows()
+    assert [(s_, src) for s_, src, _o in got] == [("ARB", "max_positions"), ("ARB", "taken")] and eng.opened == ["ARB/USDT:USDT"], got
+    assert got[0][2] == "DUP" and got[1][2] == "PENDING", got          # dòng bóng trùng không chờ kết quả, không vào thống kê
+    assert not [r for r in STORE.pending_signals(50) if r["source"] == "max_positions"]
+    n, tech = tech_n()
+    assert n == 1 and tech == [("ARB", "taken")], (n, tech)
+
+
+@section("review B 4: lượt 1 AAA vào, BBB slot_taken; lượt 2 BBB vào lệnh – bộ tự học thấy BBB một lần")
+def _():
+    sigs = lambda: {"AAA/USDT:USDT": (trend_sig("AAA/USDT:USDT", 7.0), ""), "BBB/USDT:USDT": (trend_sig("BBB/USDT:USDT", 6.0), "")}
+    eng = FakeEngine()
+    bot = make_bot(sigs(), opens=0, engine=eng)
+    bot.scan()
+    res = sigs()
+    M.diagnose = lambda sym, *a, **k: (res[sym][0], "", {"score": res[sym][0].score})
+    bot.scan()                                              # AAA đang cooldown sau khi vào; BBB được hỏi AI
+    got = all_rows()
+    assert [(s_, src) for s_, src, _o in got] == [("AAA", "taken"), ("BBB", "slot_taken"), ("BBB", "taken")], got
+    assert got[1][2] == "DUP", got
+    n, tech = tech_n()
+    assert n == 2 and tech == [("AAA", "taken"), ("BBB", "taken")], (n, tech)
+    # khởi động lại (mất cooldown / shadow_seen) lúc đủ lệnh: tín hiệu đã có dòng hỏi AI không bị ghi bóng thêm
+    bot2 = make_bot({"BBB/USDT:USDT": (trend_sig("BBB/USDT:USDT", 6.0), "")}, opens=cfg.MAX_OPEN_POSITIONS)
+    STORE.db.run("DELETE FROM signals")
+    for g, src in ((trend_sig("BBB/USDT:USDT", 6.0), "ai_rejected"),):
+        g.ref_price, g.ref_ts = 100.0, time.time()
+        STORE.log_signal(g, {"decision": "SKIP", "confidence": 80}, False, source=src)
+    bot2.scan()
+    assert [(s_, src) for s_, src, _o in all_rows()] == [("BBB", "ai_rejected")], all_rows()
+    # nến tín hiệu khác (tín hiệu mới) vẫn được ghi
+    nxt = trend_sig("BBB/USDT:USDT", 6.0); nxt.candle_ts = CANDLE + 900
+    bot2.shadow_seen.clear()
+    M.diagnose = lambda sym, *a, **k: (nxt, "", {"score": 6.0})
+    bot2.scan()
+    assert [(s_, src) for s_, src, _o in all_rows()] == [("BBB", "ai_rejected"), ("BBB", "max_positions")], all_rows()
+
+
+@section("review B 2: giờ ghi trong features = giờ luật phiên đã xét (chẩn đoán 06:59:50, ghi giá 07:00:05)")
+def _():
+    STORE.db.run("DELETE FROM signals")
+    day = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d")) - 86400
+    blk = trend_sig("NNN/USDT:USDT", 6.0, hour=6)          # chẩn đoán 06:59:50 → luật 0h–7h chặn
+    assert S.blocking_rule(blk) == "night_session"
+    blk.ref_price, blk.ref_ts = 100.0, day + 7 * 3600 + 5
+    STORE.log_signal(blk, None, False, source="blocked")
+    tak = trend_sig("TTT/USDT:USDT", 6.0, hour=12)         # chẩn đoán 12:59:50 → không bị chặn, vào lệnh 13:00:05
+    assert S.blocking_rule(tak) == ""
+    tak.ref_price, tak.ref_ts = 100.0, day + 13 * 3600 + 5
+    STORE.log_signal(tak, {"decision": "LONG", "confidence": 80}, True, source="taken")
+    f = {r["symbol"].split("/")[0]: json.loads(r["features"]) for r in STORE.db.run("SELECT * FROM signals", fetch=True)}
+    assert f["NNN"]["hour"] == 6 and f["TTT"]["hour"] == 12, (f["NNN"]["hour"], f["TTT"]["hour"])
+    for r in STORE.db.run("SELECT sid FROM signals", fetch=True):
+        STORE.set_outcome(r["sid"], "TP", 1.0, 1.0, 1.0, 1.0)
+    st_ = Learner(STORE, None, None, lambda m: None).compute_stats()[0]
+    assert st_["trigger_blocked_excluded"] == 1 and st_["by_trigger"]["pullback"]["n"] == 1, st_["by_trigger"]
+    assert st_["by_rule"]["night_session"]["n"] == 1 and st_["by_rule"]["afternoon_session"]["n"] == 0, st_["by_rule"]
+
+
+@section("review B 6: đang đủ lệnh, lượt quét (~30 giây) vẫn quản lý lệnh mở mỗi MONITOR_INTERVAL")
+def _():
+    clock = [1_000_000.0]
+    fake = NS(time=lambda: clock[0], sleep=lambda s: None)
+
+    class SlowOKX(ScanOKX):
+        def ohlcv(self, *a, **k):
+            clock[0] += 0.3                                  # 2 lần đọc nến / coin → 0.6 giây / coin
+            return []
+    syms = [f"C{i}/USDT:USDT" for i in range(50)]
+    eng = FakeEngine()
+    bot = make_bot({s_: (None, "1h sideway") for s_ in syms}, opens=cfg.MAX_OPEN_POSITIONS, engine=eng)
+    bot.okx = SlowOKX(syms)
+    real, M.time = M.time, fake
+    try:
+        t0 = clock[0]
+        bot.scan()
+        t1 = clock[0]
+    finally:
+        M.time = real
+    marks = [t0] + eng.monitored + [t1]
+    assert t1 - t0 >= 29 and len(eng.monitored) >= 1, (t1 - t0, eng.monitored)
+    assert max(b - a for a, b in zip(marks, marks[1:])) <= cfg.MONITOR_INTERVAL + 0.61, marks
+
+
+@section("review B 7: bảng scans giữ 6 cột như 3.2.x (quay lui về server cũ vẫn ghi được lượt quét); n_open đọc lại đúng")
+def _():
+    cols = [r["name"] for r in STORE.db.run("PRAGMA table_info(scans)", fetch=True)]
+    assert cols == ["ts", "scanned", "passed", "reasons", "near", "top"], cols
+    STORE.db.run("DELETE FROM scans")
+    STORE.add_scan({"ts": 1.0, "scanned": 50, "passed": 1, "reasons": {"1h sideway": 30}, "near": [], "top": ["A long 6"],
+                    "n_open": 2})
+    STORE.db.run("INSERT INTO scans VALUES(?,?,?,?,?,?)", (2.0, 50, 0, "{}", "[]", "[]"))     # câu lệnh của bản 3.2.1
+    sc = {r["ts"]: r for r in STORE.scans(5)}
+    assert sc[1.0]["n_open"] == 2 and sc[1.0]["reasons"] == {"1h sideway": 30} and sc[2.0]["n_open"] == 0, sc
+
+
+@section("review B 9: /status và thẻ 'Lần quét cuối' báo đang đủ lệnh – chỉ ghi bóng, không hỏi AI")
+def _():
+    bot = make_bot({"AAA/USDT:USDT": (trend_sig("AAA/USDT:USDT", 7.0), "")}, opens=cfg.MAX_OPEN_POSITIONS)
+    bot.scan()
+    bot.engine.equity = lambda prices=None: 10.0
+    bot.engine._pnl = lambda *a: (0.0, 0.0)
+    bot.ai = NS(last_model="m", calls_today=lambda: 0, stats={"fails": 0})
+    bot.paused, bot.start_equity, bot.last_prices, bot.last_btc = False, 10.0, {}, {}
+    line = [x for x in M.Bot.status_text(bot).splitlines() if x.startswith("Quét cuối")][0]
+    assert "1 đạt – đủ %d lệnh, chỉ ghi bóng" % cfg.MAX_OPEN_POSITIONS in line, line
+    from bot.dashboard import APP_JS
+    assert "ls.n_open?` – đủ ${ls.n_open} lệnh, chỉ ghi bóng`" in APP_JS
 
 
 assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"

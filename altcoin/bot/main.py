@@ -99,7 +99,8 @@ class Bot:
         if getattr(self, "last_btc", None):
             lines.append("₿ " + mkt.describe(self.last_btc))
         if ls:
-            lines.append(f"Quét cuối {dt.datetime.fromtimestamp(ls['ts']).strftime('%H:%M')}: {ls['scanned']} coin, {ls['passed']} đạt | "
+            lines.append(f"Quét cuối {dt.datetime.fromtimestamp(ls['ts']).strftime('%H:%M')}: {ls['scanned']} coin, {ls['passed']} đạt"
+                         + (f" – đủ {ls['n_open']} lệnh, chỉ ghi bóng" if ls.get("n_open") else "") + " | "
                          + ", ".join(f"{k} {v}" for k, v in list(ls['reasons'].items())[:4]))
         for t in opens:
             p = self.last_prices.get(t["symbol"])
@@ -272,10 +273,22 @@ class Bot:
         """Quét coin, chấm tín hiệu, hỏi AI tối đa AI_CANDIDATES_PER_SCAN ứng viên (vào được 1 lệnh thì dừng).
         v3.3: đủ MAX_OPEN_POSITIONS lệnh mở vẫn quét (bản cũ ngừng im lặng – mất log quét và dữ liệu bóng ~9% thời gian):
         không hỏi AI, không vào lệnh, ứng viên đạt được ghi bóng nguồn "max_positions". Ứng viên xếp sau ứng viên vừa vào
-        lệnh (bản cũ bỏ mất, không hỏi AI cũng không ghi) được ghi bóng nguồn "slot_taken"."""
+        lệnh (bản cũ bỏ mất, không hỏi AI cũng không ghi) được ghi bóng nguồn "slot_taken". Lượt quét sau hỏi AI về đúng
+        tín hiệu đó thì dòng bóng cũ được đánh dấu trùng (storage.log_signal) – bộ tự học đếm mỗi tín hiệu một lần.
+        Đang có lệnh mở: lượt quét (~30 giây, 50 coin) xen engine.monitor() mỗi MONITOR_INTERVAL – SL/TP1/trailing không
+        bị trễ trong lúc quét (bản cũ đủ lệnh thì không quét nên không trễ)."""
         opens = self.store.open_trades()
         full = len(opens) >= cfg.MAX_OPEN_POSITIONS
         open_syms = {t["symbol"] for t in opens}
+        last_mon = [time.time()]
+
+        def keep_monitoring():
+            if opens and time.time() - last_mon[0] >= cfg.MONITOR_INTERVAL:
+                last_mon[0] = time.time()
+                try:
+                    self.engine.monitor()
+                except Exception as e:
+                    log.warning("quản lý lệnh mở giữa lượt quét lỗi: %s", str(e)[:160])
         coins = self.okx.top_altcoins(cfg.TOP_N_COINS)
         btc = mkt.btc_context(self.okx)
         self.last_btc = btc
@@ -283,6 +296,7 @@ class Bot:
                  f" | đủ {len(opens)} lệnh mở – chỉ ghi tín hiệu bóng, không hỏi AI" if full else "")
         candidates, reasons, near = [], Counter(), []
         for sym, vol, chg in coins:
+            keep_monitoring()
             if sym in open_syms or self.cooldown.get(sym, 0) > time.time():
                 continue
             try:
@@ -341,6 +355,7 @@ class Bot:
             self._shadow(sig, "not_sent")
 
         for i, sig in enumerate(candidates[:k]):   # hỏi AI lần lượt tối đa k ứng viên tốt nhất (điểm cao trước); vào được 1 lệnh thì dừng
+            keep_monitoring()
             log.info("Gửi AI: %s %s điểm %s | %s", sig.symbol, sig.side, sig.score, mkt.describe(sig.context))
             ai = self.ai.analyze(sig)
             taken = False

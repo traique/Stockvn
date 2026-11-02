@@ -117,9 +117,12 @@ class Store:
         self._add_cols("signals", [("sid", "TEXT"), ("source", "TEXT"), ("entry", real), ("sl", real), ("tp", real),
                                    ("features", "TEXT"), ("outcome", "TEXT"), ("outcome_r", real), ("outcome_ts", real),
                                    ("r_fixed", real), ("r_hybrid", real), ("r_trail", real), ("r_tp1v", "TEXT"),
-                                   # v3.3: biến thể so sánh A/B "SL 2.5 ATR + bám sóng toàn bộ" trên cùng tín hiệu (exits.ALT_*)
-                                   ("r_sl25_trail", real)])
-        self._add_cols("scans", [("n_open", "INTEGER")])    # v3.3: số lệnh mở khi quét lúc đã đủ lệnh (0 = còn chỗ)
+                                   # v3.3: biến thể so sánh A/B "SL 2.5 ATR + bám sóng toàn bộ" trên cùng tín hiệu (exits.ALT_*);
+                                   # alt_open = 1: kết quả chính đã có, biến thể còn chạy (ghi r_sl25_trail sau, không giữ
+                                   # kết quả chính chờ biến thể)
+                                   ("r_sl25_trail", real), ("alt_open", "INTEGER")])
+        # bảng scans GIỮ NGUYÊN cột (bản 3.2.x ghi "INSERT INTO scans VALUES(6 giá trị)" – thêm cột làm hỏng ghi lượt quét
+        # khi quay lui về server cũ với cùng file SQLite): số lệnh mở lúc quét khi đã đủ lệnh nằm trong JSON reasons (_n_open)
         self._add_cols("trades", [("tp1", real), ("tp1_done", "INTEGER"), ("peak", real), ("peak_ts", real),
                                   ("realized", real), ("atr", real), ("notional0", real), ("exit_mode", "TEXT"),
                                   ("sl0", real), ("risk_mult", real), ("tp1_ts", real),
@@ -239,19 +242,50 @@ class Store:
         return [(r["ts"], r["equity"]) for r in reversed(rows)]
 
     # ---- signals
+    # nguồn ghi bóng THAY cho lượt hỏi AI (ứng viên đạt nhưng chưa được hỏi) và nguồn của lượt hỏi AI
+    SHADOW_SOURCES = ("not_sent", "slot_taken", "max_positions")
+    AI_SOURCES = ("taken", "ai_weak", "ai_override", "ai_rejected", "ai_error", "skipped")
+
+    def _same_signal(self, sig, ts):
+        """Các dòng đã ghi của CÙNG tín hiệu: cùng mã, hướng và nến 15m tín hiệu (sig.candle_ts). Không có candle_ts → []."""
+        c = getattr(sig, "candle_ts", None)
+        if not c:
+            return []
+        out = []
+        for r in self.db.run("SELECT sid, source, outcome, features FROM signals WHERE symbol=? AND side=? AND ts>=? AND ts<=?",
+                             (sig.symbol, sig.side, float(c), float(ts) + 60), fetch=True):
+            try:
+                same = abs(float(json.loads(r["features"] or "{}").get("candle_ts") or 0) - float(c)) < 1
+            except Exception:
+                same = False
+            if same and r["outcome"] != "DUP":
+                out.append(r)
+        return out
+
     def log_signal(self, sig, ai, taken, source="ai"):
         """source: taken | ai_weak | ai_override | ai_rejected | ai_error | skipped | not_sent | slot_taken | max_positions |
         below_score | blocked
         v3.3: entry = giá last MỚI lúc quyết định (sig.ref_price – cùng giá lệnh paper/live vào), ts = lúc lấy giá đó;
         giá đóng nến 15m tín hiệu giữ ở features.signal_close, ATR đúng (không làm tròn) ở features.atr. Bộ tự học mô phỏng
-        từ entry ± trượt giá như paper. hour = giờ (TIMEZONE) của ts – luật phiên giờ xét theo lúc quyết định."""
+        từ entry ± trượt giá như paper. hour = giờ (TIMEZONE) mà luật phiên đã được xét (sig.context["hour"], lúc chẩn đoán –
+        main.scan chặn theo đúng giờ đó); giờ của ts chỉ dùng khi context không có.
+        Một tín hiệu một dòng (định danh: mã, hướng, nến tín hiệu): lượt quét sau hỏi AI về tín hiệu đã ghi bóng nguồn
+        SHADOW_SOURCES (đủ lệnh / lượt quét đã vào lệnh khác / xếp sau) → dòng bóng cũ thành outcome 'DUP', bộ tự học chỉ
+        đếm dòng hỏi AI; ghi bóng lại tín hiệu đã có dòng → bỏ. Trả sid của dòng mới, hoặc None nếu không ghi."""
         import uuid
         ts = getattr(sig, "ref_ts", None) or time.time()
+        same = self._same_signal(sig, ts) if source in self.SHADOW_SOURCES + self.AI_SOURCES else []
+        if source in self.SHADOW_SOURCES and any(r["source"] in self.SHADOW_SOURCES + self.AI_SOURCES for r in same):
+            log.debug("bỏ ghi bóng %s %s (%s): tín hiệu đã có dòng", sig.symbol, sig.side, source)
+            return None
         feats = {k: v for k, v in (sig.context or {}).items() if k != "last_candles"}
         feats["triggers"] = list(getattr(sig, "triggers", []) or [])
         feats["reasons"] = sig.reasons
         feats["rr"] = round(sig.rr, 2)
-        feats["hour"] = time.localtime(ts).tm_hour
+        if feats.get("hour") is None:
+            feats["hour"] = time.localtime(ts).tm_hour
+        if getattr(sig, "candle_ts", None):
+            feats["candle_ts"] = sig.candle_ts
         if getattr(sig, "atr", None):
             feats["atr"] = sig.atr
         if getattr(sig, "rejected", ""):
@@ -261,28 +295,47 @@ class Store:
         feats["entry_ref"] = "last" if ref else "close"       # close: không lấy được giá mới (mạng) – dùng giá đóng nến
         if getattr(sig, "skip", ""):
             feats["skip"] = sig.skip
+        sid = uuid.uuid4().hex[:12]
         self.db.run("""INSERT INTO signals(ts, symbol, side, score, ai_decision, ai_conf, ai_reason, ai_model, taken,
                        sid, source, entry, sl, tp, features, outcome) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             ts, sig.symbol, sig.side, sig.score,
             (ai or {}).get("decision"), (ai or {}).get("confidence"),
             (ai or {}).get("reason"), (ai or {}).get("model"), int(taken),
-            uuid.uuid4().hex[:12], source, ref or sig.price, sig.sl, sig.tp, json.dumps(feats, ensure_ascii=False),
+            sid, source, ref or sig.price, sig.sl, sig.tp, json.dumps(feats, ensure_ascii=False),
             "PENDING"))
+        if source in self.AI_SOURCES:
+            for r in same:
+                if r["source"] in self.SHADOW_SOURCES:
+                    self.db.run("UPDATE signals SET outcome='DUP', outcome_ts=?, alt_open=NULL WHERE sid=?", (time.time(), r["sid"]))
+                    log.debug("tín hiệu %s %s: dòng bóng %s (%s) trùng dòng hỏi AI %s", sig.symbol, sig.side, r["sid"],
+                              r["source"], sid)
+        return sid
 
     def pending_signals(self, limit=40):
         return self.db.run("SELECT * FROM signals WHERE outcome='PENDING' AND ts < ? ORDER BY ts LIMIT ?",
                            (time.time() - 300, limit), fetch=True)
 
-    def set_outcome(self, sid, outcome, r, r_fixed=None, r_hybrid=None, r_trail=None, r_tp1v=None, r_sl25_trail=None):
+    def set_outcome(self, sid, outcome, r, r_fixed=None, r_hybrid=None, r_trail=None, r_tp1v=None, r_sl25_trail=None,
+                    alt_open=False):
         """r_tp1v: {"1.0": R, "1.3": R, ...} – kết quả hybrid với từng mức TP1 (để tự học chọn TP1 lời nhất).
-        r_sl25_trail: R của biến thể "SL 2.5 ATR + bám sóng toàn bộ" (chỉ để so sánh, không tự áp dụng)."""
+        r_sl25_trail: R của biến thể "SL 2.5 ATR + bám sóng toàn bộ" (chỉ để so sánh, không tự áp dụng); alt_open: biến
+        thể chưa kết thúc – ghi sau bằng set_alt."""
         self.db.run("""UPDATE signals SET outcome=?, outcome_r=?, outcome_ts=?, r_fixed=?, r_hybrid=?, r_trail=?, r_tp1v=?,
-                       r_sl25_trail=? WHERE sid=?""",
+                       r_sl25_trail=?, alt_open=? WHERE sid=? AND outcome='PENDING'""",
                     (outcome, r, time.time(), r_fixed, r_hybrid, r_trail,
-                     json.dumps(r_tp1v) if r_tp1v else None, r_sl25_trail, sid))
+                     json.dumps(r_tp1v) if r_tp1v else None, r_sl25_trail, 1 if alt_open else None, sid))
+
+    def alt_pending_signals(self, limit=60):
+        """Tín hiệu đã có kết quả chính, biến thể A/B còn chạy."""
+        return self.db.run("SELECT * FROM signals WHERE alt_open=1 AND outcome NOT IN ('PENDING','DUP') ORDER BY ts LIMIT ?",
+                           (limit,), fetch=True)
+
+    def set_alt(self, sid, r):
+        self.db.run("UPDATE signals SET r_sl25_trail=?, alt_open=NULL WHERE sid=?", (r, sid))
 
     def resolved_signals(self, since=0):
-        return self.db.run("""SELECT * FROM signals WHERE outcome IS NOT NULL AND outcome NOT IN ('PENDING','NODATA')
+        """Tín hiệu có kết quả (bỏ PENDING, NODATA và DUP – dòng bóng trùng một dòng hỏi AI của cùng tín hiệu)."""
+        return self.db.run("""SELECT * FROM signals WHERE outcome IS NOT NULL AND outcome NOT IN ('PENDING','NODATA','DUP')
                               AND ts>=? ORDER BY ts""", (since,), fetch=True)
 
     # ---- nhật ký hoạt động
@@ -303,10 +356,12 @@ class Store:
 
     # ---- lịch sử quét
     def add_scan(self, s):
-        self.db.run("INSERT INTO scans(ts, scanned, passed, reasons, near, top, n_open) VALUES(?,?,?,?,?,?,?)",
-                    (s["ts"], s["scanned"], s["passed"], json.dumps(s["reasons"], ensure_ascii=False),
-                     json.dumps(s["near"], ensure_ascii=False), json.dumps(s["top"], ensure_ascii=False),
-                     int(s.get("n_open") or 0)))
+        reasons = dict(s["reasons"])
+        if s.get("n_open"):
+            reasons["_n_open"] = int(s["n_open"])      # đủ lệnh mở: chỉ ghi bóng (schema scans giữ như 3.2.x)
+        self.db.run("INSERT INTO scans(ts, scanned, passed, reasons, near, top) VALUES(?,?,?,?,?,?)",
+                    (s["ts"], s["scanned"], s["passed"], json.dumps(reasons, ensure_ascii=False),
+                     json.dumps(s["near"], ensure_ascii=False), json.dumps(s["top"], ensure_ascii=False)))
 
     def scans(self, limit=100):
         rows = self.db.run("SELECT * FROM scans ORDER BY ts DESC LIMIT ?", (limit,), fetch=True)
@@ -316,6 +371,7 @@ class Store:
                     r[k] = json.loads(r[k] or "null")
                 except Exception:
                     pass
+            r["n_open"] = r["reasons"].pop("_n_open", 0) if isinstance(r.get("reasons"), dict) else 0
         return rows
 
     # ---- nhật ký tự học

@@ -139,6 +139,9 @@ class Signal:
     ref_price: float = None
     ref_ts: float = None
     skip: str = ""            # engine không vào được (giá đã chạy, vốn, lot...) – ghi vào tín hiệu bóng
+    # v3.3: giờ mở (giây) của nến 15m tín hiệu – định danh tín hiệu (mã, hướng, nến): lượt quét sau thấy lại đúng tín hiệu
+    # đã ghi bóng (slot_taken / max_positions / not_sent) mà hỏi AI thì dòng bóng cũ bị đánh dấu trùng (storage.log_signal)
+    candle_ts: float = None
 
     @property
     def rr(self):
@@ -552,6 +555,8 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
     if trend == 0:
         if cfg.RANGE_ENABLED:
             sig, why = _range_setup(symbol, df, htf, funding, change24h, market, info)
+            if sig is not None:
+                sig.candle_ts = df.ts[-1] / 1000
             return sig, why, info
         why = "1h sideway" if h.adx < cfg.HTF_MIN_ADX else "1h không rõ xu hướng (giá/EMA lệch nhau)"
         return None, why, info
@@ -574,7 +579,7 @@ def diagnose(symbol, ohlcv_ltf, ohlcv_htf, funding=0.0, change24h=0.0, market=No
         return None, f"SL theo cấu trúc quá xa ({abs(price - sl) / a:.1f} ATR)", info
     ctx = _context(df, htf, trend, funding, change24h, market, a, "trend")
     sig = Signal(symbol, side, score, price, a, sl, tp, reasons, ctx,
-                 triggers=sorted({trig_key(t) for t in triggers}))
+                 triggers=sorted({trig_key(t) for t in triggers}), candle_ts=df.ts[-1] / 1000)
 
     min_score = min_score_for(sig)
     if score < min_score:

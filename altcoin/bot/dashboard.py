@@ -90,7 +90,7 @@ function render(d){
       <div class="r ${x.upnl>=0?'up':'dn'}">${x.upnl==null?'—':sgn(x.upnl)+f(Math.abs(x.upnl),4)}<small>USDT${x.price&&x.margin?' · '+f(100*x.upnl/x.margin,1)+'% ký quỹ':''}</small></div>
       <div class="m">Vào ${px(x.entry)} · Giá ${px(x.price)} · SL ${px(x.sl)} · ${x.exit_mode==='hybrid'?(x.tp1_done?`đã chốt ${f(100*(1-x.notional/x.notional0),0)}% (${sgn(x.realized)}${f(Math.abs(x.realized),3)}), phần còn lại bám sóng`:`TP1 ${px(x.tp1)} rồi bám sóng`):x.exit_mode==='trail'?'bám sóng (trailing ATR)':`TP ${px(x.tp)}`} · ${f(x.notional,1)} USDT · mở ${ago(x.opened_at)} trước</div></div>`).join('')
       :'<div class="empty">Không có lệnh nào đang mở – bot đang chờ tín hiệu đủ điều kiện.</div>');
-    const ls=d.last_scan;put('scan',ls?`<b>Lần quét cuối</b> ${ago(ls.ts)} trước · ${ls.scanned} coin · <b class="${ls.passed?'up':''}">${ls.passed} đạt</b>${ls.top&&ls.top.length?' ('+ls.top.map(esc).join(', ')+')':''}<br>Loại vì: ${Object.entries(ls.reasons||{}).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · ')||'—'}${ls.near&&ls.near.length?`<br>Suýt đạt: ${ls.near.map(esc).join(', ')}`:''}`:'Chưa quét lần nào.');
+    const ls=d.last_scan;put('scan',ls?`<b>Lần quét cuối</b> ${ago(ls.ts)} trước · ${ls.scanned} coin · <b class="${ls.passed?'up':''}">${ls.passed} đạt</b>${ls.top&&ls.top.length?' ('+ls.top.map(esc).join(', ')+')':''}${ls.n_open?` – đủ ${ls.n_open} lệnh, chỉ ghi bóng`:''}<br>Loại vì: ${Object.entries(ls.reasons||{}).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · ')||'—'}${ls.near&&ls.near.length?`<br>Suýt đạt: ${ls.near.map(esc).join(', ')}`:''}`:'Chưa quét lần nào.');
   }
   renderLog();
 }
@@ -112,7 +112,7 @@ function renderAI(a){
    :'<div class="empty">Chưa gọi model nào.</div>');
 }
 const SRC={taken:'Đã vào lệnh',ai_weak:'Vào (AI chưa chắc)',ai_override:'Vào dù AI phản đối yếu',ai_rejected:'AI từ chối',ai_error:'AI lỗi/hết lượt',skipped:'Không vào được (giá đã chạy/vốn/lot)',not_sent:'Không gửi AI',slot_taken:'Không gửi AI (đã vào lệnh khác)',max_positions:'Không gửi AI (đủ lệnh mở)',blocked:'Luật chặn',below_score:'Suýt đạt'};
-const OUT={TP:'TP',SL:'SL',TIMEOUT:'Hết giờ',PENDING:'Đang theo dõi',NODATA:'Không dữ liệu'};
+const OUT={TP:'TP',SL:'SL',TIMEOUT:'Hết giờ',PENDING:'Đang theo dõi',NODATA:'Không dữ liệu',DUP:'Trùng (đã hỏi AI)'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});return r.json()}
 let evTimer=null;
@@ -196,7 +196,7 @@ function renderLog(){
   else if(tab==='signals'){rows=D.signals;$('histN').textContent='';
     el.innerHTML=rows.length?rows.map(x=>{const o=x.outcome||'';const rr=x.outcome_r;let fe={};try{fe=JSON.parse(x.features||'{}')}catch(e){}
       return `<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span style="color:var(--mut);font-weight:500;font-size:12px">${t(x.ts)} · điểm ${x.score}</span></div>
-      <div class="r">${o?`<span class="out ${o}">${OUT[o]||o}${rr!=null&&o!=='PENDING'?' '+(rr>=0?'+':'')+f(rr,2)+'R':''}</span>`:''}<small>${SRC[x.source]||(x.taken?'Đã vào':'Bỏ qua')}</small></div>
+      <div class="r">${o?`<span class="out ${o}">${OUT[o]||o}${rr!=null&&o!=='PENDING'&&o!=='DUP'?' '+(rr>=0?'+':'')+f(rr,2)+'R':''}</span>`:''}<small>${SRC[x.source]||(x.taken?'Đã vào':'Bỏ qua')}</small></div>
       <div class="m">${x.ai_decision?`AI ${esc(x.ai_decision)} ${x.ai_conf??''}% · `:''}${fe.rejected?fe.rejected+' · ':''}${esc(x.ai_reason)}</div></div>`}).join(''):'<div class="empty">Chưa có tín hiệu nào qua bộ lọc.</div>'}
   else if(tab==='events'){renderEvents();return}
   else if(tab==='scans'){renderScans();return}

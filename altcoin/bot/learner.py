@@ -174,6 +174,7 @@ class Learner:
         self.last_stats = store.get("learn_stats")
         self.last_resolve = 0
         self.last_learn = 0
+        self.last_alt = 0       # lần xét gần nhất các tín hiệu chỉ còn biến thể A/B chạy (ALT_RECHECK_S)
         self._first = {}        # sid → nến 1m của khung 5m chứa lúc vào (không đổi nữa sau khi khung đóng)
 
     LEARNED_SCHEMA = 3
@@ -194,36 +195,57 @@ class Learner:
             self._reset_v33(L)
 
     def _reset_v33(self, L):
-        """Một lần (cờ kv RESET_FLAG, dùng chung khi nhiều instance chung DB): đưa MỌI tham số tự học về mặc định, xoá thời
-        gian chờ, bỏ các đề xuất đang chờ duyệt. Chúng được học bằng thống kê sai của bản trước 3.3: tín hiệu luật chặn sẵn
-        đã chặn vẫn được tính cho trọng số trigger (pullback 0.82: 22/32 tín hiệu đã bị chặn sẵn), sai số chuẩn coi tín hiệu
-        cùng ngày là độc lập (32 tín hiệu của 3 ngày, t ≈ -2.04), không cần số ngày tối thiểu, trọng số pullback bị bỏ qua
-        ở nửa số tín hiệu, giá vào cũ và phí 0.15%. Ghi log, lịch sử tự học, và thông báo (leader gửi ở tick đầu tiên)."""
+        """Một lần (cờ kv RESET_FLAG, dùng chung khi nhiều instance chung DB): tham số tự học được học bằng thống kê sai của
+        bản trước 3.3 – tín hiệu luật chặn sẵn đã chặn vẫn được tính cho trọng số trigger (pullback 0.82: 22/32 tín hiệu đã
+        bị chặn sẵn), sai số chuẩn coi tín hiệu cùng ngày là độc lập (32 tín hiệu của 3 ngày, t ≈ -2.04), không cần số ngày
+        tối thiểu, trọng số pullback bị bỏ qua ở nửa số tín hiệu, giá vào cũ và phí 0.15%.
+        * Chạy ảo + LEARN_MODE=auto (bộ tự học vốn tự áp dụng): đưa MỌI tham số tự học về mặc định, xoá thời gian chờ.
+        * Chạy thật hoặc LEARN_MODE suggest / off: KHÔNG tự đổi bộ luật đang chạy (tham số có thể do người dùng duyệt tay –
+          /apply, gợi ý AI ngày): ghi một đề xuất "Khôi phục" chờ duyệt (web hoặc /apply).
+        Cả hai: bỏ các đề xuất chờ duyệt cũ (chưa áp dụng nên luật đang chạy không đổi; chúng cũng từ thống kê cũ), ghi log,
+        lịch sử tự học, và thông báo (leader gửi ở tick đầu tiên)."""
         old = {k: L.get(k) for k in self.DEFAULTS}
         changed = {k: v for k, v in old.items() if v not in (None, [], {})}
-        L.update({k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
-                  for k, v in self.DEFAULTS.items()})
-        L["schema"] = self.LEARNED_SCHEMA
-        self.store.set("learned", L)
-        self.store.set("learn_last", {})
+        auto = self.mode == "auto" and cfg.MODE == "paper"
         dropped = 0
         for r in self.store.learn_log(500):
             if r["status"] == "pending":
                 self.store.set_learn_status(r["ts"], "rejected")
                 dropped += 1
+        if auto:
+            self._set_defaults(L)
         if changed or dropped:
             what = ", ".join(_describe_param(k, v) for k, v in changed.items()) or "không có tham số nào đang khác mặc định"
-            reason = (f"v3.3: đưa tham số tự học về mặc định ({what}"
-                      + (f"; bỏ {dropped} đề xuất chờ duyệt" if dropped else "") + "). Chúng được học bằng thống kê cũ: "
-                      "tính cả tín hiệu luật chặn sẵn đã chặn, coi tín hiệu cùng ngày là độc lập, phí 0,15% và giá vào cũ. "
-                      f"Từ nay mỗi thay đổi cần ≥ {cfg.LEARN_MIN_SAMPLES} mẫu trải trên ≥ {cfg.LEARN_MIN_DAYS} ngày, "
-                      f"t ≥ {cfg.LEARN_MIN_T:g} tính theo ngày.")
-            self.store.add_learn("migrate", "v3.3", old, self.DEFAULTS, reason, 0, 0, "applied")
-            self.store.set(self.NOTICE_KEY, "🧬 TỰ HỌC – " + reason)
+            why = ("Chúng được học bằng thống kê cũ: tính cả tín hiệu luật chặn sẵn đã chặn, coi tín hiệu cùng ngày là độc lập, "
+                   "phí 0,15% và giá vào cũ. "
+                   f"Từ nay mỗi thay đổi cần ≥ {cfg.LEARN_MIN_SAMPLES} mẫu trải trên ≥ {cfg.LEARN_MIN_DAYS} ngày, "
+                   f"t ≥ {cfg.LEARN_MIN_T:g} tính theo ngày.")
+            drop = f"; bỏ {dropped} đề xuất chờ duyệt cũ" if dropped else ""
+            if auto:
+                reason = f"v3.3: đưa tham số tự học về mặc định ({what}{drop}). {why}"
+                self.store.add_learn("migrate", "v3.3", old, self.DEFAULTS, reason, 0, 0, "applied")
+                self.store.set(self.NOTICE_KEY, "🧬 TỰ HỌC – " + reason)
+            elif changed:
+                reason = (f"v3.3: đề xuất đưa tham số tự học về mặc định ({what}{drop}) – chế độ {cfg.MODE}/{self.mode} "
+                          f"nên bot không tự đổi luật đang chạy. {why}")
+                self.store.add_learn("reset", "v3.3", old, self.DEFAULTS, reason, 0, 0, "pending")
+                self.store.set(self.NOTICE_KEY, "🧬 TỰ HỌC – đề xuất (chờ duyệt trên web hoặc /apply)\n" + reason)
+            else:
+                reason = f"v3.3: tham số tự học đang ở mặc định{drop} (đề xuất từ thống kê cũ)."
+                self.store.add_learn("migrate", "v3.3", old, old, reason, 0, 0, "applied")
+                self.store.set(self.NOTICE_KEY, "🧬 TỰ HỌC – " + reason)
             log.info("Tự học: %s", reason)
         else:
             log.info("Tự học v3.3: tham số tự học đang ở mặc định – không cần đưa về")
         self.store.set(self.RESET_FLAG, time.time())
+
+    def _set_defaults(self, L):
+        """Đưa các tham số tự học về mặc định (DEFAULTS), xoá thời gian chờ."""
+        L.update({k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+                  for k, v in self.DEFAULTS.items()})
+        L["schema"] = self.LEARNED_SCHEMA
+        self.store.set("learned", L)
+        self.store.set("learn_last", {})
 
     def _flush_notice(self):
         """Gửi thông báo đang chờ (lần đưa về mặc định v3.3) qua kênh thông báo thường – chỉ leader gọi tick()."""
@@ -250,32 +272,56 @@ class Learner:
             log.info("Tự học: đã đưa tham số bản cũ về mặc định (v3.2): %s", old)
 
     # ================================================================ 1. kết quả bóng
+    ALT_RECHECK_S = 1800    # tín hiệu chỉ còn biến thể A/B chạy: xét 30 phút/lần (trừ mã đang đọc nến cho tín hiệu khác)
+
     def resolve_pending(self):
+        """Kết quả chính (outcome, R các cách thoát, TP1) ghi ngay khi các cách thoát đang có đã xong; biến thể A/B
+        "SL 2.5 ATR + bám sóng" (chỉ để so sánh) chạy lâu hơn thì ghi sau (cột alt_open) – không giữ kết quả chính."""
         rows = self.store.pending_signals(60)
-        if not rows:
+        now = time.time()
+        alt_rows = self.store.alt_pending_signals(60)
+        if now - self.last_alt >= self.ALT_RECHECK_S:
+            self.last_alt = now
+        else:
+            syms = {r["symbol"] for r in rows}
+            alt_rows = [r for r in alt_rows if r["symbol"] in syms]
+        if not rows and not alt_rows:
             return 0
-        by_sym = defaultdict(list)
+        by_sym = defaultdict(lambda: ([], []))
         for r in rows:
-            by_sym[r["symbol"]].append(r)
+            by_sym[r["symbol"]][0].append(r)
+        for r in alt_rows:
+            by_sym[r["symbol"]][1].append(r)
         done = 0
         cost_frac = costs.after_fill_cost()     # v3.3: cùng mô hình chi phí với paper (bản cũ thiếu trượt giá chiều vào)
-        for sym, items in by_sym.items():
-            since = int(min(i["ts"] for i in items) * 1000)
+        for sym, (items, alts) in by_sym.items():
+            since = int(min(i["ts"] for i in items + alts) * 1000)
             try:
                 candles = self.okx.ex.fetch_ohlcv(sym, "5m", since=since, limit=300)
             except Exception as e:
                 log.debug("shadow %s: %s", sym, e)
-                continue
-            for it in items:
+                candles = None
+            for it in (items if candles is not None else []):
                 first = self._entry_bars(sym, it)
                 if first is False:
                     continue            # chưa đọc được nến 1m lúc vào – để lượt sau, không mô phỏng lẫn giá trước lúc vào
                 res = self._simulate_all(it, candles, cost_frac, first)
                 if res:
-                    outcome, r, rf, rh, rt, rv, ra = res
-                    self.store.set_outcome(it["sid"], outcome, r, rf, rh, rt, rv, ra)
-                    self._first.pop(it["sid"], None)
+                    outcome, r, rf, rh, rt, rv, ra, alt_open = res
+                    self.store.set_outcome(it["sid"], outcome, r, rf, rh, rt, rv, ra, alt_open=alt_open)
+                    if not alt_open:
+                        self._first.pop(it["sid"], None)
                     done += 1
+            for it in alts:
+                fin, ra = False, None
+                first = self._entry_bars(sym, it) if candles is not None else False
+                if first is not False:
+                    fin, ra = self._simulate_alt(it, candles, cost_frac, first)
+                if not fin and now - float(it["ts"]) > (cfg.RUNNER_MAX_HOLD_HOURS + 3) * 3600:
+                    fin = True          # quá hạn mà vẫn không đọc được nến (mã bị gỡ…) – bỏ biến thể, không kẹt hàng chờ
+                if fin:
+                    self.store.set_alt(it["sid"], ra)
+                    self._first.pop(it["sid"], None)
         if done:
             log.info("Tự học: cập nhật kết quả %d tín hiệu", done)
         return done
@@ -297,22 +343,18 @@ class Learner:
         return rows
 
     @staticmethod
-    def _simulate_all(it, candles, cost_frac, first=None):
-        """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1 + biến thể A/B "SL 2.5 ATR + bám sóng toàn bộ" (exits.ALT_*).
-        Kết quả chính (outcome/R) theo cách bot đang dùng. Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ
-        thoát kiểu fixed, không có biến thể (SL/TP của range là một setup khác).
+    def _plan(it):
+        """Giá khớp, SL, ATR, setup của một tín hiệu bóng – None khi lệnh không vào được (NODATA).
         v3.3 – cùng giá & phí với lệnh paper: vào ở it["entry"] (giá last lúc quyết định) trượt SLIPPAGE, 1R/TP1 tính
-        từ giá khớp đó, trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper. ATR là ATR
-        đúng của tín hiệu (features.atr, như lệnh paper); tín hiệu ghi trước khi có trường này dùng atr_pct (đã làm tròn).
-        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate).
-        Trả về (outcome, R, R fixed, R hybrid, R trail, {TP1: R}, R biến thể) hoặc None nếu chưa kết thúc."""
+        từ giá khớp đó. ATR là ATR đúng của tín hiệu (features.atr, như lệnh paper); tín hiệu ghi trước khi có trường này
+        dùng atr_pct (đã làm tròn). alt_sl: SL của biến thể A/B (setup xu hướng), None với range."""
         side, sl = it["side"], it["sl"]
         if not it["entry"] or not sl:
-            return "NODATA", 0.0, None, None, None, None, None
+            return None
         sign = 1 if side == "long" else -1
         entry = costs.entry_fill(side, it["entry"])
         if (entry - sl) * sign <= 0:        # giá khớp đã vượt SL – không vào được (engine.fill_check)
-            return "NODATA", 0.0, None, None, None, None, None
+            return None
         try:
             f = json.loads(it.get("features") or "{}")
         except Exception:
@@ -323,34 +365,66 @@ class Learner:
         is_range = f.get("setup") == "range"
         tp_fixed = it.get("tp") if is_range else None
         if is_range and tp_fixed and ((tp_fixed - entry) * sign <= 0 or (tp_fixed - it["entry"]) * sign <= 0):
-            return "NODATA", 0.0, None, None, None, None, None    # giá đã vượt TP cố định – paper cũng không vào
-        jobs = {m: dict(mode=("fixed" if is_range else m), tp_fixed=tp_fixed) for m in exits.MODES}
-        if not is_range:
-            for v in exits.TP1_CANDIDATES:
-                jobs[f"tp1:{v}"] = dict(mode="hybrid", tp1_r=v)
-            # biến thể A/B: SL từ giá đóng nến tín hiệu như strategy._levels với 2.5 ATR, vào cùng giá khớp, bám sóng toàn bộ
-            jobs["alt"] = dict(mode=exits.ALT_MODE,
-                               sl=exits.alt_sl(side, float(f.get("signal_close") or it["entry"]), sl, atr))
-        res = {}
-        for k, j in jobs.items():
-            res[k] = exits.simulate(side, entry, j.get("sl", sl), atr, j["mode"], it["ts"], candles, cost_frac,
-                                    tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"), first=first)
-        # hết dữ liệu mà chưa kết thúc → sau RUNNER_MAX_HOLD_HOURS + 1h thì đóng theo giá cuối
-        age = time.time() - it["ts"]
+            return None                     # giá đã vượt TP cố định – paper cũng không vào
+        # biến thể A/B: SL từ giá đóng nến tín hiệu như strategy._levels với 2.5 ATR, vào cùng giá khớp, bám sóng toàn bộ
+        alt_sl = None if is_range else exits.alt_sl(side, float(f.get("signal_close") or it["entry"]), sl, atr)
+        return dict(side=side, sl=sl, entry=entry, atr=atr, is_range=is_range, tp_fixed=tp_fixed, alt_sl=alt_sl)
+
+    @staticmethod
+    def _run(p, it, jobs, candles, cost_frac, first):
+        """Mô phỏng các cách thoát `jobs`. Hết dữ liệu mà chưa kết thúc → sau RUNNER_MAX_HOLD_HOURS + 1h đóng theo giá cuối
+        (TIMEOUT). Trả {job: (outcome, R)}, hoặc None khi còn job chưa kết thúc."""
+        side, entry, sl = p["side"], p["entry"], p["sl"]
+        res = {k: exits.simulate(side, entry, j.get("sl", sl), p["atr"], j["mode"], it["ts"], candles, cost_frac,
+                                 tp1_r=j.get("tp1_r"), tp_fixed=j.get("tp_fixed"), first=first) for k, j in jobs.items()}
         unfinished = [k for k in res if res[k][0] is None]
         if unfinished:
-            if age <= cfg.RUNNER_MAX_HOLD_HOURS * 3600 + 3600 or not candles:
+            if time.time() - it["ts"] <= cfg.RUNNER_MAX_HOLD_HOURS * 3600 + 3600 or not candles:
                 return None
             last = float(candles[-1][4])
             for k in unfinished:
                 risk = abs(entry - jobs[k].get("sl", sl))
                 move = ((last - entry) if side == "long" else (entry - last)) / risk - cost_frac * entry / risk
                 res[k] = ("TIMEOUT", round(move, 3))
+        return res
+
+    @staticmethod
+    def _simulate_all(it, candles, cost_frac, first=None):
+        """Mô phỏng cả 3 cách thoát + hybrid với từng mức TP1 + biến thể A/B "SL 2.5 ATR + bám sóng toàn bộ" (exits.ALT_*).
+        Kết quả chính (outcome/R) theo cách bot đang dùng. Tín hiệu setup "range" có TP riêng (dải giữa Bollinger) → chỉ
+        thoát kiểu fixed, không có biến thể (SL/TP của range là một setup khác).
+        Trừ phí hai chiều + trượt giá chiều ra (costs.after_fill_cost); tổng 0.20% như paper.
+        first: nến 1m của khung 5m chứa lúc vào – bỏ phút chứa lúc vào như paper (exits.simulate).
+        Trả về (outcome, R, R fixed, R hybrid, R trail, {TP1: R}, R biến thể, biến thể còn chạy) hoặc None nếu các cách
+        thoát đang có chưa kết thúc. Biến thể (chỉ để so sánh) KHÔNG giữ kết quả chính: còn chạy thì R biến thể = None,
+        cờ thứ 8 = True, resolve_pending ghi sau (_simulate_alt)."""
+        p = Learner._plan(it)
+        if p is None:
+            return "NODATA", 0.0, None, None, None, None, None, False
+        is_range = p["is_range"]
+        jobs = {m: dict(mode=("fixed" if is_range else m), tp_fixed=p["tp_fixed"]) for m in exits.MODES}
+        if not is_range:
+            for v in exits.TP1_CANDIDATES:
+                jobs[f"tp1:{v}"] = dict(mode="hybrid", tp1_r=v)
+        res = Learner._run(p, it, jobs, candles, cost_frac, first)
+        if res is None:
+            return None
+        fin, ra = Learner._simulate_alt(it, candles, cost_frac, first, p)
         rv = {k.split(":")[1]: res[k][1] for k in res if k.startswith("tp1:")} or None
         from .engine import current_exit_mode
         main = current_exit_mode()
         o, r = res["fixed"] if is_range else res[main]
-        return o, r, res["fixed"][1], res["hybrid"][1], res["trail"][1], rv, (res["alt"][1] if "alt" in res else None)
+        return o, r, res["fixed"][1], res["hybrid"][1], res["trail"][1], rv, ra, not fin
+
+    @staticmethod
+    def _simulate_alt(it, candles, cost_frac, first=None, p=None):
+        """Biến thể A/B của một tín hiệu: (True, R) khi đã kết thúc (hoặc TIMEOUT), (True, None) khi không có biến thể
+        (range / không vào được), (False, None) khi còn chạy."""
+        p = p or Learner._plan(it)
+        if p is None or p["alt_sl"] is None:
+            return True, None
+        res = Learner._run(p, it, {"alt": dict(mode=exits.ALT_MODE, sl=p["alt_sl"])}, candles, cost_frac, first)
+        return (False, None) if res is None else (True, res["alt"][1])
 
     # ================================================================ 2. thống kê
     def compute_stats(self):
@@ -613,6 +687,8 @@ class Learner:
         elif k == "ai_veto_conf":
             L["ai_veto_conf"] = int(p["new"])
             self._touch("ai_veto_conf")
+        elif k == "reset":                  # đề xuất "Khôi phục" (v3.3 ở chế độ chạy thật / suggest / off) được duyệt
+            self._set_defaults(L)
         self.store.set("learned", L)
         log.info("Tự học áp dụng: %s %s → %s", k, p["key"], p["new"])
 
