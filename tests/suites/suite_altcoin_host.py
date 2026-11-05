@@ -316,9 +316,9 @@ t.ok("...not over the altcoin's own (panel ALT_, or altcoin/bot.env; a <...> pla
 # The models: the stock's when the altcoin names none (the stock's own defaults when the stock sets none either)
 from tradingagents.llm_clients.fallback_client import ENDPOINTS  # noqa: E402
 
-t.ok("models: the supervisor's defaults are the stock's (fallback_client.ENDPOINTS)",
+t.ok("models: the supervisor's defaults are the stock's (fallback_client.ENDPOINTS); 9Router: auto (it picks the model)",
      (ah.ROUTER9_DEFAULT_MODEL, ah.OPENROUTER_DEFAULT_MODEL)
-     == (ENDPOINTS["router9"].default_model, ENDPOINTS["openrouter"].default_model))
+     == (ENDPOINTS["router9"].default_model, ENDPOINTS["openrouter"].default_model) and ah.ROUTER9_DEFAULT_MODEL == "auto")
 t.ok("models: nothing set anywhere → the stock's defaults (9Router, OpenRouter first then the altcoin's free list)",
      env.get("NINEROUTER_MODELS") == ah.ROUTER9_DEFAULT_MODEL
      and env.get("OPENROUTER_MODELS") == f"{ah.OPENROUTER_DEFAULT_MODEL},auto"

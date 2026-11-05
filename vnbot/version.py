@@ -27,13 +27,14 @@ from pathlib import Path
 
 VERSION = "v1.17.1"
 RELEASED = "2026-11-05"
-RELEASE_BUILD = "111f496"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "06f6369"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.17.1", "2026-11-05", (
         "Altcoin dùng chung model AI của Cổ phiếu khi không khai model riêng (trước: chỉ chung khoá)",
+        "9Router mặc định auto (trước gpt-4o-mini): 9Router tự chọn model cho cả Cổ phiếu lẫn Altcoin",
         "9Router: model của AI phản biện (QUICK_MODEL, rồi ROUTER9_MODEL), chỉ khi cùng địa chỉ 9Router",
         "OpenRouter: OPENROUTER_MODEL của Cổ phiếu trước, rồi các model free Altcoin tự dò",
         "Log khởi động ghi model đang dùng chung, hoặc biến nào giữ AI riêng của Altcoin",

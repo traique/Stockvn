@@ -94,7 +94,7 @@ Chạy tay (ví dụ khi Actions tắt): `python scripts/build_botkeep_bundle.py
 # AI - ít nhất một dòng có key
 ROUTER9_BASE_URL=https://<9router-cua-ban>/v1
 ROUTER9_API_KEY=...
-ROUTER9_MODEL=gpt-4o-mini
+ROUTER9_MODEL=auto          # 9Router tự chọn model; Altcoin dùng chung
 GROQ_API_KEY=...            # dự phòng, nên có
 OPENROUTER_API_KEY=...      # dự phòng, nên có
 
@@ -582,7 +582,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `PROVIDER_ORDER` | `router9,groq,openrouter,xai` | Thứ tự dự phòng AI |
-| `ROUTER9_BASE_URL`, `ROUTER9_API_KEY`, `ROUTER9_MODEL` | - / - / `gpt-4o-mini` | 9Router |
+| `ROUTER9_BASE_URL`, `ROUTER9_API_KEY`, `ROUTER9_MODEL` | - / - / `auto` | 9Router (`auto`: 9Router tự chọn model; Altcoin dùng chung) |
 | `GROQ_API_KEY`, `GROQ_MODEL` | - / `openai/gpt-oss-20b` | Groq |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | - / model `:free` | OpenRouter |
 | `XAI_API_KEY`, `XAI_MODEL` | - / `grok-4-fast` | Grok (tuỳ chọn) |

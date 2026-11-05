@@ -82,7 +82,7 @@ IGNORED = re.compile(r"ALT_(TELEGRAM_|ZOOM_|PEER_|DASHBOARD_)|ALT_(SELF_URL|KEEP
 FALLBACKS = {"OPENROUTER_API_KEY": "OPENROUTER_API_KEY", "NINEROUTER_BASE_URL": "ROUTER9_BASE_URL",
              "NINEROUTER_API_KEY": "ROUTER9_API_KEY"}      # the child's name: the stock's
 # The stock's models when unset: tradingagents/llm_clients/fallback_client.py ENDPOINTS (not imported: langchain)
-ROUTER9_DEFAULT_MODEL = "gpt-4o-mini"
+ROUTER9_DEFAULT_MODEL = "auto"                  # 9Router picks the model
 OPENROUTER_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 OKX_KEYS = ("ALT_OKX_API_KEY", "ALT_OKX_API_SECRET", "ALT_OKX_PASSPHRASE")
 KEEP_SECRET = "__BOTKEEP_KEEP_SECRET_"

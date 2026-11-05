@@ -156,7 +156,7 @@ Altcoin hỏi model `auto` của 9Router và model free tự dò của OpenRoute
 
 | Altcoin cần | Lấy từ Cổ phiếu | Khi nào |
 |---|---|---|
-| `NINEROUTER_MODELS` | `QUICK_MODEL`, không có thì `ROUTER9_MODEL` (model của AI phản biện), không có nữa thì `gpt-4o-mini` như Cổ phiếu | Altcoin dùng **cùng địa chỉ** 9Router với Cổ phiếu (tên model của 9Router này có thể không có ở 9Router khác) |
+| `NINEROUTER_MODELS` | `QUICK_MODEL`, không có thì `ROUTER9_MODEL` (model của AI phản biện), không có nữa thì `auto` như Cổ phiếu (9Router tự chọn model) | Altcoin dùng **cùng địa chỉ** 9Router với Cổ phiếu (tên model của 9Router này có thể không có ở 9Router khác) |
 | `OPENROUTER_MODELS` | `OPENROUTER_MODEL` (trống: model mặc định của Cổ phiếu), **thử trước**; lỗi hoặc hết lượt thì sang các model free Altcoin tự dò | Altcoin có khoá OpenRouter (riêng hay chung) |
 
 Log khởi động ghi "Altcoin dùng chung model AI của Cổ phiếu: 9Router …, OpenRouter …". Altcoin khai model riêng

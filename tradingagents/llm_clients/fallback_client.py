@@ -31,7 +31,8 @@ Configuration (environment):
     PROVIDER_ORDER       router9,groq,openrouter,xai (default; unset keys are skipped)
     ROUTER9_BASE_URL     9Router endpoint, OpenAI-compatible (…/v1)
     ROUTER9_API_KEY      9Router key
-    ROUTER9_MODEL        default model on 9Router (the tier model overrides it)
+    ROUTER9_MODEL        default model on 9Router (the tier model overrides it); default
+                         "auto": 9Router picks the model (the altcoin uses the same)
     GROQ_API_KEY         GROQ_MODEL (default openai/gpt-oss-20b)
     OPENROUTER_API_KEY   OPENROUTER_MODEL (default a ":free" model)
     XAI_API_KEY          XAI_MODEL (default grok-4-fast) - Grok, optional
@@ -81,7 +82,7 @@ class ProviderEndpoint:
 
 ENDPOINTS = {
     "router9": ProviderEndpoint("router9", "9Router", "ROUTER9_BASE_URL", None,
-                                "ROUTER9_API_KEY", "ROUTER9_MODEL", "gpt-4o-mini"),
+                                "ROUTER9_API_KEY", "ROUTER9_MODEL", "auto"),
     "groq": ProviderEndpoint("groq", "Groq", "GROQ_BASE_URL", "https://api.groq.com/openai/v1",
                              "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-20b"),
     "openrouter": ProviderEndpoint("openrouter", "OpenRouter", "OPENROUTER_BASE_URL",
