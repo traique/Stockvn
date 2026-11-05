@@ -483,12 +483,19 @@ def create_app(settings: Settings, jobs: JobQueue, watchlist: Watchlist, trader=
         ok = ver.is_release()
         check = ('<span class="badge b-ok">đúng bản phát hành</span>' if ok
                  else '<span class="badge b-err">khác bản phát hành</span>')
+        from vnbot import altcoin_ai
+
+        app = (altcoin_ai.info() or {}).get("app") or {}
         stats = ui.strip([
             ("Phiên bản", html.escape(ver.VERSION), f"phát hành {html.escape(ver._ddmmyyyy(ver.RELEASED))}"),
             ("Bản dựng", f"<code>{html.escape(ver.build())}</code>", check),
             ("Đang chạy từ", html.escape(ver.started_text()), html.escape(ver.uptime())),
             ("Python", html.escape(platform.python_version()), html.escape(platform.system())),
-        ])
+        ] + ([("Altcoin", html.escape(str(app["version"])),
+               f'bản dựng <code>{html.escape(str(app.get("build") or "?"))}</code> · '
+               + ('<span class="badge b-ok">đúng bản phát hành</span>' if app.get("release")
+                  else '<span class="badge b-err">khác bản phát hành</span>')
+               + ' · <a href="/altcoin/phienban">chi tiết</a>')] if app.get("version") else []))
         warn = "" if ok else ui.alert(
             f"Code đang chạy (bản dựng {ver.build()}) khác bản phát hành {ver.VERSION} ({ver.RELEASE_BUILD}): có thể "
             "upload thiếu file, lẫn file của bản cũ, hoặc code đã được sửa. Hãy upload lại đủ gói rồi khởi động lại.",
@@ -723,20 +730,56 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
         log = CriticLog(settings.data_dir)
         st = log.stats()
         alerts = _alerts_today()
+        from vnbot import altcoin_ai
+
         prow = []
         for p in providers:
-            state = (f'<span class="badge b-watch">tạm nghỉ {p["resting_seconds"]} giây</span>'
-                     if p["resting_seconds"] else '<span class="badge b-ok">sẵn sàng</span>')
-            calls = f'{p["calls_today"]} / {p["cap"]}' if p["cap"] else str(p["calls_today"])
-            prow.append(f'<tr><td><b>{html.escape(p["label"])}</b><div class="muted small">{html.escape(p["model"])}</div>'
+            if p["resting_seconds"]:
+                state = f'<span class="badge b-watch">tạm nghỉ {p["resting_seconds"]} giây</span>'
+            elif p.get("peer_resting"):
+                state = '<span class="badge b-watch">nghỉ theo Altcoin</span>'
+            else:
+                state = '<span class="badge b-ok">sẵn sàng</span>'
+            used = p["calls_today"] + p.get("peer_calls", 0)
+            calls = str(p["calls_today"]) + (f' <span class="muted small">+ {p["peer_calls"]} Altcoin</span>'
+                                             if p.get("shared_with") else "")
+            calls += f' / {p["cap"]}' if p["cap"] else ""
+            model = altcoin_ai.model_text(p["model"], p.get("served"))
+            cooling = p.get("cooling") or {}
+            note = (f'<div class="muted small">dùng chung khoá với Altcoin: lượt và lúc nghỉ tính chung</div>'
+                    if p.get("shared_with") else "")
+            note += (f'<div class="muted small">tạm bỏ qua {len(cooling)} model: '
+                     + html.escape(", ".join(sorted(cooling)[:3])) + "</div>" if cooling else "")
+            prow.append(f'<tr><td><b>{html.escape(p["label"])}</b><div class="muted small">{html.escape(model)}</div>'
                         + (f'<div class="small neg">{html.escape(p["last_error"])}</div>' if p["last_error"] else "")
-                        + f'</td><td>{state}</td><td class="num">{calls}{ui.meter(p["calls_today"], p["cap"])}</td></tr>')
+                        + note + f'</td><td>{state}</td><td class="num">{calls}{ui.meter(used, p["cap"])}</td></tr>')
         budget = ui.card(
             "Hạn mức AI hôm nay",
             ui.table([("Nhà cung cấp", ""), ("Trạng thái", ""), ("Lượt", "num")], prow,
                      "Chưa cấu hình nhà cung cấp AI (ROUTER9_*, GROQ_API_KEY, OPENROUTER_API_KEY)."),
             sub=f"Đã dùng {usage['total']}" + (f" / {usage['cap']} lượt (LLM_MAX_CALLS_PER_DAY)" if usage["cap"] else " lượt")
                 + " · tính theo ngày giờ Việt Nam", flush=True)
+        alt = altcoin_ai.info()
+        alt_card = ""
+        if alt:
+            ai = alt.get("ai") or {}
+            version = altcoin_ai.version_line(alt)
+            body_alt = (f'<p class="small" style="margin:0 0 6px">{html.escape(version)}</p>' if version else "")
+            if ai.get("enabled"):
+                body_alt += (f'<p class="small" style="margin:0">Hôm nay <b>{ai.get("calls_today", 0)}</b> / '
+                             f'{ai.get("budget", "?")} lượt (hạn mức riêng của Altcoin)'
+                             + ui.meter(ai.get("calls_today", 0), ai.get("budget") or 0) + "</p>")
+                if ai.get("last_model"):
+                    body_alt += (f'<p class="small" style="margin:6px 0 0">Model trả lời gần nhất: '
+                                 f'<b>{html.escape(altcoin_ai.model_text(ai.get("last_model"), ai.get("last_served")))}</b></p>')
+                if ai.get("last_error"):
+                    body_alt += f'<p class="small neg" style="margin:6px 0 0">{html.escape(str(ai["last_error"])[:200])}</p>'
+            else:
+                body_alt += '<p class="small muted" style="margin:0">AI của Altcoin đang tắt hoặc chưa có nhà cung cấp.</p>'
+            alt_card = ui.card("Altcoin · AI", body_alt,
+                               sub=f"Cập nhật {altcoin_ai.ago((ai or {}).get('ts') or alt['ts'])} · nhà cung cấp dùng chung khoá "
+                                   "thì lượt và lúc nghỉ tính chung (bảng bên)",
+                               action='<a class="btn btn-ghost" href="/altcoin/ai">Xem</a>')
         feed = "".join(f'<li><span class="t">{html.escape(a.get("at", ""))}</span><span>{html.escape(a.get("text", ""))}</span></li>'
                        for a in reversed(alerts))
         if not feed:
@@ -758,7 +801,9 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
                        else '<span class="badge b-err">phản đối</span>')
             crow.append(f'<tr><td class="num muted">{html.escape(r["day"])}</td><td class="sym">{html.escape(r["code"])}</td>'
                         f'<td>{ui.action_badge(r["action"])}</td><td>{verdict} <span class="muted small">{r["confidence"]}%</span></td>'
-                        f'<td class="small">{html.escape(r.get("reason", ""))}</td><td>{result}</td></tr>')
+                        f'<td class="small">{html.escape(r.get("reason", ""))}'
+                        + (f'<div class="muted small">{html.escape(r["model"])}</div>' if r.get("model") else "")
+                        + f'</td><td>{result}</td></tr>')
         agree, reject = st["AGREE"], st["REJECT"]
 
         def r_of(x):
@@ -796,6 +841,7 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
                     "đều được lưu lại và đối chiếu với diễn biến các phiên sau, giúp bạn đánh giá mức độ đáng tin của AI.")
             + stats
             + '<div class="grid g2">' + budget + alert_card + "</div>"
+            + (f'<div class="mt">{alt_card}</div>' if alt_card else "")
             + '<div class="mt">'
             + ui.card("AI phản biện gần đây",
                       ui.table([("Ngày", ""), ("Mã", ""), ("Hệ thống", ""), ("AI", ""), ("Lý do", ""), ("Kết quả", "")],

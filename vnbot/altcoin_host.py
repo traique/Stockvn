@@ -12,8 +12,10 @@ Off unless ALTCOIN_ENABLED=1: then nothing starts and nothing changes but one lo
   Telegram, Zoom, Render peer, login) are only reported (``ignored_keys``); Botkeep's
   masked values are dropped (``dropped_secrets``). With no key of its own, the altcoin
   shares the stock's OpenRouter and 9Router keys; with no model of its own, the stock's
-  models too (9Router: the critic's QUICK_MODEL/ROUTER9_MODEL, on the same 9Router only;
-  OpenRouter: OPENROUTER_MODEL first, then the free models it finds itself).
+  models too (9Router: the critic's QUICK_MODEL/ROUTER9_MODEL, "auto" by default, on the same
+  9Router only; OpenRouter: OPENROUTER_MODEL, "auto" by default). AI_SHARE_DIR (the stock's,
+  <DATA_DIR>/ai_share) is passed on: the two bots count their requests on a shared key together
+  and honour each other's rests (tradingagents/llm_clients/ai_share.py).
 - Live only when ALT_MODE=live, ALT_I_UNDERSTAND_THE_RISK=yes, ALT_LIVE_ACK equal to the
   instance name and the three ALT_OKX_* keys are all set. ALT_MODE neither empty nor paper
   and a condition missing: off (disabled), with the reason - never paper on what is likely
@@ -83,7 +85,7 @@ FALLBACKS = {"OPENROUTER_API_KEY": "OPENROUTER_API_KEY", "NINEROUTER_BASE_URL": 
              "NINEROUTER_API_KEY": "ROUTER9_API_KEY"}      # the child's name: the stock's
 # The stock's models when unset: tradingagents/llm_clients/fallback_client.py ENDPOINTS (not imported: langchain)
 ROUTER9_DEFAULT_MODEL = "auto"                  # 9Router picks the model
-OPENROUTER_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+OPENROUTER_DEFAULT_MODEL = "auto"               # the free models listed now, ranked as the altcoin ranks them
 OKX_KEYS = ("ALT_OKX_API_KEY", "ALT_OKX_API_SECRET", "ALT_OKX_PASSPHRASE")
 KEEP_SECRET = "__BOTKEEP_KEEP_SECRET_"
 SECRET_NAME = re.compile(r"TOKEN|SECRET|KEY|PASS|DATABASE_URL")
@@ -174,8 +176,9 @@ def child_env(environ, files: dict) -> tuple[dict[str, str], dict[str, list[str]
 def _share_models(environ, files: dict, env: dict, info: dict) -> None:
     """The stock's AI models for an altcoin that names none of its own (panel ALT_, or
     altcoin/bot.env; info["own_models"] then names it): on the stock's 9Router (same address),
-    the model of the stock's critic (QUICK_MODEL, else ROUTER9_MODEL); on OpenRouter, the
-    stock's OPENROUTER_MODEL first, then the free models the altcoin finds itself ("auto")."""
+    the model of the stock's critic (QUICK_MODEL, else ROUTER9_MODEL, else "auto"); on OpenRouter,
+    the stock's OPENROUTER_MODEL as it is (default "auto": the free models listed now, which both
+    bots rank the same way)."""
     info.update(own_models=[], models={})
 
     def own(*names: str) -> list[str]:
@@ -205,7 +208,7 @@ def _share_models(environ, files: dict, env: dict, info: dict) -> None:
             info["own_models"] += mine
         else:
             name, model = stock_model(("OPENROUTER_MODEL",), OPENROUTER_DEFAULT_MODEL)
-            env["OPENROUTER_MODELS"] = f"{model},auto"
+            env["OPENROUTER_MODELS"] = model            # the same syntax: ids and "auto", comma separated
             info["shared"].append(name)
             info["models"]["OpenRouter"] = model
 
@@ -457,6 +460,7 @@ class Supervisor:
         if self.fresh:
             cmd.append("--allow-empty-db")
         read_end, write_end = os.pipe()
+        env["AI_SHARE_DIR"] = self.environ.get("AI_SHARE_DIR") or str(self.stock_dir / "ai_share")
         env.update(HUB_FD=str(write_end), HUB_TOKEN=tokens[0], HUB_CMD_TOKEN=tokens[1],
                    HUB_DROPPED=",".join(info["dropped_secrets"]))      # names only: the banner of its pages
         try:

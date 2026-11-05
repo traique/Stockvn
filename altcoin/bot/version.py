@@ -16,13 +16,20 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.3.0"
-RELEASED = "2026-11-02"
-RELEASE_BUILD = "a1a7ad4"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.3.1"
+RELEASED = "2026-11-05"
+RELEASE_BUILD = "7fe2138"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.3.1", "2026-11-05", (
+        "Chạy trong Stockvn: provider dùng chung khoá với Cổ phiếu thì đếm lượt chung theo hạn mức ngày của Cổ phiếu (OpenRouter 45)",
+        "Cổ phiếu cho 9Router/OpenRouter nghỉ (429, sai khoá, cổng sập) thì Altcoin cũng nghỉ và ngược lại – không gọi vào provider vừa từ chối",
+        "OpenRouter: model bận 'upstream' chỉ nghỉ riêng model đó; lỗi kết nối trả lại lượt đã đếm (như Cổ phiếu)",
+        "Ghi model thật đã trả lời (9Router 'auto' tự chọn): trang AI, /alt ai, quyết định gần nhất ghi '9router/auto → model'",
+        "Trạng thái AI và phiên bản Altcoin gửi sang trang /ai, /trangthai, /phienban của Cổ phiếu",
+    )),
     ("3.3.0", "2026-11-02", (
         "Chạy ảo vào lệnh ở giá last lúc quyết định (+ trượt giá), không ở giá đóng nến 15m cũ vài phút; chỉ bỏ khi giá khớp đã vượt SL (range: vượt TP)",
         "Cổng xét lại ở giá mới (ngược 0,5R, SL > 3 ATR, R:R range) là đổi chiến lược nên tắt sẵn – muốn dùng thì đặt FILL_RECHECK=true",
