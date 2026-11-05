@@ -650,7 +650,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `ALT_MODE`, `ALT_I_UNDERSTAND_THE_RISK`, `ALT_LIVE_ACK`, `ALT_OKX_API_KEY`, `ALT_OKX_API_SECRET`, `ALT_OKX_PASSPHRASE` | `paper` / - | Altcoin chạy thật chỉ khi `ALT_MODE=live`, `ALT_I_UNDERSTAND_THE_RISK=yes`, `ALT_LIVE_ACK` = tên instance và đủ 3 khoá OKX; thiếu một cái thì Altcoin không chạy |
 | `ALT_DATABASE_URL` | - | Postgres riêng của Altcoin; trống = SQLite trong `ALT_DATA_DIR`. Không bao giờ là `DATABASE_URL` |
 | `ALT_DATA_DIR`, `ALT_INSTANCE_NAME`, `ALT_PUBLIC_URL` | `data/altcoin` / `botkeep` / `<PUBLIC_URL>/altcoin` | Thư mục dữ liệu, tên instance, địa chỉ trang Altcoin |
-| `ALT_OPENROUTER_API_KEY`, `ALT_NINEROUTER_*` | khoá của Cổ phiếu | AI riêng của Altcoin; trống thì dùng chung `OPENROUTER_API_KEY`, `ROUTER9_*` |
+| `ALT_OPENROUTER_API_KEY`, `ALT_NINEROUTER_*`, `ALT_OPENROUTER_MODELS` | khoá và model của Cổ phiếu | AI riêng của Altcoin; trống thì dùng chung `OPENROUTER_API_KEY`, `ROUTER9_*` và cả model (`QUICK_MODEL`/`ROUTER9_MODEL` trên cùng 9Router, `OPENROUTER_MODEL` trước rồi model free tự dò), xem `docs/ALTCOIN_TRONG_STOCKVN.md` mục 4.3 |
 | `ALT_<TÊN>` | - | Mọi biến khác của Altcoin, ví dụ `ALT_LEVERAGE=5`. Không có `ALT_TELEGRAM_*`, `ALT_ZOOM_*` (bị bỏ qua). Đủ danh sách: `docs/ALTCOIN_TRONG_STOCKVN.md` mục 4 |
 
 ## 10. Giới hạn và xử lý sự cố

@@ -11,7 +11,9 @@ Off unless ALTCOIN_ENABLED=1: then nothing starts and nothing changes but one lo
   DATABASE_URL...) never pass. The ALT_ keys of what the altcoin no longer has (its own
   Telegram, Zoom, Render peer, login) are only reported (``ignored_keys``); Botkeep's
   masked values are dropped (``dropped_secrets``). With no key of its own, the altcoin
-  shares the stock's OpenRouter and 9Router keys.
+  shares the stock's OpenRouter and 9Router keys; with no model of its own, the stock's
+  models too (9Router: the critic's QUICK_MODEL/ROUTER9_MODEL, on the same 9Router only;
+  OpenRouter: OPENROUTER_MODEL first, then the free models it finds itself).
 - Live only when ALT_MODE=live, ALT_I_UNDERSTAND_THE_RISK=yes, ALT_LIVE_ACK equal to the
   instance name and the three ALT_OKX_* keys are all set. ALT_MODE neither empty nor paper
   and a condition missing: off (disabled), with the reason - never paper on what is likely
@@ -79,6 +81,9 @@ SUPERVISOR_KEYS = {"ALT_MODE", "ALT_I_UNDERSTAND_THE_RISK", "ALT_LIVE_ACK", "ALT
 IGNORED = re.compile(r"ALT_(TELEGRAM_|ZOOM_|PEER_|DASHBOARD_)|ALT_(SELF_URL|KEEPALIVE_INTERVAL|SUPPORT_EMAIL)$")
 FALLBACKS = {"OPENROUTER_API_KEY": "OPENROUTER_API_KEY", "NINEROUTER_BASE_URL": "ROUTER9_BASE_URL",
              "NINEROUTER_API_KEY": "ROUTER9_API_KEY"}      # the child's name: the stock's
+# The stock's models when unset: tradingagents/llm_clients/fallback_client.py ENDPOINTS (not imported: langchain)
+ROUTER9_DEFAULT_MODEL = "gpt-4o-mini"
+OPENROUTER_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 OKX_KEYS = ("ALT_OKX_API_KEY", "ALT_OKX_API_SECRET", "ALT_OKX_PASSPHRASE")
 KEEP_SECRET = "__BOTKEEP_KEEP_SECRET_"
 SECRET_NAME = re.compile(r"TOKEN|SECRET|KEY|PASS|DATABASE_URL")
@@ -144,7 +149,8 @@ def live_gate(environ, instance: str) -> tuple[str, str | None]:
 def child_env(environ, files: dict) -> tuple[dict[str, str], dict[str, list[str]]]:
     """The child's environment: an allowlist, never a copy of os.environ (/caidat puts the
     stock's tokens there), plus ALT_<NAME> as <NAME>. ``files``: file_values(), so a shared
-    key never hides the altcoin's own. Returns (env, {ignored_keys, dropped_secrets, shared})."""
+    key never hides the altcoin's own. Returns (env, {ignored_keys, dropped_secrets, shared,
+    own_models, models})."""
     env = {k: v for k, v in environ.items() if k in SYSTEM_KEYS or k.startswith("LC_")}
     info: dict[str, list[str]] = {"ignored_keys": [], "dropped_secrets": [], "shared": []}
     for key, value in sorted(environ.items()):
@@ -160,8 +166,48 @@ def child_env(environ, files: dict) -> tuple[dict[str, str], dict[str, list[str]
         if name not in env and not _set_value(files.get(name)) and _set_value(environ.get(stock)):
             env[name] = environ[stock].strip()
             info["shared"].append(stock)
+    _share_models(environ, files, env, info)
     env.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     return env, info
+
+
+def _share_models(environ, files: dict, env: dict, info: dict) -> None:
+    """The stock's AI models for an altcoin that names none of its own (panel ALT_, or
+    altcoin/bot.env; info["own_models"] then names it): on the stock's 9Router (same address),
+    the model of the stock's critic (QUICK_MODEL, else ROUTER9_MODEL); on OpenRouter, the
+    stock's OPENROUTER_MODEL first, then the free models the altcoin finds itself ("auto")."""
+    info.update(own_models=[], models={})
+
+    def own(*names: str) -> list[str]:
+        return [n for n in names if n in env or _set_value(files.get(n))]
+
+    def stock_model(names: tuple[str, ...], default: str) -> tuple[str, str]:
+        for name in names:
+            if _set_value(environ.get(name)):
+                return name, environ[name].strip()
+        return names[-1], default
+
+    stock_base = _set_value(environ.get("ROUTER9_BASE_URL")).rstrip("/")
+    alt_base = (_set_value(files.get("NINEROUTER_BASE_URL")) or env.get("NINEROUTER_BASE_URL", "")).strip().rstrip("/")
+    if stock_base and alt_base == stock_base:
+        mine = own("NINEROUTER_MODELS", "NINEROUTER_MODEL")
+        if mine:
+            info["own_models"] += mine
+        else:
+            name, env["NINEROUTER_MODELS"] = stock_model(("QUICK_MODEL", "ROUTER9_MODEL"), ROUTER9_DEFAULT_MODEL)
+            info["shared"].append(name)
+            info["models"]["9Router"] = env["NINEROUTER_MODELS"]
+    elif stock_base and alt_base:
+        info["own_models"].append("NINEROUTER_BASE_URL")       # another 9Router: its model names may differ
+    if "OPENROUTER_API_KEY" in env or _set_value(files.get("OPENROUTER_API_KEY")):
+        mine = own("OPENROUTER_MODELS")
+        if mine:
+            info["own_models"] += mine
+        else:
+            name, model = stock_model(("OPENROUTER_MODEL",), OPENROUTER_DEFAULT_MODEL)
+            env["OPENROUTER_MODELS"] = f"{model},auto"
+            info["shared"].append(name)
+            info["models"]["OpenRouter"] = model
 
 
 def db_fingerprint(url) -> str:
@@ -439,6 +485,12 @@ class Supervisor:
                                ", ".join(info["dropped_secrets"]))
             if info["shared"]:
                 logger.info("Altcoin dùng %s của Cổ phiếu (chung hạn mức)", ", ".join(info["shared"]))
+            if info["models"]:
+                logger.info("Altcoin dùng chung model AI của Cổ phiếu: %s",
+                            ", ".join(f"{k} {v}" for k, v in info["models"].items()))
+            if info["own_models"]:
+                logger.info("Altcoin giữ AI riêng (%s, trên panel ALT_… hoặc altcoin/bot.env): không theo model của "
+                            "Cổ phiếu – xoá các biến này để dùng chung", ", ".join(info["own_models"]))
         self._set(state="starting", reason=None, pid=proc.pid, port=port, started=time.time(),
                   restarts=self._spawns - 1, leader=False, seam_ok=None, **self._panel)
         self._readers = [threading.Thread(target=self._read_log, args=(proc.stdout,), name="altcoin-log", daemon=True),

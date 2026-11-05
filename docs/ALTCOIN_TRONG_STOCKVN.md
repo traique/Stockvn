@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `a1a7ad4`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.17.1** và **Altcoin 3.3.0** (bản dựng `a1a7ad4`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -134,7 +134,8 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_PUBLIC_URL` | `<PUBLIC_URL>/altcoin` | Địa chỉ trang Altcoin, ít khi cần đặt |
 | `ALT_LEADER_TTL` | 90 | Số giây một instance được coi là còn sống (khoá leader, chặn instance thứ hai) |
 | `ALT_OPENROUTER_API_KEY` | trống | Khoá OpenRouter riêng của Altcoin |
-| `ALT_NINEROUTER_BASE_URL`, `ALT_NINEROUTER_API_KEY`, `ALT_NINEROUTER_MODELS` | trống | 9Router riêng của Altcoin |
+| `ALT_NINEROUTER_BASE_URL`, `ALT_NINEROUTER_API_KEY`, `ALT_NINEROUTER_MODELS` | trống | 9Router riêng của Altcoin. Trống = 9Router và model của Cổ phiếu (mục 4.3) |
+| `ALT_OPENROUTER_MODELS` | trống | Model OpenRouter riêng của Altcoin (`auto` = chỉ tự dò model free). Trống = `OPENROUTER_MODEL` của Cổ phiếu trước, rồi model free tự dò |
 | `ALT_CUSTOM_*` | trống | Nhà cung cấp AI tự chọn của Altcoin (không dùng chung với Cổ phiếu) |
 | `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo, đặt sau lần khởi động 3.3.0 đầu tiên** (mục 10.1) |
 
@@ -149,6 +150,19 @@ Thiếu khoá riêng (cả trên panel lẫn trong `altcoin/bot.env`) thì Altco
 | `NINEROUTER_API_KEY` | `ROUTER9_API_KEY` |
 
 Hai bot khi đó chia nhau hạn mức (OpenRouter free khoảng 50 lượt/ngày). Nên đặt `ALT_OPENROUTER_API_KEY` riêng nếu có.
+
+Từ Stockvn v1.17.1 Altcoin cũng dùng chung **model** của Cổ phiếu khi không khai model riêng (trước đó chỉ chung khoá:
+Altcoin hỏi model `auto` của 9Router và model free tự dò của OpenRouter, khác model Cổ phiếu dùng):
+
+| Altcoin cần | Lấy từ Cổ phiếu | Khi nào |
+|---|---|---|
+| `NINEROUTER_MODELS` | `QUICK_MODEL`, không có thì `ROUTER9_MODEL` (model của AI phản biện), không có nữa thì `gpt-4o-mini` như Cổ phiếu | Altcoin dùng **cùng địa chỉ** 9Router với Cổ phiếu (tên model của 9Router này có thể không có ở 9Router khác) |
+| `OPENROUTER_MODELS` | `OPENROUTER_MODEL` (trống: model mặc định của Cổ phiếu), **thử trước**; lỗi hoặc hết lượt thì sang các model free Altcoin tự dò | Altcoin có khoá OpenRouter (riêng hay chung) |
+
+Log khởi động ghi "Altcoin dùng chung model AI của Cổ phiếu: 9Router …, OpenRouter …". Altcoin khai model riêng
+(`ALT_NINEROUTER_MODELS`, `ALT_OPENROUTER_MODELS` trên panel, hoặc `NINEROUTER_MODEL(S)`, `OPENROUTER_MODELS` trong
+`altcoin/bot.env`, kể cả giá trị `auto` chép từ mẫu `botkeep.env`) hay 9Router địa chỉ khác thì giữ của nó, log ghi
+"Altcoin giữ AI riêng (…)": xoá các biến đó để dùng chung. Model đang trả lời: `/alt ai` hoặc trang AI của Altcoin.
 
 ### 4.4 Khoá bị bỏ qua
 
@@ -226,10 +240,10 @@ Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch
 ```bash
 python tests/run_all.py                              # phải kết thúc bằng "tất cả đều đạt"
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
-python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.3.0.zip
+python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.1-alt3.3.0.zip
 ```
 
-Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng a1a7ad4 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.17.1: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng a1a7ad4 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
