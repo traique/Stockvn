@@ -97,16 +97,18 @@ function render(d){
 function renderAI(a){
   const sub=$('aiSub'),last=$('aiLast'),el=$('aiModels');if(!el)return;
   if(!a.enabled){sub.textContent='tắt';last.textContent='AI đang tắt (AI_ENABLED=false hoặc chưa cấu hình provider) – bot vào lệnh thuần kỹ thuật.';el.innerHTML='';return}
-  sub.innerHTML=`${a.calls_today}/${a.budget} hôm nay · ngưỡng ${a.min_confidence}% · thứ tự: ${(a.order||[]).join(' → ')} · khi AI lỗi: ${a.fail_policy==='skip'?'bỏ qua':a.fail_policy==='score'?'vào theo điểm KT':'tự động'}`;
+  sub.innerHTML=`${a.calls_today}/${a.budget} hôm nay · ngưỡng ${a.min_confidence}% · thứ tự: ${(a.order||[]).join(' → ')} · khi AI lỗi: ${a.fail_policy==='skip'?'bỏ qua':a.fail_policy==='score'?'vào theo điểm KT':'tự động'}`+
+   (a.shared||[]).map(x=>`<br>${esc(x.provider)} dùng chung khoá với ${esc((x.with||[]).join(', '))}: ${x.calls}${x.cap?'/'+x.cap:''} lượt hôm nay (cả hai bot)${x.rest?` · <span class="dn">${esc(x.rest)}</span>`:''}`).join('');
   if(a.last_result){const r=a.last_result,ok=r.decision===r.side.toUpperCase()&&r.confidence>=a.min_confidence;
-    last.innerHTML=`<b>Quyết định gần nhất</b> · ${t(r.ts)} — ${sideTag(r.side)} ${r.symbol.split('/')[0]} (điểm ${r.score}) → <b class="${ok?'up':'dn'}">${esc(r.decision)} ${r.confidence}%</b> <span style="color:var(--mut)">${(r.model||'').split('/').slice(-1)[0]}</span><br>${esc(r.reason)}`}
+    last.innerHTML=`<b>Quyết định gần nhất</b> · ${t(r.ts)} — ${sideTag(r.side)} ${r.symbol.split('/')[0]} (điểm ${r.score}) → <b class="${ok?'up':'dn'}">${esc(r.decision)} ${r.confidence}%</b> <span style="color:var(--mut)">${esc((r.model||'').split('/').slice(-1)[0])}${r.served&&r.served!==(r.model||'').split('/').slice(1).join('/')?' → '+esc(r.served):''}</span><br>${esc(r.reason)}`}
   else last.innerHTML='Chưa có tín hiệu nào được gửi cho AI – bộ lọc kỹ thuật chưa tìm thấy ứng viên đủ điều kiện.';
   if(a.last_error)last.innerHTML+=`<br><span class="dn">⚠ Lần hỏi gần nhất không model nào trả lời: ${esc(a.last_error)}</span>`;
   const provs=(a.providers||[]).map(p=>`<span class="pill">${p.name}: ${p.models.length} model</span>`).join(' ');
   const rows=(a.models||[]);
   el.innerHTML=`<div class="row"><div class="t" style="gap:6px">${provs||'<span class="muted">Chưa cấu hình nhà cung cấp AI</span>'}</div></div>`+
    (rows.length?rows.map(m=>{const rate=m.calls?Math.round(100*m.ok/m.calls):0;
-    return `<div class="row"><div class="t">${m.model.split('/').slice(-1)[0]} <span class="pill" style="font-size:10px">${m.model.split('/')[0]}</span>${m.cooldown?'<span class="pill" style="color:var(--dn)">nghỉ</span>':''}</div>
+    const real=m.last_served&&m.last_served!==m.model.split('/').slice(1).join('/')?` <span style="color:var(--mut)">→ ${esc(m.last_served)}</span>`:'';
+    return `<div class="row"><div class="t">${esc(m.model.split('/').slice(-1)[0])}${real} <span class="pill" style="font-size:10px">${m.model.split('/')[0]}</span>${m.cooldown?'<span class="pill" style="color:var(--dn)">nghỉ</span>':''}</div>
     <div class="r">${m.calls} lượt<small>${m.ok} ok · ${m.fail} lỗi · ${rate}%</small></div>
     <div class="m">${m.analyze} phân tích · ${m.review} tổng kết${m.avg_ms?` · ~${(m.avg_ms/1000).toFixed(1)}s/lượt`:''} · dùng lần cuối ${ago(m.last_ts)} trước${m.last_error?`<br><span class="dn">Lỗi cuối: ${esc(m.last_error)}</span>`:''}</div></div>`}).join('')
    :'<div class="empty">Chưa gọi model nào.</div>');

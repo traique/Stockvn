@@ -4,13 +4,18 @@
 
 Hỗ trợ nhiều provider OpenAI-compatible (9Router local, OpenRouter, custom), tự fallback.
 Có giới hạn số lần gọi mỗi ngày (AI_MAX_CALLS_PER_DAY).
+Chạy trong Stockvn (có AI_SHARE_DIR): provider dùng CHUNG khoá với bot Cổ phiếu thì đếm lượt chung theo hạn mức
+ngày của Cổ phiếu (vd OpenRouter 45) và tôn trọng lượt nghỉ bot kia đặt (ai_share.py); ghi model thật đã trả lời
+(9Router "auto" tự chọn model) và trạng thái AI để trang của Cổ phiếu hiển thị.
 """
 import json
 import logging
 import re
+import threading
 import time
 import datetime as dt
 import requests
+from .ai_share import Ledger, fingerprint
 from .config import cfg
 
 log = logging.getLogger("ai")
@@ -175,8 +180,62 @@ class AIFilter:
         self.dead = set()          # model trả 404 (đã bị gỡ) → bỏ qua tới lần dò lại
         self._last_refresh = time.time()
         self.last_error = None
+        self.last_served = None    # model thật đã trả lời lần cuối (9Router "auto" tự chọn)
+        self._tl = threading.local()
         self.providers = self._build_providers()
         log.info("AI providers: %s", [(p["name"], len(p["models"])) for p in self.providers])
+        # Chạy trong Stockvn: lượt/lượt nghỉ của provider dùng chung khoá với Cổ phiếu (AI_SHARE_DIR trống: không chia gì)
+        self.share = Ledger("altcoin")
+        for p in self.providers:
+            self.share.register(self._sname(p), self._fp(p))
+        try:
+            from .version import VERSION, build, is_release
+            self.share.set_extra(app={"name": "Altcoin", "version": VERSION, "build": build(), "release": is_release()})
+        except Exception:
+            pass
+        self._share_status()
+
+    # ------------------------------------------------------------ dùng chung với Cổ phiếu (ai_share.py)
+    _SHARE_NAMES = {"9router": "router9"}      # tên provider phía Cổ phiếu (tradingagents fallback_client)
+
+    @classmethod
+    def _sname(cls, p):
+        return cls._SHARE_NAMES.get(p["name"], p["name"])
+
+    @staticmethod
+    def _fp(p):
+        return fingerprint(p["base"], p["key"])
+
+    @staticmethod
+    def _provider_wide(p, e):
+        """Lỗi của CẢ provider (hết lượt, sai khoá, cổng sập), không riêng model / câu hỏi này → bot kia cũng nghỉ."""
+        st = getattr(e, "status", None) or getattr(getattr(e, "response", None), "status_code", None)
+        if isinstance(e, requests.ConnectionError) or st in (401, 402):
+            return True
+        if st == 429:
+            return "upstream" not in str(e).lower()     # "... rate-limited upstream": chỉ model đó bận
+        if p["name"] == "9router":                      # 1 cổng cho mọi model: lỗi của cổng là lỗi chung
+            return st == 403 or (st or 0) >= 500 or isinstance(e, requests.Timeout)
+        return False
+
+    def _share_status(self):
+        """Trạng thái AI cho trang của Cổ phiếu (/ai, /trangthai)."""
+        self.share.set_extra(ai={"enabled": bool(cfg.AI_ENABLED and self.providers), "calls_today": self.calls_today(),
+                                 "budget": cfg.AI_MAX_CALLS_PER_DAY, "last_model": self.last_model,
+                                 "last_served": self.last_served, "last_error": self.last_error, "ts": time.time()})
+
+    def shared_providers(self):
+        """Provider dùng chung khoá với bot khác: lượt hôm nay của cả hai / hạn mức chung, lượt nghỉ bot kia đặt."""
+        share = getattr(self, "share", None)
+        out = []
+        for p in (self.providers if share else []):
+            sname, fp = self._sname(p), self._fp(p)
+            peers = share.shared(sname, fp)
+            if peers:
+                out.append({"provider": p["name"], "with": sorted({w for w, _, _ in peers}),
+                            "calls": share.calls(sname) + share.peer_calls(sname, fp),
+                            "cap": share.shared_cap(sname, fp), "rest": share.peer_rest(sname, fp)})
+        return out
 
     # ------------------------------------------------------------ provider
     def _build_providers(self):
@@ -266,19 +325,21 @@ class AIFilter:
             # model suy luận: nghĩ ít, không trả phần suy nghĩ → dành token cho JSON
             body["reasoning"] = {"effort": "low", "exclude": True}
         r = requests.post(f"{provider['base']}/chat/completions", headers=headers, json=body, timeout=(cfg.NINEROUTER_TIMEOUT if provider["name"] == "9router" else cfg.AI_TIMEOUT))
-        if r.status_code == 429:
-            raise AIHTTPError(429, "rate limited (hết lượt/quá tải)")
-        if r.status_code in (400, 401, 402, 403, 404):
+        if r.status_code in (400, 401, 402, 403, 404, 429):
             try:
                 msg = r.json().get("error", {})
                 msg = msg.get("message", "") if isinstance(msg, dict) else str(msg)
             except Exception:
                 msg = r.text[:120]
+            if r.status_code == 429:   # giữ lời của provider: "upstream" = chỉ model này bận, không phải cả OpenRouter
+                raise AIHTTPError(429, f"rate limited (hết lượt/quá tải): {msg[:140]}")
             raise AIHTTPError(r.status_code, f"HTTP {r.status_code}: {msg[:140]}")
         r.raise_for_status()
         data = r.json()
         if "error" in data:
             raise RuntimeError(data["error"].get("message", "error") if isinstance(data["error"], dict) else data["error"])
+        served = data.get("model")
+        self._tl.served = served if isinstance(served, str) and served else None   # model thật (9Router "auto" tự chọn)
         msg = (data.get("choices") or [{}])[0].get("message") or {}
         content = msg.get("content") or ""
         if not content.strip():
@@ -301,7 +362,7 @@ class AIFilter:
     def budget_left(self):
         return cfg.AI_MAX_CALLS_PER_DAY - self.calls_today()
 
-    def _record(self, key, ok, ms, err=None, kind=None):
+    def _record(self, key, ok, ms, err=None, kind=None, served=None):
         m = self.model_stats.setdefault(key, {"calls": 0, "ok": 0, "fail": 0, "ms_total": 0, "last_ts": 0,
                                                "last_error": "", "analyze": 0, "review": 0})
         m["calls"] += 1
@@ -312,6 +373,12 @@ class AIFilter:
             m["last_error"] = str(err)[:160]
         if ok and kind:
             m[kind] = m.get(kind, 0) + 1
+        if ok and served:              # model thật: "9router/auto" có thể là nhiều model khác nhau
+            m["last_served"] = served
+            seen = m.setdefault("served", {})
+            seen[served] = seen.get(served, 0) + 1
+            if len(seen) > 8:
+                seen.pop(min(seen, key=seen.get))
         try:
             self.store.set("ai_model_stats", self.model_stats)
         except Exception:
@@ -324,6 +391,7 @@ class AIFilter:
             rows.append({"model": key, "calls": m["calls"], "ok": m["ok"], "fail": m["fail"],
                          "avg_ms": int(m["ms_total"] / m["ok"]) if m["ok"] else None,
                          "analyze": m.get("analyze", 0), "review": m.get("review", 0),
+                         "last_served": m.get("last_served"), "served": m.get("served", {}),
                          "last_ts": m["last_ts"], "last_error": m.get("last_error", ""),
                          "cooldown": self.cooldown.get(tuple(key.split("/", 1)), 0) > time.time()})
         rows.sort(key=lambda r: -r["last_ts"])
@@ -332,6 +400,7 @@ class AIFilter:
             "providers": [{"name": p["name"], "base": p["base"], "models": p["models"]} for p in self.providers],
             "order": cfg.AI_PROVIDER_ORDER, "calls_today": self.calls_today(), "budget": cfg.AI_MAX_CALLS_PER_DAY,
             "min_confidence": cfg.AI_MIN_CONFIDENCE, "last_model": self.last_model,
+            "last_served": getattr(self, "last_served", None), "shared": self.shared_providers(),
             "last_result": self.last_result, "models": rows, "last_error": self.last_error,
             "fail_policy": cfg.AI_FAIL_POLICY, "dead": sorted(self.dead),
         }
@@ -363,26 +432,38 @@ class AIFilter:
         for attempt in range(2):
             now = time.time()
             for p in self.providers:
+                sname, fp = self._sname(p), self._fp(p)
                 for model in list(p["models"]):
                     if self.cooldown.get((p["name"], model), 0) > now:
                         continue
                     if tried >= cfg.AI_MAX_TRIES:
+                        break
+                    why = self.share.check(sname, fp)
+                    if why:            # bot Cổ phiếu (cùng khoá) đang cho nghỉ / hết hạn mức chung: sang provider khác
+                        errors.append(f"{p['name']}: {why}")
                         break
                     tried += 1
                     key = f"{p['name']}/{model}"
                     t0 = time.time()
                     try:
                         self.stats["calls"] += 1
+                        self._tl.served = None
+                        self.share.count(sname, fp)
                         txt = self._chat(p, model, system, user)
                         res = _extract_json(txt or "", required_key)
                         if not res or required_key not in res:
                             raise RuntimeError(f"JSON không hợp lệ: {(txt or '')[:120]}")
+                        served = getattr(self._tl, "served", None) or model
                         res["model"] = key
+                        res["served"] = served
                         self.last_model = key
+                        self.last_served = served
                         self.last_error = None
                         self._count_call()
                         self.fail_streak.pop((p["name"], model), None)
-                        self._record(key, True, (time.time() - t0) * 1000, kind=kind)
+                        self.share.clear_rest(sname)
+                        self._record(key, True, (time.time() - t0) * 1000, kind=kind, served=served)
+                        self._share_status()
                         return res
                     except Exception as e:
                         self.stats["fails"] += 1
@@ -395,6 +476,10 @@ class AIFilter:
                         self.cooldown[(p["name"], model)] = time.time() + wait
                         if getattr(e, "status", None) in (403, 404) and p["name"] == "openrouter":
                             self.dead.add(model)
+                        if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                            self.share.count(sname, fp, -1)    # chưa tới provider: trả lại lượt, như Cổ phiếu
+                        if self._provider_wide(p, e):          # bot kia nghỉ provider này đúng thời gian nghỉ cơ bản
+                            self.share.rest(sname, fp, self._cool(p, model, e), str(e))
             # lượt 1 thất bại vì model OpenRouter chết → dò lại danh sách rồi thử thêm 1 lượt
             if attempt == 0 and any(m in self.dead for p in self.providers for m in p["models"]):
                 self.refresh_models(force=True)
@@ -403,6 +488,7 @@ class AIFilter:
         self.last_error = (errors[-1] if errors else "mọi model đang nghỉ (cooldown)")[:200]
         if not errors:
             log.warning("AI: tất cả model đang trong thời gian nghỉ")
+        self._share_status()
         return None
 
     # ------------------------------------------------------------ 1) phân tích trước khi vào
@@ -434,7 +520,8 @@ class AIFilter:
             res["confidence"] = 0
         self.last_result = {"ts": time.time(), "symbol": signal.symbol, "side": signal.side, "score": signal.score,
                             "decision": res["decision"], "confidence": res["confidence"],
-                            "reason": str(res.get("reason", ""))[:300], "model": res["model"]}
+                            "reason": str(res.get("reason", ""))[:300], "model": res["model"],
+                            "served": res.get("served")}
         try:
             self.store.set("ai_last_result", self.last_result)
         except Exception:

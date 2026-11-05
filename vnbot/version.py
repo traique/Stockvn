@@ -25,13 +25,22 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.17.0"
-RELEASED = "2026-10-30"
-RELEASE_BUILD = "dabc857"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.18.0"
+RELEASED = "2026-11-05"
+RELEASE_BUILD = "72c40a1"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.18.0", "2026-11-05", (
+        "Altcoin dùng chung model AI của Cổ phiếu khi không khai model riêng (trước: chỉ chung khoá)",
+        "9Router mặc định auto (trước gpt-4o-mini): 9Router tự chọn model cho cả Cổ phiếu lẫn Altcoin",
+        "OpenRouter mặc định auto: các model free đang có, xếp như Altcoin; thử tối đa 3 model mỗi lượt",
+        "Model OpenRouter bị gỡ hoặc bận chỉ bỏ qua model đó, model kế trả lời, OpenRouter không phải nghỉ",
+        "Cùng khoá với Altcoin: lượt hai bot tính chung vào hạn mức ngày (OpenRouter 45), nghỉ chung khi bị từ chối",
+        "Ghi model thật đã trả lời (9Router auto → model nó chọn): /ai, /trangthai, từng ý kiến AI phản biện",
+        "/ai có thẻ Altcoin · AI và lượt Altcoin trên khoá chung; /phienban có phiên bản Altcoin",
+    )),
     ("v1.17.0", "2026-10-30", (
         "Định giá bot tự tính cho mọi mã, không cần nhập: /dinhgia MÃ (gõ tắt /dg); Zoom: dinhgia FPT",
         "Mô hình P/B hợp lý như thẻ ngân hàng; Ke 12% ngân hàng, 13% mã khác (VALUATION_KE_DEFAULT)",

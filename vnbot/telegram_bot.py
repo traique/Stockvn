@@ -568,9 +568,10 @@ class TelegramBot:
             elif command == "/trangthai":
                 self.send(chat_id, self._status())
             elif command in ("/phienban", "/version"):
-                from vnbot import version
+                from vnbot import altcoin_ai, version
 
-                self.send(chat_id, version.text())
+                alt = altcoin_ai.version_line(altcoin_ai.info())
+                self.send(chat_id, version.text() + (f"\n\n🪙 {alt} (chi tiết: /alt phienban)" if alt else ""))
             elif command in ("/stv", "/sieutinhieu"):
                 self._stv(chat_id, args)
             elif command in ("/stvvon", "/stvkhop", "/stvthuong", "/stvcosan", "/stvxoa"):
@@ -945,10 +946,22 @@ class TelegramBot:
         usage = usage_today()
         cap = f"/{usage['cap']}" if usage["cap"] else ""
         lines.append(f"\nNhà cung cấp AI (theo thứ tự), hôm nay đã gọi {usage['total']}{cap} lượt:")
+        from vnbot import altcoin_ai
+
         for row in provider_status():
-            state = f"nghỉ {row['resting_seconds']}s ({row['last_error']})" if row["resting_seconds"] else "sẵn sàng"
-            calls = f"{row['calls_today']}/{row['cap']}" if row["cap"] else str(row["calls_today"])
-            lines.append(f"- {row['label']} [{row['model']}]: {state}, {calls} lượt")
+            if row["resting_seconds"]:
+                state = f"nghỉ {row['resting_seconds']}s ({row['last_error']})"
+            elif row.get("peer_resting"):
+                state = f"nghỉ theo Altcoin ({row['last_error']})"
+            else:
+                state = "sẵn sàng"
+            calls = str(row["calls_today"]) + (f" + {row['peer_calls']} Altcoin" if row.get("shared_with") else "")
+            calls += f"/{row['cap']}" if row["cap"] else ""
+            model = altcoin_ai.model_text(row["model"], row.get("served"))
+            lines.append(f"- {row['label']} [{model}]: {state}, {calls} lượt")
+        alt = altcoin_ai.info()
+        if alt:
+            lines += [""] + altcoin_ai.ai_lines(alt)
         return "\n".join(lines)
 
     # ── job events ──

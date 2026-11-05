@@ -94,7 +94,7 @@ Chạy tay (ví dụ khi Actions tắt): `python scripts/build_botkeep_bundle.py
 # AI - ít nhất một dòng có key
 ROUTER9_BASE_URL=https://<9router-cua-ban>/v1
 ROUTER9_API_KEY=...
-ROUTER9_MODEL=gpt-4o-mini
+ROUTER9_MODEL=auto          # 9Router tự chọn model; Altcoin dùng chung
 GROQ_API_KEY=...            # dự phòng, nên có
 OPENROUTER_API_KEY=...      # dự phòng, nên có
 
@@ -573,7 +573,11 @@ LLM_CALL_TIMEOUT_SEC=180
 
 Một lượt phân tích đầy đủ tốn khoảng 15-35 lượt gọi AI (4 analyst kèm các vòng gọi tool, Bull/Bear, Research Manager, Trader, 3 góc nhìn rủi ro, Portfolio Manager). Giảm `MAX_TOOL_ROUNDS` nếu cần tiết kiệm thêm.
 
-`QUICK_MODEL` / `DEEP_MODEL` chọn model trên 9Router cho hai tầng (tầng deep dùng cho Research Manager và Portfolio Manager). Các nhà cung cấp khác dùng `GROQ_MODEL`, `OPENROUTER_MODEL`, `XAI_MODEL`.
+`QUICK_MODEL` / `DEEP_MODEL` chọn model trên 9Router cho hai tầng (tầng deep dùng cho Research Manager và Portfolio Manager); trống là `ROUTER9_MODEL`, mặc định `auto` (9Router tự chọn model). Các nhà cung cấp khác dùng `GROQ_MODEL`, `OPENROUTER_MODEL`, `XAI_MODEL`.
+
+**OpenRouter** mặc định `OPENROUTER_MODEL=auto`: bot đọc danh sách model `:free` OpenRouter đang có (không tốn lượt, làm mới 12 giờ, lưu ở `data/openrouter_models.json`), xếp theo cùng thứ tự với Altcoin, mỗi lượt hỏi thử tối đa `OPENROUTER_MAX_TRIES` (3) model. Model bị gỡ (404), không hợp lệ hay bị từ chối thì bỏ qua 6 giờ, model báo bận “upstream” bỏ qua 10 phút, và model kế tiếp trả lời mà OpenRouter không phải nghỉ; 429 khác (hết lượt của khoá) thì OpenRouter nghỉ như cũ. Ghi model cụ thể (`a/b:free`) để chỉ dùng model đó, thêm `,auto` để có dự phòng.
+
+**Dùng chung với Altcoin** (`ALTCOIN_ENABLED=1`): hai bot ghi lượt gọi và lúc nghỉ của từng nhà cung cấp vào `data/ai_share/` (mỗi bot một file, không chứa khoá). Nhà cung cấp hai bot dùng **cùng khoá** thì lượt của cả hai tính chung vào hạn mức ngày của Cổ phiếu (vd OpenRouter 45, dưới 50 lượt/ngày của gói free), và bot này cho nhà cung cấp nghỉ (429, sai khoá, 9Router sập) thì bot kia cũng không gọi vào cho tới hết lúc nghỉ. `/ai`, `/trangthai` hiện lượt của Altcoin cạnh lượt của Cổ phiếu, model **thật** đã trả lời (9Router `auto` → model nó chọn) và thẻ AI của Altcoin; `/phienban` có phiên bản Altcoin.
 
 ## 9. Toàn bộ biến môi trường
 
@@ -582,9 +586,10 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `PROVIDER_ORDER` | `router9,groq,openrouter,xai` | Thứ tự dự phòng AI |
-| `ROUTER9_BASE_URL`, `ROUTER9_API_KEY`, `ROUTER9_MODEL` | - / - / `gpt-4o-mini` | 9Router |
+| `ROUTER9_BASE_URL`, `ROUTER9_API_KEY`, `ROUTER9_MODEL` | - / - / `auto` | 9Router (`auto`: 9Router tự chọn model; Altcoin dùng chung) |
 | `GROQ_API_KEY`, `GROQ_MODEL` | - / `openai/gpt-oss-20b` | Groq |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | - / model `:free` | OpenRouter |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | - / `auto` | OpenRouter (`auto`: các model `:free` đang có, xếp như Altcoin) |
+| `OPENROUTER_MAX_TRIES` | 3 | Số model OpenRouter thử tối đa trong một lượt hỏi |
 | `XAI_API_KEY`, `XAI_MODEL` | - / `grok-4-fast` | Grok (tuỳ chọn) |
 | `QUICK_MODEL`, `DEEP_MODEL` | `ROUTER9_MODEL` | Model 9Router cho từng tầng |
 | `LLM_QUOTA_COOLDOWN_SEC` | 300 | Nghỉ khi 429 không có Retry-After |
@@ -650,7 +655,7 @@ Phần lớn các biến dưới đây (trừ khoá, token và mật khẩu) s�
 | `ALT_MODE`, `ALT_I_UNDERSTAND_THE_RISK`, `ALT_LIVE_ACK`, `ALT_OKX_API_KEY`, `ALT_OKX_API_SECRET`, `ALT_OKX_PASSPHRASE` | `paper` / - | Altcoin chạy thật chỉ khi `ALT_MODE=live`, `ALT_I_UNDERSTAND_THE_RISK=yes`, `ALT_LIVE_ACK` = tên instance và đủ 3 khoá OKX; thiếu một cái thì Altcoin không chạy |
 | `ALT_DATABASE_URL` | - | Postgres riêng của Altcoin; trống = SQLite trong `ALT_DATA_DIR`. Không bao giờ là `DATABASE_URL` |
 | `ALT_DATA_DIR`, `ALT_INSTANCE_NAME`, `ALT_PUBLIC_URL` | `data/altcoin` / `botkeep` / `<PUBLIC_URL>/altcoin` | Thư mục dữ liệu, tên instance, địa chỉ trang Altcoin |
-| `ALT_OPENROUTER_API_KEY`, `ALT_NINEROUTER_*` | khoá của Cổ phiếu | AI riêng của Altcoin; trống thì dùng chung `OPENROUTER_API_KEY`, `ROUTER9_*` |
+| `ALT_OPENROUTER_API_KEY`, `ALT_NINEROUTER_*`, `ALT_OPENROUTER_MODELS` | khoá và model của Cổ phiếu | AI riêng của Altcoin; trống thì dùng chung `OPENROUTER_API_KEY`, `ROUTER9_*` và cả model (`QUICK_MODEL`/`ROUTER9_MODEL` trên cùng 9Router, `OPENROUTER_MODEL`; cả hai mặc định `auto`); cùng khoá thì lượt và lúc nghỉ tính chung, xem `docs/ALTCOIN_TRONG_STOCKVN.md` mục 4.3 |
 | `ALT_<TÊN>` | - | Mọi biến khác của Altcoin, ví dụ `ALT_LEVERAGE=5`. Không có `ALT_TELEGRAM_*`, `ALT_ZOOM_*` (bị bỏ qua). Đủ danh sách: `docs/ALTCOIN_TRONG_STOCKVN.md` mục 4 |
 
 ## 10. Giới hạn và xử lý sự cố
@@ -701,7 +706,7 @@ python tests/run_all.py -v web   # in chi tiết một bộ
 pytest -q                        # hoặc chạy qua pytest
 ```
 
-Kết quả `32/32 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì các bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
+Kết quả `34/34 bộ đạt` là an toàn để cập nhật. Có ❌ thì đừng upload: dòng `FAIL ...` cho biết kiểm tra nào hỏng. Thiếu `httpx` thì các bộ web bị bỏ qua (⏭️) và bộ `version` bỏ phần web, không tính là lỗi.
 
 | Bộ | Kiểm tra |
 |---|---|
@@ -719,6 +724,8 @@ Kết quả `32/32 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `breakout` | Công tắc MUA breakout: breakout thành THEO DÕI (đang giữ: GIỮ không kèm kế hoạch), pullback không đổi, kết quả bóng nhóm riêng, hiệu chỉnh đêm không đổi công tắc, nút trên trang `/bot` (mật khẩu, chặn POST chéo trang) |
 | `bundle` | Gói Botkeep: chỉ file trong danh sách cho phép, không `.env`/`.db`/`data/`/`__pycache__`/`tests/` (thử với file mồi), giới hạn 250 file và 4 MB, zip tái lập được, mã bản dựng đúng bản phát hành, thay đổi chưa commit bị chặn |
 | `altcoin_scripts` | Các script thử offline của altcoin (`altcoin/test_engine.py`: cả vùng găng – SIGTERM giữa đặt lệnh live và ghi DB, báo tin, dời SL sau TP1; tắt bot chờ `/alt close` đóng hết; `test_learner`, `test_risk`, `test_strategy`, `test_web`) trên bản chép tạm, không đọc `.env`/`bot.env`; `altcoin/check_db.py` chỉ đọc `.env`/`bot.env` cạnh nó (ưu tiên `ALT_DATABASE_URL`) và `ALT_DATABASE_URL` của biến môi trường, không bao giờ `DATABASE_URL` của stock. `test_smoke.py` cần OKX thật: chạy tay `cd altcoin && python test_smoke.py` |
+| `ai_share` | AI dùng chung giữa Cổ phiếu và Altcoin: hai bản `ai_share.py` giống hệt nhau; lượt của bot kia tính vào hạn mức của khoá chung, ngày mới, khởi động lại, file cũ/hỏng bị bỏ; Cổ phiếu và Altcoin tôn trọng lúc nghỉ của nhau (429, sai khoá, 9Router sập; không với lỗi riêng của một lượt hỏi hay model bận “upstream”); lượt không tới provider được trả lại; OpenRouter `auto`: danh sách và thứ tự giống Altcoin, model 404/bận được bỏ qua và model kế trả lời, `OPENROUTER_MAX_TRIES`; model thật đã trả lời (9Router `auto`) ở `last_call`, `provider_status`, AI phản biện và `/alt ai` |
+| `ai_share_web` | Trang `/ai` (lượt Altcoin trên khoá chung, “nghỉ theo Altcoin”, thẻ Altcoin · AI, model trả lời mỗi ý kiến phản biện), `/phienban` (phiên bản Altcoin), `/trangthai`; tắt `ALTCOIN_ENABLED` thì không hiện |
 | `altcoin_host` | Altcoin là tiến trình con của stock (`ALTCOIN_ENABLED=1`): env của nó chỉ từ danh sách cho phép, không bao giờ có token Telegram/Zoom, mật khẩu web hay `DATABASE_URL` của stock; khoá kênh, Render và đăng nhập riêng trong `altcoin/bot.env` bị xoá; chỉ chạy live khi đủ `ALT_MODE`, `ALT_I_UNDERSTAND_THE_RISK`, `ALT_LIVE_ACK`, `ALT_OKX_*` (thiếu thì không chạy, không lùi về paper); chặn DB của stock, DB rỗng (`ALTCOIN_FRESH_START` chỉ cho paper, `hosted.funded`), lệnh đang mở của chế độ khác và instance thứ hai (75, cả lúc đang chạy); khung trạng thái/thông báo qua pipe; khởi động lại, backoff, dừng khi stock dừng; che bí mật trong log `[altcoin]` |
 | `altcoin_proxy` | Hub trước trang web (`/altcoin/`): đường dẫn lạ (`..`, `//`, `#`, `%2e`, `%5F`…) bị chặn 400 trước mọi bước; `/altcoin/_hub*` và các đường Zoom/công tắc kênh cũ của altcoin 404 (kể cả có mật khẩu); trang công khai và `/altcoin/zoom` chuyển sang trang của stock; cùng `WEB_PASSWORD`, cùng bộ đếm khoá khi sai mật khẩu và cùng kiểm tra chống gửi form từ trang khác như stock; `/altcoin/hub.json` cần mật khẩu, không có token; altcoin không nhận `Authorization` hay `X-Hub-*` của client; body ≤ 64 KB, ≤ 8 yêu cầu cùng lúc, viết lại `Location`; trang 503 khi altcoin chưa chạy, stock vẫn chạy; altcoin tắt (không có Hub): `/altcoin` và `/altcoin/` là trang "Altcoin đang tắt" của stock, cần mật khẩu, mọi đường khác dưới `/altcoin/` 404 (kể cả `_hub`, có mật khẩu), `/health` không đổi, chỗ đặt `bot.db` cũ theo `ALT_DATA_DIR` của server; `Supervisor.sections()` (thanh chuyển mà `main_botkeep` đặt): bật, tắt có code altcoin, tắt không có code (không có thanh) |
 | `altcoin_web` | Trang altcoin sau khi `hosted.py` thích nghi: mọi link nằm dưới `/altcoin/` trừ đúng 3 link sang stock (`/`, `/ai#kenh`, `/zoom`); `/altcoin/caidat` có thẻ “Kênh do Stock quản lý” thay hai thẻ kênh; altcoin chỉ nhận yêu cầu có `X-Hub-Token` (trừ `GET /health`); thanh chuyển Cổ phiếu / Altcoin ở cả hai phía, trạng thái cạnh chữ Altcoin (điện thoại: một chữ, tắt vẫn là "Altcoin (tắt)", cả trên trang "Altcoin đang tắt"), luôn một hàng; `/_hub/command` chỉ với `X-Hub-Cmd-Token`, chỉ lệnh trong danh sách, lệnh ghi chỉ khi giữ quyền giao dịch và từng lệnh một (close quá giờ chờ rồi close lần hai: "đang có lệnh", không đóng hai lần) |
