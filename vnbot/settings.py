@@ -178,6 +178,8 @@ def load() -> Settings:
     os.environ.setdefault("TRADINGAGENTS_MEMORY_LOG_PATH", str(data_dir / "memory" / "trading_memory.md"))
     os.environ.setdefault("TRADINGAGENTS_OUTPUT_LANGUAGE", "Vietnamese")
     os.environ.setdefault("LLM_USAGE_PATH", str(data_dir / "llm_usage.json"))   # the day's AI budget
+    os.environ.setdefault("AI_SHARE_DIR", str(data_dir / "ai_share"))          # AI use shared with the altcoin bot
+    os.environ.setdefault("OPENROUTER_MODELS_CACHE", str(data_dir / "openrouter_models.json"))   # its free models
     allowed = _ids("TELEGRAM_ALLOWED_IDS") or _ids("ALLOWED_USER_ID")
     report_time = _hhmm("DAILY_REPORT_TIME", "15:30")
     watch = tuple(

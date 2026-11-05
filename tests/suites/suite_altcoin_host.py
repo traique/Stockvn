@@ -306,12 +306,49 @@ t.ok("child env: Botkeep's masked value dropped and reported", info["dropped_sec
      and "OKX_API_SECRET" not in env)
 t.ok("child env: the stock's AI keys shared when the altcoin has none", env.get("OPENROUTER_API_KEY") == "sk-or-stock-key"
      and env.get("NINEROUTER_API_KEY") == "stock-router9-key" and env.get("NINEROUTER_BASE_URL") == stock["ROUTER9_BASE_URL"]
-     and info["shared"] == ["OPENROUTER_API_KEY", "ROUTER9_BASE_URL", "ROUTER9_API_KEY"], info["shared"])
+     and info["shared"][:3] == ["OPENROUTER_API_KEY", "ROUTER9_BASE_URL", "ROUTER9_API_KEY"], info["shared"])
 env2, info2 = ah.child_env({**stock, "ALT_OPENROUTER_API_KEY": "sk-or-alt"},
                            {"NINEROUTER_API_KEY": "botenv-9r", "NINEROUTER_BASE_URL": "<chưa điền>"})
 t.ok("...not over the altcoin's own (panel ALT_, or altcoin/bot.env; a <...> placeholder does not count)",
      env2["OPENROUTER_API_KEY"] == "sk-or-alt" and "NINEROUTER_API_KEY" not in env2
      and env2.get("NINEROUTER_BASE_URL") == stock["ROUTER9_BASE_URL"], info2["shared"])
+
+# The models: the stock's when the altcoin names none (the stock's own defaults when the stock sets none either)
+from tradingagents.llm_clients.fallback_client import ENDPOINTS  # noqa: E402
+
+t.ok("models: the supervisor's defaults are the stock's (fallback_client.ENDPOINTS); 9Router: auto (it picks the model)",
+     (ah.ROUTER9_DEFAULT_MODEL, ah.OPENROUTER_DEFAULT_MODEL)
+     == (ENDPOINTS["router9"].default_model, ENDPOINTS["openrouter"].default_model) and ah.ROUTER9_DEFAULT_MODEL == "auto")
+t.ok("models: nothing set anywhere → the stock's defaults (auto on 9Router, auto on OpenRouter: the same free list)",
+     env.get("NINEROUTER_MODELS") == ah.ROUTER9_DEFAULT_MODEL == "auto"
+     and env.get("OPENROUTER_MODELS") == ah.OPENROUTER_DEFAULT_MODEL == "auto"
+     and info["shared"][3:] == ["ROUTER9_MODEL", "OPENROUTER_MODEL"] and not info["own_models"]
+     and info["models"] == {"9Router": ah.ROUTER9_DEFAULT_MODEL, "OpenRouter": ah.OPENROUTER_DEFAULT_MODEL},
+     (env.get("NINEROUTER_MODELS"), env.get("OPENROUTER_MODELS"), info))
+models = {**stock, "ROUTER9_MODEL": "cx/gpt-5", "OPENROUTER_MODEL": "x/y:free"}
+env3, info3 = ah.child_env(models, {})
+t.ok("models: the stock's ROUTER9_MODEL and OPENROUTER_MODEL, as they are (the same syntax on both)",
+     env3.get("NINEROUTER_MODELS") == "cx/gpt-5" and env3.get("OPENROUTER_MODELS") == "x/y:free", info3)
+env3, info3 = ah.child_env({**models, "QUICK_MODEL": "cx/gpt-5-mini"}, {})
+t.ok("models: QUICK_MODEL first, as the stock's critic (vnbot.settings quick_model)",
+     env3.get("NINEROUTER_MODELS") == "cx/gpt-5-mini" and "QUICK_MODEL" in info3["shared"], info3)
+env3, info3 = ah.child_env({**models, "ALT_NINEROUTER_MODELS": "auto", "ALT_OPENROUTER_MODELS": "a/b:free"}, {})
+t.ok("models: the altcoin's own on the panel (ALT_) win, and are reported", env3.get("NINEROUTER_MODELS") == "auto"
+     and env3.get("OPENROUTER_MODELS") == "a/b:free" and info3["own_models"] == ["NINEROUTER_MODELS", "OPENROUTER_MODELS"]
+     and not info3["models"], info3)
+env3, info3 = ah.child_env(models, {"NINEROUTER_MODEL": "auto", "OPENROUTER_MODELS": "<chưa điền>"})
+t.ok("models: ...in altcoin/bot.env too (NINEROUTER_MODEL, the old name); a <...> placeholder does not count",
+     "NINEROUTER_MODELS" not in env3 and env3.get("OPENROUTER_MODELS") == "x/y:free"
+     and info3["own_models"] == ["NINEROUTER_MODEL"], info3)
+env3, info3 = ah.child_env(models, {"NINEROUTER_BASE_URL": "http://other-9router:1/v1"})
+t.ok("models: another 9Router (its own address): the stock's model name is not sent there, reported",
+     "NINEROUTER_MODELS" not in env3 and "NINEROUTER_BASE_URL" in info3["own_models"], info3)
+env3, info3 = ah.child_env({**models, "ALT_NINEROUTER_BASE_URL": stock["ROUTER9_BASE_URL"] + "/"}, {})
+t.ok("models: the altcoin's own address equal to the stock's (a trailing / aside) is the same 9Router",
+     env3.get("NINEROUTER_MODELS") == "cx/gpt-5", info3)
+env3, info3 = ah.child_env({k: v for k, v in models.items() if k not in ("ROUTER9_BASE_URL", "OPENROUTER_API_KEY")}, {})
+t.ok("models: no 9Router of the stock and no OpenRouter key: no model set, nothing reported",
+     not {"NINEROUTER_MODELS", "OPENROUTER_MODELS"} & set(env3) and not info3["models"] and not info3["own_models"], info3)
 t.ok("child env: an empty ALT_ value is left out", "EMPTY" not in env)
 bad = TMP / "badenv"
 bad.mkdir()
@@ -904,7 +941,7 @@ t.ok("spawn: absolute hosted.py, cwd = its folder, sealed argv (port, parent pid
      and meta["args"][meta["args"].index("--deny-db") + 1] == ah.db_fingerprint(stock["DATABASE_URL"])
      and "--allow-empty-db" not in meta["args"], meta)
 t.ok("spawn: the child's environment has HUB_FD/HUB_TOKEN/HUB_CMD_TOKEN and no stock secret",
-     {"HUB_FD", "HUB_TOKEN", "HUB_CMD_TOKEN", "PYTHONIOENCODING"} <= set(meta["env"])
+     {"HUB_FD", "HUB_TOKEN", "HUB_CMD_TOKEN", "PYTHONIOENCODING", "AI_SHARE_DIR"} <= set(meta["env"])
      and not [k for k in meta["env"] if k.startswith(("TELEGRAM_", "ZOOM_", "WEB_", "RENDER_")) or k == "MODE"], meta["env"])
 t.ok("state(): ignored_keys = the panel's (ALT_…) and the child's; rss_mb of both processes",
      "ALT_TELEGRAM_TOKEN" in st["ignored_keys"] and "TELEGRAM_TOKEN" in st["ignored_keys"]

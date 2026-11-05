@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.17.0** và **Altcoin 3.3.0** (bản dựng `a1a7ad4`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.18.0** và **Altcoin 3.3.1** (bản dựng `7fe2138`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -134,7 +134,8 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_PUBLIC_URL` | `<PUBLIC_URL>/altcoin` | Địa chỉ trang Altcoin, ít khi cần đặt |
 | `ALT_LEADER_TTL` | 90 | Số giây một instance được coi là còn sống (khoá leader, chặn instance thứ hai) |
 | `ALT_OPENROUTER_API_KEY` | trống | Khoá OpenRouter riêng của Altcoin |
-| `ALT_NINEROUTER_BASE_URL`, `ALT_NINEROUTER_API_KEY`, `ALT_NINEROUTER_MODELS` | trống | 9Router riêng của Altcoin |
+| `ALT_NINEROUTER_BASE_URL`, `ALT_NINEROUTER_API_KEY`, `ALT_NINEROUTER_MODELS` | trống | 9Router riêng của Altcoin. Trống = 9Router và model của Cổ phiếu (mục 4.3) |
+| `ALT_OPENROUTER_MODELS` | trống | Model OpenRouter riêng của Altcoin (`auto` = tự dò model free). Trống = `OPENROUTER_MODEL` của Cổ phiếu (mặc định `auto`) |
 | `ALT_CUSTOM_*` | trống | Nhà cung cấp AI tự chọn của Altcoin (không dùng chung với Cổ phiếu) |
 | `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo, đặt sau lần khởi động 3.3.0 đầu tiên** (mục 10.1) |
 
@@ -149,6 +150,34 @@ Thiếu khoá riêng (cả trên panel lẫn trong `altcoin/bot.env`) thì Altco
 | `NINEROUTER_API_KEY` | `ROUTER9_API_KEY` |
 
 Hai bot khi đó chia nhau hạn mức (OpenRouter free khoảng 50 lượt/ngày). Nên đặt `ALT_OPENROUTER_API_KEY` riêng nếu có.
+
+Từ Stockvn v1.18.0 Altcoin cũng dùng chung **model** của Cổ phiếu khi không khai model riêng (trước đó chỉ chung khoá):
+
+| Altcoin cần | Lấy từ Cổ phiếu | Khi nào |
+|---|---|---|
+| `NINEROUTER_MODELS` | `QUICK_MODEL`, không có thì `ROUTER9_MODEL` (model của AI phản biện), không có nữa thì `auto` như Cổ phiếu (9Router tự chọn model) | Altcoin dùng **cùng địa chỉ** 9Router với Cổ phiếu (tên model của 9Router này có thể không có ở 9Router khác) |
+| `OPENROUTER_MODELS` | `OPENROUTER_MODEL` y nguyên, mặc định `auto`: hai bot đọc cùng danh sách model `:free` và xếp cùng thứ tự, nên hỏi cùng model trước | Altcoin có khoá OpenRouter (riêng hay chung) |
+
+**Lượt và lúc nghỉ tính chung (từ Stockvn v1.18.0, Altcoin 3.3.1).** Hai bot ghi lượt gọi trong ngày và lúc nghỉ của
+từng nhà cung cấp vào `<DATA_DIR>/ai_share/` (`stock.json`, `altcoin.json`; mỗi bot chỉ ghi file của mình; không chứa
+khoá, chỉ một dấu vân tay của địa chỉ + khoá). Nhà cung cấp hai bot dùng **cùng khoá**:
+
+- lượt của cả hai tính chung vào hạn mức ngày của Cổ phiếu (`OPENROUTER_MAX_CALLS_PER_DAY`, mặc định 45 – dưới 50
+  lượt/ngày của gói free; `ROUTER9_MAX_CALLS_PER_DAY` nếu đặt). Hạn mức riêng của từng bot vẫn giữ: Cổ phiếu
+  `LLM_MAX_CALLS_PER_DAY`, Altcoin `AI_MAX_CALLS_PER_DAY`;
+- bot này thấy nhà cung cấp từ chối (429 hết lượt, sai khoá, 9Router sập hoặc lỗi 5xx) thì bot kia cũng không gọi vào
+  cho tới hết lúc nghỉ. Lỗi riêng của một lượt hỏi (quá dài) hay một model OpenRouter bận “upstream” không tính;
+- lượt không tới được nhà cung cấp (lỗi kết nối, quá thời gian) được trả lại, như Cổ phiếu vẫn làm.
+
+`/ai` và `/trangthai` của Cổ phiếu hiện lượt của Altcoin cạnh lượt của Cổ phiếu (“12 + 5 Altcoin / 45”), “nghỉ theo
+Altcoin”, thẻ **Altcoin · AI** (lượt hôm nay của Altcoin, model **thật** trả lời gần nhất, lỗi gần nhất); `/phienban`
+có phiên bản và bản dựng Altcoin. Trang AI của Altcoin và `/alt ai` hiện phần dùng chung và model thật
+(`9router/auto → <model 9Router chọn>`).
+
+Log khởi động ghi "Altcoin dùng chung model AI của Cổ phiếu: 9Router …, OpenRouter …". Altcoin khai model riêng
+(`ALT_NINEROUTER_MODELS`, `ALT_OPENROUTER_MODELS` trên panel, hoặc `NINEROUTER_MODEL(S)`, `OPENROUTER_MODELS` trong
+`altcoin/bot.env`, kể cả giá trị `auto` chép từ mẫu `botkeep.env`) hay 9Router địa chỉ khác thì giữ của nó, log ghi
+"Altcoin giữ AI riêng (…)": xoá các biến đó để dùng chung. Model đang trả lời: `/alt ai` hoặc trang AI của Altcoin.
 
 ### 4.4 Khoá bị bỏ qua
 
@@ -226,10 +255,10 @@ Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch
 ```bash
 python tests/run_all.py                              # phải kết thúc bằng "tất cả đều đạt"
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
-python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.17.0-alt3.3.0.zip
+python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.18.0-alt3.3.1.zip
 ```
 
-Builder in hai dòng `Stock v1.17.0: bản dựng … = bản phát hành` và `Altcoin 3.3.0: bản dựng a1a7ad4 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.18.0: bản dựng … = bản phát hành` và `Altcoin 3.3.1: bản dựng 7fe2138 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -292,10 +321,10 @@ Mục đích: thử trên đúng server Botkeep những điểm không thử đ�
 
    Không đặt `ALT_MODE` (paper) và **không** đặt `ALT_DATABASE_URL` (SQLite tạm). Thông báo của canary tới chat của anh/chị với tiêu đề `🪙 Altcoin ›`; muốn im thì tắt **Altcoin · thông báo** trên `/ai#kenh`.
 3. Kiểm tra trong 15–30 phút:
-   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.0 (a1a7ad4)`. Không có lỗi múi giờ hay "thiếu thư viện".
-   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `a1a7ad4`, `dropped_secrets` rỗng.
+   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.1 (7fe2138)`. Không có lỗi múi giờ hay "thiếu thư viện".
+   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `7fe2138`, `dropped_secrets` rỗng.
    - [ ] `/health` chỉ có `"altcoin": {"state": "running"}`.
-   - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.3.0 "đúng bản phát hành".
+   - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.3.1 "đúng bản phát hành".
    - [ ] Telegram `/alt status`; Zoom `alt status` (1:1) và `/vnbot alt status` (trong kênh) đều được trả lời.
    - [ ] `/alt close` hỏi xác nhận; `/alt close xacnhan` trả "Đã đóng N lệnh."; `/close` trần chỉ nhận lời nhắc.
    - [ ] `/alt zoomtest` báo "Zoom: nhận" và "Telegram …: OK".
@@ -320,11 +349,11 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 5. Đặt **`ALTCOIN_ENABLED=1`** rồi khởi động lại server Cổ phiếu.
    - Nếu `hub.json` báo `waiting` với "instance khác đang chạy: crypto@<host cũ>": heartbeat của server cũ còn mới (dưới 90 giây). Altcoin tự chạy sau khoảng 100 giây. Nếu vẫn chờ mãi: server cũ (hoặc Render) chưa thật sự dừng.
 6. **Kiểm tra chấp nhận:**
-   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.0`, `build` `a1a7ad4`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
+   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.1`, `build` `7fe2138`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
    - [ ] `/health` chỉ có `altcoin.state`.
-   - [ ] `/altcoin/phienban`: 3.3.0, `a1a7ad4`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
+   - [ ] `/altcoin/phienban`: 3.3.1, `7fe2138`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
    - [ ] `/alt status` được trả lời trên Telegram và trên Zoom (`alt status`, `/vnbot alt status`); `/trangthai` của Cổ phiếu vẫn chạy.
-   - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.2.0 → v3.3.0" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
+   - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.3.0 → v3.3.1" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
    - [ ] `/alt status` dòng "Instances": chỉ `crypto` còn sống. Dòng cũ (`render`, hoặc `crypto` của server cũ) hiện "(mất liên lạc)": chỉ là hiển thị.
    - [ ] Trong 1 giờ log Botkeep không có `409` hay `terminated by other getUpdates`.
    - [ ] Từ máy ngoài, có hay không có `-u x:<mật khẩu>`: `curl -i -X POST https://HOST/altcoin/_hub/command` → 404; `curl -i https://HOST/altcoin/%5Fhub/command` → 400; `curl -i https://HOST/_hub/command` → 404.

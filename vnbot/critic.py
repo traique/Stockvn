@@ -104,7 +104,20 @@ def ask(result, llm, lessons: list[str] | None = None) -> dict:
     verdict = parse(content)
     if verdict is None:
         raise ValueError(f"AI trả lời không đúng định dạng: {content[:160]!r}")
+    verdict["model"] = answered_by()
     return verdict
+
+
+def answered_by() -> str:
+    """Who answered this thread's last request: "9Router gpt-5-mini", "9Router auto → gpt-5-mini"
+    (9Router on "auto" picked it), "" when unknown (a test's stand-in model)."""
+    from tradingagents.llm_clients.fallback_client import last_call
+
+    call = last_call()
+    if not call.get("served"):
+        return ""
+    asked, served = call.get("model") or "", call["served"]
+    return f"{call['label']} " + (f"{asked} → {served}" if asked and asked != served else served)
 
 
 def verdict_line(code: str, result, verdict: dict | None, error: str = "") -> str:
@@ -140,6 +153,8 @@ class CriticLog:
                "stop": result.stop_price, "target": result.target_price,
                "verdict": verdict["verdict"], "confidence": verdict["confidence"], "reason": verdict["reason"],
                "outcome": None}
+        if verdict.get("model"):
+            row["model"] = verdict["model"]
         with self._lock:
             rows = [r for r in self._read() if not (r["day"] == day and r["code"] == row["code"])]
             rows.append(row)

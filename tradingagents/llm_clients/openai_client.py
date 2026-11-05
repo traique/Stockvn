@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -66,6 +67,24 @@ class LocalCompatibleChatOpenAI(NormalizedChatOpenAI):
         if resolved == "function_calling":
             kwargs.setdefault("tool_choice", None)
         return super().with_structured_output(schema, method=method, **kwargs)
+
+    def _create_chat_result(self, response, generation_info=None):
+        result = super()._create_chat_result(response, generation_info)
+        model = response.get("model") if isinstance(response, dict) else getattr(response, "model", None)
+        _served.model = model if isinstance(model, str) and model else None
+        return result
+
+
+_served = threading.local()
+
+
+def served_model() -> str | None:
+    """The model the endpoint said answered this thread's last request of a
+    ``LocalCompatibleChatOpenAI`` (a gateway such as 9Router on "auto" picks
+    one), then forgotten; None when unknown."""
+    model = getattr(_served, "model", None)
+    _served.model = None
+    return model
 
 
 def _input_to_messages(input_: Any) -> list:

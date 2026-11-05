@@ -20,7 +20,19 @@ single LangChain chat model they can ``invoke``, ``bind_tools`` and ask for
   (default 60) and ``<PROVIDER>_MAX_CALLS_PER_DAY`` per provider (OpenRouter
   defaults to 45, under its free tier's 50 a day; 0 = no cap). A provider past
   its cap is skipped until tomorrow; past the total, calls fail with
-  ``LLMBudgetExceeded``. Counts survive a restart when ``LLM_USAGE_PATH`` is set.
+  ``LLMBudgetExceeded``. Counts survive a restart when ``LLM_USAGE_PATH`` is set;
+- with the altcoin bot on the same server (``AI_SHARE_DIR``, ``ai_share``), a
+  provider both reach with the same key counts the requests of both against its
+  daily cap, and a rest either puts on it (429, key refused, endpoint down)
+  holds for both;
+- OpenRouter tries the models of OPENROUTER_MODEL at call time ("auto", the
+  default: the free models OpenRouter lists now, ranked as the altcoin ranks
+  them - ``openrouter_models``), at most ``OPENROUTER_MAX_TRIES`` (3) per call;
+  a model gone (404, not a valid id, refused) or busy upstream is left out for
+  a while and the next one answers, without resting OpenRouter.
+
+The model that actually answered (9Router "auto" picks one) is kept per provider
+(``provider_status``) and for the calling thread (``last_call``).
 
 An answer the provider did give but that does not parse (structured output) is
 not a provider failure: it is raised to the agent, which falls back to free
@@ -31,9 +43,14 @@ Configuration (environment):
     PROVIDER_ORDER       router9,groq,openrouter,xai (default; unset keys are skipped)
     ROUTER9_BASE_URL     9Router endpoint, OpenAI-compatible (…/v1)
     ROUTER9_API_KEY      9Router key
-    ROUTER9_MODEL        default model on 9Router (the tier model overrides it)
+    ROUTER9_MODEL        default model on 9Router (the tier model overrides it); default
+                         "auto": 9Router picks the model (the altcoin uses the same)
     GROQ_API_KEY         GROQ_MODEL (default openai/gpt-oss-20b)
-    OPENROUTER_API_KEY   OPENROUTER_MODEL (default a ":free" model)
+    OPENROUTER_API_KEY   OPENROUTER_MODEL (default "auto": the free models listed now; or
+                         ids separated by commas, "auto" among them to add the free ones)
+    OPENROUTER_MAX_TRIES OpenRouter models tried in one call (default 3)
+    AI_SHARE_DIR         folder of the files shared with the altcoin bot (vnbot.settings)
+    OPENROUTER_MODELS_CACHE  JSON file keeping OpenRouter's free list (vnbot.settings)
     XAI_API_KEY          XAI_MODEL (default grok-4-fast) - Grok, optional
     LLM_CALL_TIMEOUT_SEC per-call timeout (default 120)
     LLM_MAX_CONCURRENT   requests in flight at once (default 2)
@@ -81,12 +98,12 @@ class ProviderEndpoint:
 
 ENDPOINTS = {
     "router9": ProviderEndpoint("router9", "9Router", "ROUTER9_BASE_URL", None,
-                                "ROUTER9_API_KEY", "ROUTER9_MODEL", "gpt-4o-mini"),
+                                "ROUTER9_API_KEY", "ROUTER9_MODEL", "auto"),
     "groq": ProviderEndpoint("groq", "Groq", "GROQ_BASE_URL", "https://api.groq.com/openai/v1",
                              "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-20b"),
     "openrouter": ProviderEndpoint("openrouter", "OpenRouter", "OPENROUTER_BASE_URL",
                                    "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
-                                   "OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"),
+                                   "OPENROUTER_MODEL", "auto"),
     "xai": ProviderEndpoint("xai", "Grok (xAI)", "XAI_BASE_URL", "https://api.x.ai/v1",
                             "XAI_API_KEY", "XAI_MODEL", "grok-4-fast"),
 }
@@ -111,13 +128,19 @@ class AllProvidersResting(RuntimeError):
 
 _resting_until: dict[str, float] = {}
 _last_error: dict[str, str] = {}
+_served: dict[str, dict] = {}         # provider -> the last answer's {"model", "served", "ts"}
 _lock = threading.Lock()
+_local = threading.local()            # last_call() of this thread
 
 
-def _rest(name: str, seconds: float, reason: str) -> None:
+def _rest(name: str, seconds: float, reason: str, share: bool = False) -> None:
+    """``name`` rests ``seconds``; ``share``: the failure is the provider's, not this request's
+    (429, key refused, endpoint down or failing), so the altcoin bot on the same key rests it too."""
     with _lock:
         _resting_until[name] = time.time() + seconds
         _last_error[name] = reason
+    if share:
+        _ledger().rest(name, _fingerprint(name), seconds, reason)
     logger.warning("LLM provider %s rests %.0fs: %s", name, seconds, reason)
 
 
@@ -126,42 +149,124 @@ def _recovered(name: str) -> None:
         was = _resting_until.pop(name, None)
         _last_error.pop(name, None)
     if was:
+        _ledger().clear_rest(name)
         logger.info("LLM provider %s answers again", name)
 
 
 def is_resting(name: str) -> bool:
+    """Resting after a failure here, or after one the altcoin bot saw on the same key."""
     with _lock:
-        return time.time() < _resting_until.get(name, 0.0)
+        if time.time() < _resting_until.get(name, 0.0):
+            return True
+    return _peer_rest(name) is not None
+
+
+# ─── Sharing with the altcoin bot (ai_share) ────────────────────────────────
+
+_share = None
+_share_where: str | None = None
+
+
+def _ledger():
+    """This process's file in AI_SHARE_DIR (none set: nothing shared, every call a no-op)."""
+    global _share, _share_where
+    from . import ai_share
+
+    where = os.environ.get("AI_SHARE_DIR", "")
+    if _share is None or where != _share_where:
+        _share, _share_where = ai_share.Ledger("stock", where), where
+    return _share
+
+
+def _fingerprint(name: str) -> str:
+    from . import ai_share
+
+    endpoint = ENDPOINTS.get(name)
+    if endpoint is None:
+        return ""
+    base = os.environ.get(endpoint.base_url_env or "") or endpoint.default_base_url or ""
+    return ai_share.fingerprint(base, os.environ.get(endpoint.key_env, ""))
+
+
+def _peer_rest(name: str) -> str | None:
+    return _ledger().peer_rest(name, _fingerprint(name))
+
+
+def peer_status() -> list[dict]:
+    """The other bots' shared files (who, ts, day, providers, extra), for a status page."""
+    return _ledger().peers()
 
 
 def provider_status() -> list[dict]:
-    """Each configured provider in order, with whether it rests and why (for a status page)."""
+    """Each configured provider in order, with whether it rests and why (for a status page):
+    ``peer_calls``/``shared_with``: the altcoin's requests of the day on the same key (the cap
+    ``cap`` holds for both); ``served``: the model that answered last."""
+    from . import openrouter_models
+
     now = time.time()
     rows = []
     for name in configured_order():
         with _lock:
             until = _resting_until.get(name, 0.0)
             reason = _last_error.get(name, "")
-        rows.append({
+            served = dict(_served.get(name) or {})
+        fp = _fingerprint(name)
+        ledger = _ledger()
+        peers = ledger.shared(name, fp)
+        peer = _peer_rest(name)
+        model = os.environ.get(ENDPOINTS[name].model_env) or ENDPOINTS[name].default_model
+        row = {
             "name": name,
             "label": ENDPOINTS[name].label,
-            "model": os.environ.get(ENDPOINTS[name].model_env) or ENDPOINTS[name].default_model,
+            "model": model,
             "resting_seconds": max(0, int(until - now)),
-            "last_error": reason,
+            "last_error": reason or (peer or ""),
             "calls_today": usage_today()["by"].get(name, 0),
-            "cap": provider_cap(name),
-        })
+            "cap": ledger.shared_cap(name, fp, provider_cap(name)),
+            "peer_calls": ledger.peer_calls(name, fp),
+            "shared_with": sorted({who for who, _, _ in peers}),
+            "peer_resting": peer is not None,
+            "served": served.get("served") or "",
+            "served_ts": served.get("ts") or 0,
+        }
+        if name == "openrouter":
+            row["cooling"] = openrouter_models.cooling()
+        rows.append(row)
     return rows
 
 
+def last_call() -> dict:
+    """This thread's last answered call: {"provider", "label", "model", "served"} ({} if none)."""
+    return dict(getattr(_local, "call", None) or {})
+
+
+def _note_served(name: str, model: Any, result: Any) -> None:
+    """The model that answered: what the endpoint says it used (9Router "auto" picks one),
+    else the one asked."""
+    from .openai_client import served_model
+
+    asked = getattr(model, "model_name", None) or ""
+    served = served_model() or getattr(result, "model", None)
+    served = served if isinstance(served, str) and served else asked
+    if not served:
+        return
+    entry = {"model": asked, "served": served, "ts": time.time()}
+    with _lock:
+        _served[name] = entry
+    _local.call = {"provider": name, "label": ENDPOINTS[name].label if name in ENDPOINTS else name, **entry}
+
+
 def reset_provider_state() -> None:
+    global _semaphore, _share, _share_where
     with _lock:
         _resting_until.clear()
         _last_error.clear()
         _usage.clear()
         _next_slot.clear()
-    global _semaphore
+        _served.clear()
     _semaphore = None
+    _share, _share_where = None, None
+    _local.call = None
 
 
 # ─── Daily budget and concurrency ───────────────────────────────────────────
@@ -220,9 +325,12 @@ def _save_usage() -> None:
 
 
 def _over_cap(name: str) -> bool:
+    """Past this provider's cap of the day - counting the altcoin's requests on the same key."""
     cap = provider_cap(name)
     with _lock:
-        return bool(cap) and _usage_today()["by"].get(name, 0) >= cap
+        if cap and _usage_today()["by"].get(name, 0) >= cap:
+            return True
+    return _ledger().cap_reached(name, _fingerprint(name), cap) is not None
 
 
 def _spend(name: str) -> None:
@@ -237,6 +345,7 @@ def _spend(name: str) -> None:
         usage["total"] += 1
         usage["by"][name] = usage["by"].get(name, 0) + 1
         _save_usage()
+    _ledger().count(name, _fingerprint(name))
 
 
 def _refund(name: str) -> None:
@@ -249,6 +358,7 @@ def _refund(name: str) -> None:
         if usage["by"].get(name, 0) > 0:
             usage["by"][name] -= 1
         _save_usage()
+    _ledger().count(name, _fingerprint(name), -1)
 
 
 def usage_today() -> dict:
@@ -347,32 +457,116 @@ def _router9_rest() -> float:
     return _env_float("ROUTER9_RETRY_SEC", 900)
 
 
+MODEL_GONE_SEC = 6 * 3600       # an OpenRouter model removed, not a valid id, or refused
+MODEL_BUSY_SEC = 600            # an OpenRouter model rate-limited upstream (the others still answer)
+
+
+def _model_failure(exc: Exception) -> float:
+    """Seconds to leave this OpenRouter model out when the failure is the model's, not
+    OpenRouter's (then OpenRouter itself does not rest); 0 otherwise."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    if status == 429:
+        return MODEL_BUSY_SEC if "upstream" in text else 0
+    if status in (403, 404) or (status == 400 and "model" in text and
+                                any(w in text for w in ("valid", "exist", "not found", "unavailable"))):
+        return MODEL_GONE_SEC
+    return 0
+
+
+def _provider_wide(exc: Exception) -> bool:
+    """The failure is the provider's (rate limit, key, endpoint down or failing), not this
+    request's (too long, a bad model id): shared with the altcoin bot on the same key."""
+    status = getattr(exc, "status_code", None) or 0
+    return status in (401, 402, 403, 429) or status >= 500 or _transport_error(exc)
+
+
+class ModelPool:
+    """OpenRouter in a chain: the models of OPENROUTER_MODEL picked at call time
+    (``openrouter_models``: "auto" = the free ones OpenRouter lists now, minus those left out
+    after a failure), at most OPENROUTER_MAX_TRIES of them per call, each one request."""
+
+    def __init__(self, spec: str, base_url: str, make):
+        self.spec, self.base_url, self._make = spec, base_url, make
+        self._made: dict[str, Any] = {}
+
+    def models(self) -> list[Any]:
+        from . import openrouter_models
+
+        tries = max(1, int(_env_float("OPENROUTER_MAX_TRIES", 3)))
+        out = []
+        for model_id in openrouter_models.models(self.spec, self.base_url)[:tries]:
+            if model_id not in self._made:
+                self._made[model_id] = self._make(model_id)
+            out.append(self._made[model_id])
+        return out
+
+
+def _expand(chain: Sequence[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    out = []
+    for name, model in chain:
+        out += [(name, m) for m in model.models()] if isinstance(model, ModelPool) else [(name, model)]
+    return out
+
+
+def _why_not(name: str) -> str:
+    with _lock:
+        own_cap = bool(provider_cap(name)) and _usage_today()["by"].get(name, 0) >= provider_cap(name)
+        resting = time.time() < _resting_until.get(name, 0.0)
+        reason = _last_error.get(name, "")
+    if own_cap:
+        return "hết hạn mức ngày"
+    shared = _ledger().cap_reached(name, _fingerprint(name), provider_cap(name))
+    if shared:
+        return shared
+    if resting:
+        return f"đang nghỉ ({reason})"
+    return _peer_rest(name) or ("mọi model đang tạm bỏ qua" if name == "openrouter" else "đang nghỉ")
+
+
 def run_chain(chain: Sequence[tuple[str, Any]], call) -> Any:
     """``call(model)`` on each provider in turn until one answers.
 
-    ``chain`` is ``[(name, model), ...]``. Resting providers and those past
-    their daily cap are skipped; when that leaves none, the call fails without
-    sending anything (``LLM_TRY_RESTING=1``: resting ones are tried last instead).
+    ``chain`` is ``[(name, model), ...]`` (an OpenRouter ``ModelPool`` stands for its models of
+    the moment). Resting providers and those past their daily cap are skipped (counting the
+    altcoin bot's requests and rests on the same key); when that leaves none, the call fails
+    without sending anything (``LLM_TRY_RESTING=1``: resting ones are tried last instead).
+    A provider that rests or reaches its cap during the call gets no further request from it.
     """
     if not chain:
         raise RuntimeError(
             "No LLM provider configured: set ROUTER9_BASE_URL and ROUTER9_API_KEY, "
             "or GROQ_API_KEY / OPENROUTER_API_KEY / XAI_API_KEY."
         )
+    from .openai_client import served_model
+
+    _local.call = None                 # last_call(): this call's answer, or nothing
+    names = list(dict.fromkeys(name for name, _ in chain))
+    ledger = _ledger()
+    for name in names:
+        if name in ENDPOINTS:
+            ledger.register(name, _fingerprint(name), provider_cap(name))
+    chain = _expand(chain)
     usable = [item for item in chain if not _over_cap(item[0])]
     ready = [item for item in usable if not is_resting(item[0])]
     ordered = list(ready)
     if os.environ.get("LLM_TRY_RESTING", "").strip().lower() in ("1", "true", "yes", "on"):
         ordered += [item for item in usable if item not in ready]
     if not ordered:
-        why = "; ".join(f"{ENDPOINTS[n].label}: " + ("hết hạn mức ngày" if _over_cap(n) else
-                                                    f"đang nghỉ ({_last_error.get(n, '')})")
-                        for n, _ in chain if n in ENDPOINTS)
+        why = "; ".join(f"{ENDPOINTS[n].label}: {_why_not(n)}" for n in names if n in ENDPOINTS)
         raise AllProvidersResting("Mọi nhà cung cấp AI đang nghỉ hoặc hết hạn mức, không gửi thêm: " + why)
     errors = []
+    stopped: set[str] = set()          # rested, unreachable or capped during this call
     for name, model in ordered:
+        if name in stopped:
+            continue
+        if _over_cap(name):            # reached during this call (this request or the altcoin's)
+            stopped.add(name)
+            errors.append(f"{ENDPOINTS[name].label if name in ENDPOINTS else name}: {_why_not(name)}")
+            continue
         _spend(name)
         _pace(name)
+        served_model()                 # forget an earlier request's answer: this one's is kept below
         try:
             with _slot():
                 result = call(model)
@@ -382,18 +576,32 @@ def run_chain(chain: Sequence[tuple[str, Any]], call) -> Any:
                 raise
             if _transport_error(exc):
                 _refund(name)
+            label = ENDPOINTS[name].label if name in ENDPOINTS else name
+            model_id = getattr(model, "model_name", "") or ""
+            gone = _model_failure(exc) if name == "openrouter" else 0
+            if gone:                   # this model only: the next OpenRouter model may answer
+                from . import openrouter_models
+
+                openrouter_models.cool(model_id, gone, reason)
+                errors.append(f"{label} {model_id}: {reason}")
+                continue
             if name == "router9":
                 rest = max(rest, _router9_rest())
             if rest:
-                _rest(name, rest, reason)
+                _rest(name, rest, reason, share=_provider_wide(exc))
             else:
                 with _lock:
                     _last_error[name] = reason
-            errors.append(f"{ENDPOINTS[name].label}: {reason}")
+            if rest or _transport_error(exc):
+                stopped.add(name)
+            errors.append(f"{label}: {reason}")
             logger.warning("LLM provider %s failed (%s); trying the next one", name, reason)
             continue
         _recovered(name)
+        _note_served(name, model, result)
         return result
+    tried = {name for name, _ in ordered}
+    errors += [f"{ENDPOINTS[n].label}: {_why_not(n)}" for n in names if n in ENDPOINTS and n not in tried]
     raise RuntimeError("Every LLM provider failed: " + "; ".join(errors))
 
 
@@ -440,7 +648,8 @@ def build_chain(model_override: str | None = None, **llm_kwargs) -> list[tuple[s
 
     ``model_override`` replaces the 9Router model (the tier model of the
     config); the other providers keep their own *_MODEL setting, since a model
-    name of one gateway rarely exists on another.
+    name of one gateway rarely exists on another. OpenRouter is a ``ModelPool``:
+    its models are picked at each call.
     """
     from .openai_client import LocalCompatibleChatOpenAI
 
@@ -453,12 +662,14 @@ def build_chain(model_override: str | None = None, **llm_kwargs) -> list[tuple[s
             model = model_override
         base_url = (os.environ.get(endpoint.base_url_env or "") or endpoint.default_base_url or "").rstrip("/")
         kwargs = {k: v for k, v in llm_kwargs.items() if k in ("temperature", "max_tokens", "callbacks")}
+
         # No retry inside the SDK: a retry on a 429 is exactly what overloads a
         # gateway, and the chain is the real fallback.
-        chain.append((name, LocalCompatibleChatOpenAI(
-            model=model, base_url=base_url, api_key=os.environ[endpoint.key_env],
-            timeout=timeout, max_retries=0, **kwargs,
-        )))
+        def make(model_id, base_url=base_url, key=os.environ[endpoint.key_env], kwargs=kwargs):
+            return LocalCompatibleChatOpenAI(model=model_id, base_url=base_url, api_key=key,
+                                             timeout=timeout, max_retries=0, **kwargs)
+
+        chain.append((name, ModelPool(model, base_url, make) if name == "openrouter" else make(model)))
     return chain
 
 

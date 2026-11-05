@@ -131,12 +131,20 @@ class Bot:
     def ai_text(self):
         st = self.ai.public_stats()
         lines = [f"🤖 AI: {'bật' if st['enabled'] else 'tắt'} | thứ tự {', '.join(st['order'])} | hôm nay {st['calls_today']}/{st['budget']}"]
+        for x in st.get("shared") or []:
+            lines.append(f"↔ {x['provider']} dùng chung khoá với {', '.join(x['with'])}: {x['calls']}"
+                         + (f"/{x['cap']}" if x['cap'] else "") + " lượt hôm nay (cả hai bot)"
+                         + (f" – {x['rest']}" if x['rest'] else ""))
         for m in st["models"][:10]:
-            lines.append(f"• {m['model']}: {m['calls']} gọi, {m['ok']} ok, {m['fail']} lỗi"
+            real = m.get("last_served")
+            real = f" → {real}" if real and real != m["model"].split("/", 1)[-1] else ""
+            lines.append(f"• {m['model']}{real}: {m['calls']} gọi, {m['ok']} ok, {m['fail']} lỗi"
                          + (f", ~{m['avg_ms']/1000:.1f}s" if m['avg_ms'] else "") + (" (đang nghỉ)" if m['cooldown'] else ""))
         if st.get("last_result"):
             r = st["last_result"]
-            lines.append(f"Gần nhất: {r['side'].upper()} {r['symbol']} → {r['decision']} {r['confidence']}% ({r['model']})\n{r['reason']}")
+            real = r.get("served")
+            real = f" → {real}" if real and real != r["model"].split("/", 1)[-1] else ""
+            lines.append(f"Gần nhất: {r['side'].upper()} {r['symbol']} → {r['decision']} {r['confidence']}% ({r['model']}{real})\n{r['reason']}")
         return "\n".join(lines)
 
     def lessons_text(self):
