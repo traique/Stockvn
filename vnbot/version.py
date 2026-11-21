@@ -25,13 +25,20 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.18.0"
-RELEASED = "2026-11-05"
-RELEASE_BUILD = "72c40a1"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.19.0"
+RELEASED = "2026-11-21"
+RELEASE_BUILD = "c498248"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.19.0", "2026-11-21", (
+        "Gõ mã là có giá realtime: FPT · fpt hpg · giá FPT · VNINDEX (tối đa 5 mã), Telegram và Zoom",
+        "Giá khớp gần nhất của DNSE, +/- và % so với tham chiếu, mở/cao/thấp, khối lượng; không gọi AI",
+        "Ngoài giờ giao dịch: giá đóng cửa phiên gần nhất, ghi rõ ngày phiên",
+        "Giá coin: alt btc · alt eth sol (Telegram gõ có / hay không), giá OKX, % và cao/thấp/khối lượng 24h",
+        "/alt btc kèm bối cảnh BTC của bot Altcoin; giá coin chạy cả khi Altcoin tắt",
+    )),
     ("v1.18.0", "2026-11-05", (
         "Altcoin dùng chung model AI của Cổ phiếu khi không khai model riêng (trước: chỉ chung khoá)",
         "9Router mặc định auto (trước gpt-4o-mini): 9Router tự chọn model cho cả Cổ phiếu lẫn Altcoin",

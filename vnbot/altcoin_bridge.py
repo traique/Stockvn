@@ -4,15 +4,19 @@ vnbot.altcoin_host never holds a channel token).
 Commands, "/alt <lệnh>" (alias "/altcoin"), from a sender the stock already allows:
 
 - only the commands of the allowlist reach the child: POST http://127.0.0.1:<port>/_hub/command
-  with X-Hub-Cmd-Token (httpx, no proxy from the environment), 15 s; "/alt" alone, "help" or an
-  unknown word get the altcoin's command table, built here;
+  with X-Hub-Cmd-Token (httpx, no proxy from the environment), 15 s; "/alt" alone, "help" or a
+  word that is no coin code get the altcoin's command table, built here;
+- coin codes ("/alt btc", "/alt eth sol"; any word that is not a command): their realtime price on
+  OKX (vnbot.quote, the public API, never through the child: the altcoin off too); BTC also gets
+  the child's own BTC context (its "btc" command) when the child runs;
 - close, apply and resume need a second message, "/alt <lệnh> xacnhan", from the same sender
   in the same chat within 120 s, used once; only the command's name is sent;
 - close (60 s) and apply (30 s) run on an "alt-cmd" thread, one at a time; a write command is
   never sent again after an error or a timeout (the child holds a lock until it is done, so a
   second close is refused there, not run twice);
 - the child off, starting, waiting, not the leader, busy, slow or failing: a plain answer
-  (ALTCOIN_ENABLED not 1: every /alt, zoomtest and close included, gets "Altcoin đang tắt").
+  (ALTCOIN_ENABLED not 1: every /alt but a coin's price, zoomtest and close included, gets
+  "Altcoin đang tắt").
 
 Notifications: the supervisor's pipe reader hands each one to ``put`` (never blocks: a queue of
 200, a full queue drops and counts). The "altcoin-notify" thread masks secrets, drops the
@@ -37,6 +41,7 @@ import re
 import threading
 import time
 
+from vnbot import quote
 from vnbot.eventlog import redact
 from vnbot.zoom import split
 
@@ -46,6 +51,8 @@ PREFIX = "🪙 Altcoin › "
 READ = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version")
 WRITE = ("pause", "resume", "close", "apply")
 CONFIRM = ("resume", "close", "apply")
+# Words of "/alt <word>" never read as a coin code ("btc" is both: its price, then the child's context).
+NOT_COINS = tuple(c for c in READ + WRITE if c != "btc") + ("help", "zoomtest", "zoompair", "zoomxoa", "zoomstatus")
 YES = ("xacnhan", "xácnhận")
 SLOW = {"close": 60, "apply": 30}           # seconds; on the alt-cmd thread
 TIMEOUT, CONNECT_TIMEOUT = 15, 2
@@ -67,7 +74,7 @@ HELP = ("🪙 Altcoin (bot OKX) – gõ /alt <lệnh> (Zoom: alt <lệnh>):\n"
         "/alt signals – tín hiệu và quyết định AI\n"
         "/alt ai – lượt gọi từng model\n"
         "/alt learn – trạng thái tự học · /alt lessons – bài học AI\n"
-        "/alt btc – bối cảnh BTC\n"
+        "/alt btc · /alt eth sol – giá realtime trên OKX (tối đa 5 coin; BTC kèm bối cảnh BTC của bot)\n"
         "/alt phienban – phiên bản Altcoin\n"
         "/alt pause – tạm dừng mở lệnh mới\n"
         "/alt resume – giao dịch lại, xoá trạng thái dừng (cần xác nhận)\n"
@@ -126,11 +133,15 @@ class Bridge:
         """'/alt <args>' from an allowed sender. ``key``: (channel, real sender, chat) of the
         two-step commands; ``source``: "Telegram" or "Zoom" (the altcoin says "qua Zoom");
         ``reply(text)`` answers in that chat."""
+        words = args.lower().split()
+        cmd = words[0] if words else ""
+        coins = None if cmd in NOT_COINS else quote.coin_symbols(args.split())
+        if coins:
+            self._coins(coins, key, source, reply)
+            return
         if not self.enabled:
             reply(self._not_running(self.sup.state()))
             return
-        words = args.lower().split()
-        cmd = words[0] if words else ""
         if cmd in ("zoompair", "zoomxoa", "zoomstatus"):
             reply(ZOOM_SHARED)
             return
@@ -165,6 +176,17 @@ class Bridge:
         except Exception:
             self._busy.release()
             raise
+
+    def _coins(self, coins: list[str], key: tuple, source: str, reply) -> None:
+        """'/alt btc eth': the price of each coin on OKX; with BTC, the child's BTC context after it."""
+        text = f"{PREFIX}giá {' '.join(coins[:quote.MAX_SYMBOLS])}\n{quote.coins_text(coins)}"
+        if "BTC" in coins[:quote.MAX_SYMBOLS] and self.enabled and self.sup.command_target() is not None:
+            context = self.call("btc", source, key)
+            head = f"{PREFIX}btc\n"
+            if context.startswith(head):
+                text += "\n" + context[len(head):]
+        for part in parts(text):
+            reply(part)
 
     def _confirm(self, key: tuple, cmd: str, yes: bool) -> str | None:
         """None: go. Otherwise what to answer: the question (first step), or why not."""

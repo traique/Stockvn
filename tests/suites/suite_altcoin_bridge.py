@@ -2,10 +2,12 @@
 offline: the real TelegramBot with a fake Bot API, the real Zoom webhook path, a fake child
 (a localhost HTTP server) and the real supervisor's pipe reader.
 
-- /alt, /alt help, /ALT STATUS, /alt@Bot, /altcoin, Zoom "alt status"; an unknown word and the
-  altcoin's bare commands (/close, /status...) never reach the child; with no bridge (the stock
-  alone) or the altcoin off, HELP, /docs and every stock command are unchanged (off: every /alt,
-  zoomtest and close included, says so and sends nothing);
+- /alt, /alt help, /ALT STATUS, /alt@Bot, /altcoin, Zoom "alt status"; a word that is no coin code
+  and the altcoin's bare commands (/close, /status...) never reach the child; with no bridge (the
+  stock alone) or the altcoin off, HELP, /docs and every stock command are unchanged (off: every
+  /alt but a coin's price, zoomtest and close included, says so and sends nothing);
+- coin codes (/alt btc, /alt eth sol, BTCUSDT, Zoom "alt btc"): their OKX price (faked here), never
+  sent to the child, the altcoin off too; BTC gets the child's BTC context after the price;
 - the stock's own permissions (a stranger runs nothing, a group gets its answer, Zoom commands
   switched off run nothing); close/apply/resume need "/alt <lệnh> xacnhan" from the same
   sender in the same chat within 120 s, once (Zoom: the real JID, not the shared "zoom" id);
@@ -46,6 +48,25 @@ from vnbot.channels import Switches  # noqa: E402
 eventlog.refresh_secrets()
 logging.getLogger("vnbot").addHandler(logging.NullHandler())     # the warnings checked here: not on the console
 t = _common.Checks()
+
+# ── OKX faked (vnbot.quote): BTC and ETH perpetuals, PEPE spot only, anything else unknown ──
+from vnbot import quote  # noqa: E402
+
+OKX = {"BTC-USDT-SWAP": {"last": "58931.8", "open24h": "57000", "high24h": "59500.1", "low24h": "56800",
+                         "volCcy24h": "100000", "ts": "1795224671501"},
+       "ETH-USDT-SWAP": {"last": "1621.78", "open24h": "1700", "high24h": "1762.57", "low24h": "1578.91",
+                         "volCcy24h": "2000000", "ts": "1795224671501"},
+       "PEPE-USDT": {"last": "0.0000034418", "open24h": "0.0000034418", "high24h": "0.0000036935",
+                     "low24h": "0.0000033363", "volCcy24h": "5000000", "ts": "1795224671501"}}
+ASKED: list[str] = []
+
+
+def fake_ticker(inst_id):
+    ASKED.append(inst_id)
+    return OKX.get(inst_id)
+
+
+quote._okx_ticker = fake_ticker
 
 
 def wait_for(cond, seconds=10.0):
@@ -155,14 +176,54 @@ t.ok("/ALT STATUS: POST /_hub/command with X-Hub-Cmd-Token, only the command's n
      SEEN[-1:])
 t.ok("...the answer: '🪙 Altcoin › status' then the child's text", last(111) == "🪙 Altcoin › status\ntrả lời status",
      last(111))
-for text in ("/alt@VnBot trades", "/altcoin signals", "/Altcoin@VnBot btc extra words"):
+for text in ("/alt@VnBot trades", "/altcoin signals", "/Altcoin@VnBot lessons extra words"):
     bot._handle(m(111, 111, text))
 t.ok("/alt@Bot, /altcoin, /Altcoin@Bot: the same (extra words never sent)",
-     [s["body"]["cmd"] for s in SEEN[-3:]] == ["trades", "signals", "btc"] and len(SEEN) == 4, SEEN[-3:])
+     [s["body"]["cmd"] for s in SEEN[-3:]] == ["trades", "signals", "lessons"] and len(SEEN) == 4, SEEN[-3:])
 n = len(SEEN)
-for text in ("/alt foo", "/alt zoompairx", "/alt close_all", "/alt /close"):
+for text in ("/alt close_all", "/alt /close", "/alt btc!x"):
     bot._handle(m(111, 111, text))
-t.ok("an unknown word: the command table, never sent", len(SEEN) == n and texts(111)[-4:] == [ab.HELP] * 4)
+t.ok("a word that is no coin code: the command table, never sent, OKX not asked",
+     len(SEEN) == n and texts(111)[-3:] == [ab.HELP] * 3 and not ASKED)
+
+# coin prices: OKX (faked), never the child
+bot._handle(m(111, 111, "/alt eth"))
+t.ok("/alt eth: its OKX perpetual's price, 24h change, high/low, volume in USDT; the child not asked",
+     len(SEEN) == n and ASKED == ["ETH-USDT-SWAP"] and last(111).startswith("🪙 Altcoin › giá ETH\nRealtime trên OKX lúc ")
+     and "🔴 ETH: 1,621.78 USDT -4.60% (24h)" in last(111)
+     and "24h: Cao 1,762.57 · Thấp 1,578.91 · KL 3.24 tỷ USDT · hợp đồng USDT-SWAP" in last(111), last(111))
+ASKED.clear()
+bot._handle(m(111, 111, "/alt PEPEUSDT foo"))
+t.ok("/alt PEPEUSDT foo: the spot pair when there is no perpetual (BTCUSDT style accepted); an unknown coin said so",
+     len(SEEN) == n and ASKED == ["PEPE-USDT-SWAP", "PEPE-USDT", "FOO-USDT-SWAP", "FOO-USDT"]
+     and "🟡 PEPE: 0.0000034418 USDT +0.00% (24h)" in last(111) and "KL 5.0 triệu USDT · spot USDT" in last(111)
+     and "❔ FOO: OKX không có cặp FOO-USDT" in last(111), last(111))
+bot._handle(m(111, 111, "/alt aa bb cc dd ee ff gg"))
+t.ok("at most 5 coins a message, said so", "(Mỗi lần tra tối đa 5 coin.)" in last(111) and "❔ EE:" in last(111)
+     and "❔ FF:" not in last(111) and len(SEEN) == n, last(111))
+ASKED.clear()
+bot._handle(m(111, 111, "/alt btc"))
+t.ok("/alt btc: the price, then the child's BTC context (its 'btc' command)",
+     SEEN[-1]["body"] == {"cmd": "btc", "source": "Telegram"} and len(SEEN) == n + 1
+     and last(111).startswith("🪙 Altcoin › giá BTC\n") and "🟢 BTC: 58,931.8 USDT +3.39% (24h)" in last(111)
+     and last(111).endswith("\ntrả lời btc"), last(111))
+bot._handle(m(111, 111, "alt eth"))
+t.ok("Telegram 'alt eth' without the '/' (as on Zoom): the same", "🪙 Altcoin › giá ETH" in last(111)
+     and "ETH: 1,621.78" in last(111), last(111))
+bot._handle(m(111, 111, "Alt status"))
+t.ok("Telegram 'Alt status' without the '/': the child's status", SEEN[-1]["body"]["cmd"] == "status"
+     and last(111).startswith("🪙 Altcoin › status"), last(111))
+n += 1
+bot._handle(m(111, 111, "/alt btc-usdt-swap eth"))
+t.ok("/alt btc-usdt-swap eth: both prices (OKX's instId understood as BTC), the context once",
+     "BTC: 58,931.8" in last(111) and "ETH: 1,621.78" in last(111) and len(SEEN) == n + 2
+     and last(111).count("trả lời btc") == 1, last(111))
+OKX_ERR = quote._okx_ticker
+quote._okx_ticker = lambda inst: (_ for _ in ()).throw(RuntimeError("OKX 50011: Too Many Requests"))
+bot._handle(m(111, 111, "/alt eth"))
+quote._okx_ticker = OKX_ERR
+t.ok("OKX failing: said so, the bot goes on", "⚠️ ETH: chưa lấy được giá OKX, thử lại sau ít phút" in last(111), last(111))
+n = len(SEEN)
 bot._handle(m(111, 111, "/alt zoompair a@b"))
 t.ok("/alt zoompair: points to the stock's commands", last(111) == ab.ZOOM_SHARED and len(SEEN) == n)
 for bare in ("/close", "/status", "/apply", "/resume", "/pause", "/ai", "/close@VnBot"):
@@ -194,6 +255,9 @@ for text in ("/alt zoomtest", "/alt close", "/alt close xacnhan", "/alt", "/alt 
     t.ok(f"altcoin off: {text} says so, nothing to the report chats, nothing asked",
          last(111) == "🪙 Altcoin đang tắt (ALTCOIN_ENABLED khác 1)." and not texts(-100500) and not texts(-100600)
          and len(SEEN) == n, last(111))
+bot._handle(m(111, 111, "/alt btc"))
+t.ok("altcoin off: /alt btc still gets the OKX price (no context, the child not asked)",
+     "🟢 BTC: 58,931.8 USDT" in last(111) and "trả lời" not in last(111) and len(SEEN) == n, last(111))
 bot.alt = quiet(SUP)
 line = "/alt <lệnh> - bot Altcoin (OKX): gõ /alt để xem lệnh\n"
 t.ok("altcoin on: HELP gains the /alt line only", line in bot._help() and bot._help().replace(line, "") == plain_help)
@@ -278,6 +342,9 @@ zoom_says("a@xmpp.zoom.us", "alt status")
 t.ok("Zoom 'alt status' (no slash): '/' added, sent with source Zoom, the answer back to Zoom",
      wait_for(lambda: len(SEEN) == n + 1) and SEEN[-1]["body"] == {"cmd": "status", "source": "Zoom"}
      and wait_for(lambda: not zoom.queue.empty()) and zoom_replies()[0][0].startswith("🪙 Altcoin › status"))
+zoom_says("a@xmpp.zoom.us", "alt eth")
+t.ok("Zoom 'alt eth': the OKX price back to Zoom, the child not asked",
+     wait_for(lambda: not zoom.queue.empty()) and "ETH: 1,621.78 USDT" in zoom_replies()[0][0] and len(SEEN) == n + 1)
 sw.set("zoom_commands", False)
 zoom_says("a@xmpp.zoom.us", "alt status")
 time.sleep(0.3)
