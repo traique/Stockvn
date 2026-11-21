@@ -4,6 +4,7 @@ Hướng dẫn chạy TradingAgents VN liên tục trên Botkeep (hoặc bất k
 
 - **Trang web**: nhập mã cổ phiếu, xem hàng đợi, đọc báo cáo HTML của các agent, sửa danh sách theo dõi.
 - **Bot Telegram**: `/phantich`, `/phanbien`, `/nhanh`, `/dinhgia`, `/theodoi`, `/trangthai`, `/id`. Zoom Team Chat ngang hàng (tuỳ chọn), cùng bộ lệnh (mục **Lệnh trên Telegram và Zoom**).
+- **Gõ mã là có giá realtime** (v1.19.0): nhắn `FPT` (hoặc `fpt hpg`, `giá FPT`, `VNINDEX`, tối đa 5 mã) trên Telegram hay Zoom, bot trả giá khớp gần nhất, +/- và % so với tham chiếu, mở/cao/thấp, khối lượng; không gọi AI. Giá coin: `alt btc`, `alt eth sol` (Telegram gõ có `/` hay không đều được), giá OKX.
 - **Định giá bot tự tính** cho mọi mã (v1.17.0), không cần nhập gì: thẻ tham khảo theo bố cục hồ sơ PDF; Ke của bot 12% ngân hàng, 13% mã khác (PDF 7,94%) nên vùng có thể khác PDF; không vào quyết định.
 - **Cảnh báo trong phiên**: stop, mục tiêu, vùng mua, vùng Rẻ/Đắt theo thẻ định giá, VNINDEX giảm mạnh, không gọi AI.
 - **Báo cáo tự động** cho danh sách theo dõi sau giờ đóng cửa mỗi ngày giao dịch (ngày lễ tự bỏ qua).
@@ -137,6 +138,8 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 
 | Lệnh | Việc |
 |---|---|
+| `FPT` · `fpt hpg` · `giá FPT` · `VNINDEX` | **Giá realtime**, gõ mã là có (không cần lệnh, tối đa 5 mã; chỉ số VNINDEX/VNI, VN30, HNX, HNX30, UPCOM). Trong giờ giao dịch: giá khớp gần nhất (DNSE) lúc gửi tin, kèm tên phiên (ATO, đang khớp lệnh, nghỉ trưa, ATC); ngoài giờ: giá đóng cửa phiên gần nhất, ghi ngày phiên nếu không phải hôm nay. Kèm +/- và % so với tham chiếu, mở/cao/thấp, khối lượng. Tin có chữ khác (`FPT có nên mua`) vẫn nhận bảng lệnh |
+| `alt btc` · `/alt btc` · `alt eth sol` | **Giá coin realtime** trên OKX (hợp đồng USDT-SWAP, không có thì spot USDT): giá, % 24h, cao/thấp/khối lượng 24h, tối đa 5 coin. `/alt btc` kèm bối cảnh BTC của bot Altcoin. Chạy cả khi Altcoin tắt |
 | `/phantich FPT` | Phân tích đầy đủ bằng các agent (vài phút) |
 | `/phantich FPT 2026-10-01` | Phân tích tại một ngày trong quá khứ (chỉ dùng dữ liệu có đến ngày đó) |
 | `/nhanh FPT` | Chỉ quyết định của Quant Engine, không gọi AI (vài giây) |
@@ -176,6 +179,8 @@ Một bộ lệnh, một bộ xử lý, cùng câu trả lời. Telegram gõ có
 | Việc | Telegram | Zoom 1:1 | Kênh Zoom |
 |---|---|---|---|
 | Danh sách lệnh | `/trogiup` (`/help`) | `trogiup` | `/vnbot trogiup` |
+| Giá realtime | `FPT` · `fpt hpg` (gõ mã, không cần `/`) | `FPT` · `fpt hpg` | `/vnbot FPT` |
+| Giá coin (OKX) | `alt btc` · `/alt btc` · `alt eth sol` | `alt btc` | `/vnbot alt btc` |
 | Phân tích đầy đủ | `/phantich FPT [YYYY-MM-DD]` (kèm file HTML) | `phantich FPT` (kèm link web) | `/vnbot phantich FPT` |
 | Quyết định Quant | `/nhanh FPT` | `nhanh FPT` | `/vnbot nhanh FPT` |
 | Định giá bot tự tính | `/dinhgia FPT` · `/dinhgia` · `/dg FPT` | `dinhgia FPT` · `dg FPT` | `/vnbot dinhgia FPT` |

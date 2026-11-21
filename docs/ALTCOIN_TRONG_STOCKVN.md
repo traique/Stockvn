@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.18.0** và **Altcoin 3.3.1** (bản dựng `7fe2138`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.19.0** và **Altcoin 3.3.1** (bản dựng `7fe2138`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -29,7 +29,7 @@ Mỗi lần upload hoặc khởi động lại server, Altcoin cũng khởi đ�
 
 ## 2. Lệnh `/alt`
 
-Gõ `/alt` (hoặc `/alt help`) để xem bảng lệnh. Bí danh: `/altcoin <lệnh>`.
+Gõ `/alt` (hoặc `/alt help`) để xem bảng lệnh. Bí danh: `/altcoin <lệnh>`. Trên Telegram gõ không có `/` cũng được (`alt btc`, `alt status`), như Zoom.
 
 | Telegram | Zoom chat 1:1 | Trong kênh Zoom | Việc |
 |---|---|---|---|
@@ -38,7 +38,7 @@ Gõ `/alt` (hoặc `/alt help`) để xem bảng lệnh. Bí danh: `/altcoin <l�
 | `/alt signals` | `alt signals` | … | Tín hiệu và quyết định AI |
 | `/alt ai` | `alt ai` | … | Lượt gọi từng model |
 | `/alt learn` · `/alt lessons` | `alt learn` · `alt lessons` | … | Trạng thái tự học · bài học AI |
-| `/alt btc` | `alt btc` | … | Bối cảnh BTC |
+| `/alt btc` · `/alt eth sol` | `alt btc` · `alt eth sol` | … | Giá realtime trên OKX (hợp đồng USDT-SWAP, không có thì spot USDT): giá, % và cao/thấp/khối lượng 24h, tối đa 5 coin; `BTCUSDT`, `BTC-USDT-SWAP` cũng được. `btc` kèm bối cảnh BTC của bot. Chạy cả khi Altcoin tắt (API công khai, không qua bot Altcoin) |
 | `/alt phienban` | `alt phienban` | … | Phiên bản Altcoin (`/phienban` là phiên bản Cổ phiếu) |
 | `/alt pause` | `alt pause` | … | Tạm dừng mở lệnh mới (lệnh đang mở vẫn được quản lý) |
 | `/alt resume` | `alt resume` | … | Giao dịch lại, xoá trạng thái dừng của bộ ngắt rủi ro – **cần xác nhận** |
@@ -255,10 +255,10 @@ Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch
 ```bash
 python tests/run_all.py                              # phải kết thúc bằng "tất cả đều đạt"
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
-python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.18.0-alt3.3.1.zip
+python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.19.0-alt3.3.1.zip
 ```
 
-Builder in hai dòng `Stock v1.18.0: bản dựng … = bản phát hành` và `Altcoin 3.3.1: bản dựng 7fe2138 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.19.0: bản dựng … = bản phát hành` và `Altcoin 3.3.1: bản dựng 7fe2138 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
