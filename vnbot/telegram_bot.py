@@ -12,7 +12,9 @@ Commands (Vietnamese, like lananh-main's bot):
     /khop mua|ban MÃ KL GIÁ [NGÀY]  record a fill in the real book (signal mode)
     /von SỐ_TIỀN               set the real book's cash (signal mode)
     /id                        your Telegram id (to put in TELEGRAM_ALLOWED_IDS)
-    /alt <lệnh>                the altcoin bot (ALTCOIN_ENABLED=1), through vnbot.altcoin_bridge
+    /alt <lệnh>                the altcoin bot (ALTCOIN_ENABLED=1), through vnbot.altcoin_bridge;
+                               /alt btc, /alt eth sol: a coin's realtime price on OKX (vnbot.quote)
+    FPT · FPT HPG · giá FPT    a message of stock codes only: their realtime price (vnbot.quote)
 
 Only ids in TELEGRAM_ALLOWED_IDS are served; the analyses cost LLM quota.
 
@@ -37,7 +39,7 @@ from pathlib import Path
 
 import requests
 
-from vnbot import altcoin_bridge
+from vnbot import altcoin_bridge, quote
 from vnbot.jobs import Job, JobQueue
 from vnbot.service import Watchlist, check_request, quick_text
 from vnbot.settings import Settings
@@ -102,13 +104,12 @@ _MD_NOISE = re.compile(r"(\*\*|__|^#+\s*)", re.MULTILINE)
 
 HELP = (
     "TradingAgents VN {version} - phân tích cổ phiếu HOSE/HNX/UPCoM.\n\n"
-    "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút)\n"
-    "/phantich FPT 2026-10-01 - phân tích tại một ngày trong quá khứ\n"
+    "FPT · FPT HPG - gõ mã là có giá realtime · /alt btc - giá coin trên OKX\n"
+    "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút); thêm 2026-10-01: tại ngày đó\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
     "/phanbien FPT - AI phản biện quyết định của hệ thống (1 lượt gọi AI); /phanbien - AI phản biện đúng bao nhiêu\n"
     "/dinhgia FPT - định giá bot tự tính: vùng, Bear/Base/Bull, có gì đổi · /dinhgia - mã theo dõi (/dg)\n"
-    "/theodoi FPT,HPG,VCB - đặt danh sách báo cáo tự động mỗi ngày\n"
-    "/theodoi - xem danh sách đang theo dõi\n"
+    "/theodoi FPT,HPG,VCB - đặt danh sách báo cáo tự động mỗi ngày · /theodoi - xem\n"
     "/trangthai - hàng đợi và trạng thái các nhà cung cấp AI\n"
     "/phienban - phiên bản đang chạy, mã bản dựng và có gì mới\n"
     "/danhmuc - danh mục bot (paper, và tài khoản thật nếu bật chế độ tín hiệu)\n"
@@ -542,6 +543,8 @@ class TelegramBot:
         text = message["text"].strip()
         command, _, rest = text.partition(" ")
         command = command.split("@")[0].lower()
+        if command in ("alt", "altcoin"):           # "alt btc" without the "/", as on Zoom
+            command = "/" + command
         args = rest.strip()
 
         if command == "/id" and user_id != ZOOM_USER:
@@ -593,7 +596,10 @@ class TelegramBot:
             elif command in altcoin_bridge.BARE and self.alt is not None and self.alt.enabled:
                 self.send(chat_id, f"Lệnh Altcoin giờ gõ /alt <lệnh>, ví dụ /alt {command[1:]} (gõ /alt để xem lệnh).")
             else:
-                self.send(chat_id, self._help())
+                # A message of stock codes only ("FPT", "fpt hpg", "giá FPT"; Zoom adds the "/"): their
+                # price (vnbot.quote); anything else: the command list, as before.
+                prices = quote.stocks_reply(text) if command not in ("/alt", "/altcoin") else None
+                self.send(chat_id, prices if prices is not None else self._help())
         except ValueError as exc:
             self.send(chat_id, f"⚠️ {exc}")
         except Exception as exc:  # noqa: BLE001
