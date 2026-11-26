@@ -177,6 +177,8 @@ Zoom and must be deleted in Zoom.</p></div>"""
 COMMANDS = (
     ("FPT · FPT HPG", "Giá realtime: gõ mã là có (tối đa 5 mã, cả VNINDEX, VN30)",
      "Realtime price: type the code (up to 5, indices too)"),
+    ("FPT 7d · FPT 14d", "Giá từng phiên của 7, 14... phiên gần nhất (w: tuần, m: tháng; tối đa 60 phiên)",
+     "Price of each of the last 7, 14... sessions (w: weeks, m: months; up to 60)"),
     ("alt btc · alt eth sol", "Giá coin realtime trên OKX", "Realtime coin price on OKX"),
     ("nhanh FPT", "Quyết định của Quant Engine, không gọi AI", "Quant engine decision, no AI"),
     ("soi FPT", "Soi nhanh một mã: giá/trần/sàn, khối lượng so MA20, khối ngoại, P/B, điểm RS, SEPA, CANSLIM, "

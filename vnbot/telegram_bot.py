@@ -18,7 +18,8 @@ Commands (Vietnamese, like lananh-main's bot):
     /id                        your Telegram id (to put in TELEGRAM_ALLOWED_IDS)
     /alt <lệnh>                the altcoin bot (ALTCOIN_ENABLED=1), through vnbot.altcoin_bridge;
                                /alt btc, /alt eth sol: a coin's realtime price on OKX (vnbot.quote)
-    FPT · FPT HPG · giá FPT    a message of stock codes only: their realtime price (vnbot.quote)
+    FPT · FPT HPG · giá FPT    a message of stock codes only: their realtime price (vnbot.quote);
+    FPT 7d · FPT HPG 14d       with a period: the last N sessions of each
 
 Only ids in TELEGRAM_ALLOWED_IDS are served; the analyses cost LLM quota.
 
@@ -108,7 +109,7 @@ _MD_NOISE = re.compile(r"(\*\*|__|^#+\s*)", re.MULTILINE)
 
 HELP = (
     "TradingAgents VN {version} - phân tích cổ phiếu HOSE/HNX/UPCoM.\n\n"
-    "FPT · FPT HPG - gõ mã là có giá realtime · /alt btc - giá coin trên OKX\n"
+    "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc - giá coin OKX\n"
     "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút); thêm 2026-10-01: tại ngày đó\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
     "/soi FPT - soi nhanh một mã: giá/trần/sàn, KL so MA20, khối ngoại, P/B, RS, SEPA/CANSLIM, cá mập, nhận định\n"
