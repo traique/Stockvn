@@ -9,6 +9,11 @@ cho bảng lệnh. Tin có chữ khác ("FPT có nên mua", "hello") vẫn nhậ
   ngày cuối (DNSE chart-api, trong phiên là nến đang chạy); so với giá đóng cửa phiên trước
   (tham chiếu: DNSE đã điều chỉnh cổ tức/thưởng nên ngày GDKHQ vẫn đúng). Kèm mở, cao, thấp và
   khối lượng của phiên.
+- Nhiều phiên: thêm một kỳ vào tin - "FPT 7d", "fpt hpg 14d", "FPT 1w", "VNINDEX 1m", "giá FPT 7 ngày" - là
+  giá đóng cửa từng phiên của N phiên giao dịch gần nhất (d/ngày/phiên: 1 phiên, w/tuần: 5, m/tháng: 22;
+  tối đa ``MAX_SESSIONS``), mới nhất trước, kèm +/- % mỗi phiên và khối lượng, tổng thay đổi cả kỳ so với
+  giá đóng cửa của phiên trước kỳ, cao/thấp nhất và khối lượng trung bình. Trong giờ giao dịch phiên hôm
+  nay lấy giá khớp gần nhất. Giá DNSE đã điều chỉnh cổ tức/thưởng.
 - Thời điểm: "realtime lúc HH:MM" chỉ trong giờ giao dịch (9:00-15:00 ngày thường); ngoài giờ là
   giá đóng cửa phiên gần nhất (tick cuối phiên còn đó cả đêm, không gọi là realtime). Mã có
   phiên cuối khác hôm nay (đang nghỉ, bị ngừng giao dịch) ghi rõ ngày phiên đó.
@@ -33,12 +38,16 @@ logger = logging.getLogger(__name__)
 
 MAX_SYMBOLS = 5
 LOOKBACK_DAYS = 20               # nến ngày đủ để có phiên trước, cả sau kỳ nghỉ Tết
+MAX_SESSIONS = 60                # "FPT 7d": tối đa bấy nhiêu phiên
+PERIOD_UNITS = {"d": 1, "ngay": 1, "ngày": 1, "phien": 1, "phiên": 1, "w": 5, "tuan": 5, "tuần": 5,
+                "m": 22, "thang": 22, "tháng": 22}
 PRICE_WORDS = ("giá", "gia", "price")
 OKX_TICKER = "https://www.okx.com/api/v5/market/ticker"
 OKX_TIMEOUT = 8
 OKX_UNKNOWN = "51001"            # OKX: mã hợp đồng không tồn tại
 
 _SPLIT = re.compile(r"[\s,;+&]+")
+_PERIOD = re.compile(r"(\d{1,3})(d|ngay|ngày|phien|phiên|w|tuan|tuần|m|thang|tháng)")
 _STOCK_CODE = re.compile(r"[A-Z0-9]{3}")
 _COIN = re.compile(r"[A-Z0-9]{2,15}")
 _COIN_SUFFIX = re.compile(r"[-/]?USDT(?:[-:](?:SWAP|USDT))?$")
@@ -96,25 +105,51 @@ def _icon(change: float | None) -> str:
 
 
 def stock_codes(text: str) -> list[str] | None:
-    """Các mã của một tin chỉ gồm mã (và chữ "giá"), theo thứ tự gõ, không trùng; None khi tin có chữ
-    khác. "/FPT", "/FPT@TenBot" và chữ "/" Zoom thêm vào đầu tin đều được bỏ."""
+    """Các mã của một tin chỉ gồm mã (và chữ "giá", và một kỳ như "7d"), theo thứ tự gõ, không trùng;
+    None khi tin có chữ khác. "/FPT", "/FPT@TenBot" và chữ "/" Zoom thêm vào đầu tin đều được bỏ."""
+    parsed = parse_lookup(text)
+    return parsed[0] if parsed else None
+
+
+def _period(word: str, following: str = "") -> tuple[int, bool] | None:
+    """(số phiên, dùng cả chữ kế tiếp) của một kỳ: "7d", "14D", "2w", "1m", "7ngày"; hoặc "7" rồi "ngày"."""
+    low = word.lower()
+    found = _PERIOD.fullmatch(low)
+    if found:
+        return int(found.group(1)) * PERIOD_UNITS[found.group(2)], False
+    if low.isdigit() and len(low) <= 3 and following.lower() in PERIOD_UNITS and len(following) > 1:
+        return int(low) * PERIOD_UNITS[following.lower()], True
+    return None
+
+
+def parse_lookup(text: str) -> tuple[list[str], int | None] | None:
+    """(các mã, số phiên của kỳ hoặc None) của một tin tra giá; None khi tin có chữ khác (bảng lệnh)."""
     from tradingagents.dataflows.symbols import normalize_symbol
     from tradingagents.market import vn_rules
 
     words = [w for w in _SPLIT.split((text or "").strip()) if w]
     if words:
         words[0] = words[0].lstrip("/").split("@")[0]
+    words = [w.strip("?!.:") for w in words]
     codes: list[str] = []
-    for word in words:
-        word = word.strip("?!.:")
+    sessions = None
+    i = 0
+    while i < len(words):
+        word = words[i]
+        i += 1
         if not word or word.lower() in PRICE_WORDS:
+            continue
+        period = _period(word, words[i] if i < len(words) else "")
+        if period is not None:                   # checked before the codes: "14D" is 3 characters
+            sessions, used_next = period
+            i += used_next
             continue
         code = normalize_symbol(word)
         if not (vn_rules.is_index(code) or _STOCK_CODE.fullmatch(code)):
             return None
         if code not in codes:
             codes.append(code)
-    return codes or None
+    return (codes, sessions) if codes else None
 
 
 def _bars(code: str, start: str, end: str):
@@ -184,6 +219,146 @@ def _stock_lines(q: dict, today: str) -> list[str]:
     return [f"{_icon(change)} {head}"] + (["   " + " · ".join(detail)] if detail else [])
 
 
+def _stock_days(code: str, start: str, end: str):
+    from tradingagents.dataflows.vendors import flows
+
+    return flows.fetch_stock_days(code, start, end)
+
+
+def _row(r: dict) -> dict:
+    return {k: r.get(k) for k in ("Date", "Close", "Ref", "High", "Low", "Volume")}
+
+
+def stock_history(code: str, sessions: int, now: datetime | None = None) -> dict:
+    """Các phiên gần nhất của một mã: ``{code, index, rows, live_day, raw}`` - ``rows`` tối đa ``sessions``
+    phiên cũ nhất trước, mỗi phiên ``{Date, Close, Ref, High, Low, Volume}``.
+
+    Cổ phiếu: giá khớp thực tế của VNDirect (``raw``), mỗi phiên kèm giá tham chiếu của chính nó, nên %
+    từng phiên đúng như bảng giá, cả ngày GDKHQ. Phiên hôm nay trong giờ: giá khớp gần nhất của DNSE,
+    tham chiếu là giá đóng cửa phiên trước theo DNSE (đã điều chỉnh nếu hôm nay là ngày GDKHQ), cao/thấp/KL
+    của nến đang chạy. Chỉ số, hoặc VNDirect lỗi: nến DNSE đã điều chỉnh cổ tức/thưởng, tham chiếu là giá
+    đóng cửa phiên trước. ``live_day``: ngày của phiên còn đang chạy (None ngoài giờ). Unknown khi không
+    nguồn nào biết mã."""
+    from tradingagents.dataflows.errors import NoMarketDataError
+    from tradingagents.market import vn_rules
+
+    now = (now or vn_rules.now_vn()).astimezone(vn_rules.VN_TZ)
+    today = now.strftime("%Y-%m-%d")
+    start = (now - timedelta(days=int(sessions * 1.6) + LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    index = vn_rules.is_index(code)
+    in_session = vn_rules.is_session_day(today) and vn_rules.is_market_hours(now)
+    rows: list[dict] = []
+    raw = False
+    if not index:
+        try:
+            frame = _stock_days(code, start, today)
+            rows = [_row(r) for r in frame.to_dict("records")] if frame is not None else []
+            raw = bool(rows)
+        except Exception as exc:  # noqa: BLE001 - DNSE's adjusted bars instead
+            logger.info("Giá nhiều phiên %s từ VNDirect: %s", code, exc)
+    trading = vn_rules.is_session_day(today) and vn_rules.session_phase(now) not in ("closed", "pre_open")
+    today_missing = not rows or rows[-1]["Date"] != today
+    dnse: list[dict] = []
+    if not raw or (trading and today_missing):
+        try:
+            frame = _bars(code, start if not raw else (now - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d"), today)
+            dnse = [dict(r) for r in frame.to_dict("records")] if frame is not None else []
+        except NoMarketDataError as exc:
+            if not raw:
+                raise Unknown(code) from exc
+        except Exception:
+            if not raw:
+                raise                            # both sources down: the caller says so
+        before = None
+        for bar in dnse:                         # DNSE's reference: the close before, on today's basis
+            bar["Ref"] = before
+            before = bar["Close"]
+        if not raw:
+            rows = [_row(b) for b in dnse]
+    if not rows:
+        raise Unknown(code)
+    if trading and (not raw or rows[-1]["Date"] != today):
+        tick = None
+        if not index:
+            try:
+                tick = _tick(code, today)
+            except Exception as exc:  # noqa: BLE001 - không có tick thì dùng giá của nến
+                logger.info("Giá khớp %s: %s", code, exc)
+        bar = next((b for b in dnse if b["Date"] == today), None)
+        if rows[-1]["Date"] == today:            # DNSE's forming bar: the last match closes it
+            if tick:
+                last = rows[-1]
+                last.update(Close=float(tick), High=max(last["High"] or tick, tick), Low=min(last["Low"] or tick, tick))
+        elif tick or bar is not None:            # VNDirect has not posted today: the bar and the last match
+            price = float(tick or bar["Close"])
+            ref = bar["Ref"] if bar is not None else (dnse[-1]["Close"] if dnse else rows[-1]["Close"])
+            rows.append({"Date": today, "Close": price, "Ref": ref,
+                         "High": max(bar["High"], price) if bar is not None else price,
+                         "Low": min(bar["Low"], price) if bar is not None else price,
+                         "Volume": bar["Volume"] if bar is not None else None})
+    chosen = rows[-sessions:]
+    live_day = today if in_session and chosen[-1]["Date"] == today else None
+    return {"code": code, "index": index, "rows": chosen, "live_day": live_day, "raw": raw}
+
+
+def _signed(value: float, decimals: int) -> str:
+    return ("+" if value > 0 else "") + _vn(value, decimals)
+
+
+def _history_lines(h: dict) -> list[str]:
+    """Một khối của "FPT 7d": thay đổi cả kỳ, cao/thấp, KL trung bình, rồi từng phiên mới nhất trước."""
+    decimals = 2 if h["index"] else 0
+    unit = " điểm" if h["index"] else ""
+    rows = h["rows"]
+    last = rows[-1]["Close"]
+    span = f"{rows[0]['Date'][8:10]}/{rows[0]['Date'][5:7]} – {rows[-1]['Date'][8:10]}/{rows[-1]['Date'][5:7]}"
+    # A session whose reference is not the close before it: an ex-date (cash or stock dividend, bonus,
+    # rights), the reference adjusted by the exchange. Its gap is not a loss.
+    ex_days = [r["Date"] for r, before in zip(rows[1:], rows[:-1], strict=False)
+               if r["Ref"] and before["Close"] and abs(r["Ref"] - before["Close"]) >= 0.5]
+    growth, known = 1.0, 0
+    for r in rows:
+        if r["Ref"]:
+            growth *= r["Close"] / r["Ref"]
+            known += 1
+    head = f"{h['code']}: {_vn(last, decimals)}{unit}"
+    change = None
+    if known:
+        change = (growth - 1) * 100
+        if ex_days:
+            head += f" {_signed(change, 2)}% sau {known} phiên"
+        else:
+            base = rows[0]["Ref"] or rows[0]["Close"]
+            head += f" {_signed(last - base, decimals)} ({_signed(change, 2)}%) sau {known} phiên"
+    else:
+        head += f" · {len(rows)} phiên từ ngày niêm yết"
+    out = [f"{_icon(change)} {head} ({span})"]
+    if ex_days:
+        out.append("   Qua ngày GDKHQ " + ", ".join(f"{d[8:10]}/{d[5:7]}" for d in ex_days)
+                   + ": % cả kỳ cộng dồn theo giá tham chiếu từng phiên, không tính phần chia cổ tức/quyền")
+    high = max(rows, key=lambda r: r["High"] or r["Close"])
+    low = min(rows, key=lambda r: r["Low"] or r["Close"])
+    summary = [f"Cao nhất {_vn(high['High'] or high['Close'], decimals)} ({high['Date'][8:10]}/{high['Date'][5:7]})",
+               f"Thấp nhất {_vn(low['Low'] or low['Close'], decimals)} ({low['Date'][8:10]}/{low['Date'][5:7]})"]
+    volumes = [r["Volume"] for r in rows if r["Volume"] and r["Date"] != h["live_day"]]
+    if volumes:
+        summary.append(f"KL TB {_vn_volume(sum(volumes) / len(volumes))}")
+    out.append("   " + " · ".join(summary))
+    for row in reversed(rows):
+        line = f"   {row['Date'][8:10]}/{row['Date'][5:7]}: {_vn(row['Close'], decimals)}"
+        if row["Ref"]:
+            day_change = row["Close"] - row["Ref"]
+            line += f" {_icon(day_change)} {_signed(day_change / row['Ref'] * 100, 2)}%"
+        if row["Volume"]:
+            line += f" · KL {_vn_volume(row['Volume'])}"
+        if row["Date"] in ex_days:
+            line += " · GDKHQ"
+        if row["Date"] == h["live_day"]:
+            line += " (đang khớp)"
+        out.append(line)
+    return out
+
+
 def _parallel(fn, items: list) -> list:
     """fn(item) cho từng item, cùng lúc (tối đa MAX_SYMBOLS luồng); lỗi trả về đúng chỗ của nó."""
     def safe(item):
@@ -202,10 +377,13 @@ def stocks_reply(text: str, now: datetime | None = None) -> str | None:
     """Câu trả lời cho một tin chỉ gồm mã cổ phiếu/chỉ số; None khi tin không phải vậy (bảng lệnh)."""
     from tradingagents.market import vn_rules
 
-    codes = stock_codes(text)
-    if not codes:
+    parsed = parse_lookup(text)
+    if not parsed:
         return None
+    codes, sessions = parsed
     now = (now or vn_rules.now_vn()).astimezone(vn_rules.VN_TZ)
+    if sessions is not None:
+        return _history_reply(codes, sessions, now)
     today = now.strftime("%Y-%m-%d")
     more = len(codes) > MAX_SYMBOLS
     codes = codes[:MAX_SYMBOLS]
@@ -226,6 +404,48 @@ def stocks_reply(text: str, now: datetime | None = None) -> str | None:
             lines.extend(_stock_lines(result, today))
     if more:
         lines.append(f"(Mỗi lần tra tối đa {MAX_SYMBOLS} mã.)")
+    if unknown:
+        lines.append("Giá coin: gõ alt btc. Danh sách lệnh: /trogiup.")
+    return "\n".join(lines)
+
+
+def _history_reply(codes: list[str], sessions: int, now: datetime) -> str:
+    """Câu trả lời của "FPT 7d": một khối mỗi mã."""
+    from tradingagents.market import vn_rules
+
+    capped = sessions > MAX_SESSIONS
+    sessions = max(1, min(sessions, MAX_SESSIONS))
+    more = len(codes) > MAX_SYMBOLS
+    codes = codes[:MAX_SYMBOLS]
+    today = now.strftime("%Y-%m-%d")
+    if vn_rules.is_market_hours(now) and vn_rules.is_session_day(today):
+        head = f"📅 Giá {sessions} phiên gần nhất · lúc {now:%H:%M %d/%m} (phiên hôm nay theo giá khớp, đang chạy)"
+    else:
+        head = f"📅 Giá {sessions} phiên gần nhất · lúc {now:%H:%M %d/%m} (giá đóng cửa)"
+    lines = [head]
+    if capped:
+        lines.append(f"(Mỗi lần xem tối đa {MAX_SESSIONS} phiên.)")
+    unknown, raw, adjusted = False, False, False
+    for code, result in zip(codes, _parallel(lambda c: stock_history(c, sessions, now), codes), strict=True):
+        lines.append("")
+        if isinstance(result, Unknown):
+            unknown = True
+            lines.append(f"❔ {code}: không có mã này trên HOSE/HNX/UPCoM")
+        elif isinstance(result, Exception):
+            logger.warning("Giá nhiều phiên %s: %s", code, result)
+            lines.append(f"⚠️ {code}: chưa lấy được giá (nguồn giá không trả lời), thử lại sau ít phút")
+        else:
+            raw = raw or result["raw"]
+            adjusted = adjusted or (not result["raw"] and not result["index"])
+            lines.extend(_history_lines(result))
+    if more:
+        lines.append(f"(Mỗi lần tra tối đa {MAX_SYMBOLS} mã.)")
+    lines.append("")
+    if raw:
+        lines.append("Giá khớp thực tế từng phiên (VNDirect), % so với tham chiếu của phiên như bảng giá.")
+    if adjusted:
+        lines.append("Mã ghi giá DNSE đã điều chỉnh cổ tức/thưởng (VNDirect chưa trả lời).")
+    lines.append("Kỳ khác: FPT 14d · FPT 2w (10 phiên) · FPT 1m (22 phiên), tối đa 60 phiên.")
     if unknown:
         lines.append("Giá coin: gõ alt btc. Danh sách lệnh: /trogiup.")
     return "\n".join(lines)

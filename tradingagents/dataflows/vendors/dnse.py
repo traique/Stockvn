@@ -5,7 +5,11 @@
   scaled to VND here; index points keep their decimals. Prices are already
   adjusted for dividends and bonus issues by DNSE. HNX and UPCoM composite
   indices are the symbols ``HNX`` / ``UPCOM``.
-- Price API (GraphQL): the last matched price of today's session, stocks only.
+- Price API (GraphQL): the last matched price of today's session, stocks only;
+  and every matched tick of a session (``fetch_ticks``): price, quantity in
+  KRX units of 10 shares (checked live 26/11/2026: FPT's ticks sum to the day's
+  matched volume once multiplied by 10), the side that hit the book (1 the
+  buyer, 2 the seller, 0 an ATO/ATC match) and the time (UTC).
 
 The chart feed returns today's forming bar during the session; dropping it is
 the loader's job, which knows the run date.
@@ -116,3 +120,44 @@ def fetch_last_match(symbol: str, day: str) -> float | None:
     except (KeyError, IndexError, TypeError, ValueError):
         return None
     return round(price * PRICE_SCALE) if price > 0 else None
+
+
+TICK_UNIT = 10               # a KRX tick's matchQtty is in units of 10 shares
+TICK_LIMIT = 300_000         # a liquid stock has ~15.000 ticks a session
+
+
+def fetch_ticks(symbol: str, day: str, limit: int = TICK_LIMIT) -> list[dict]:
+    """Every matched tick of a stock in the session of ``day``, oldest first: ``{time (HH:MM:SS.mmm,
+    Vietnam), price (VND), shares, side (1 buyer-initiated, 2 seller-initiated, 0 ATO/ATC)}``. [] when
+    the session has no tick (a holiday, an index, a code DNSE does not know)."""
+    if vn_rules.is_index(symbol):
+        return []
+    query = (
+        "query GetKrxTicksBySymbols {GetKrxTicksBySymbols("
+        f'symbols: "{symbol}", date: "{day}", limit: {int(limit)}, board: 2) '
+        "{ticks {matchPrice matchQtty side sendingTime}}}"
+    )
+    data = http.post_json(
+        TICK_API, vendor=VENDOR,
+        json={"operationName": "GetKrxTicksBySymbols", "query": query}, timeout=30.0, retries=1,
+    )
+    try:
+        ticks = data["data"]["GetKrxTicksBySymbols"]["ticks"] or []
+    except (KeyError, TypeError):
+        return []
+    out = []
+    for tick in ticks:
+        try:
+            price = float(tick["matchPrice"])
+            qty = float(tick["matchQtty"])
+            when = str(tick.get("sendingTime") or "")
+            sent = datetime.fromisoformat(when.replace("Z", "+00:00")).astimezone(vn_rules.VN_TZ)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if price <= 0 or qty <= 0:
+            continue
+        out.append({"time": sent.strftime("%H:%M:%S.") + f"{sent.microsecond // 1000:03d}",
+                    "price": round(price * PRICE_SCALE), "shares": qty * TICK_UNIT,
+                    "side": int(tick.get("side") or 0)})
+    out.reverse()                                   # DNSE sends the newest first
+    return out

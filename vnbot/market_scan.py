@@ -37,6 +37,9 @@ HISTORY_SESSIONS = 130         # levels from 120 closes are within 0,02% of a 4-
 KEEP_EXTRA = 5                 # sessions kept beyond, so the scan the day after still has its 130
 MIN_CLOSES = 120
 VALUE_SESSIONS = 20            # "most traded": the average matched value of these sessions
+VOLUME_SESSIONS = 20           # the volume average a session is compared with (vnbot.dotbien)
+RS_QUARTER = 63                # sessions in a quarter: the RS score's two quarters (rs_scores)
+RS_SESSIONS = 2 * RS_QUARTER
 WINDOW = ("09:15", "15:15")    # the scan: from the first match to after the close
 SUMMARY_AFTER = "14:46"        # the first scan from then pushes the day's list (ATC matched)
 COMPARE_AFTER = "15:15"        # the site's per-stock signals of the day are out (~15:08)
@@ -76,7 +79,8 @@ def fetch_day(day: str) -> list[dict]:
 
 class MarketCloses:
     """``{"basis": the day the closes are adjusted to, "floors": {code: exchange},
-    "days": {day: {code: [close, value]}}, "empty": [sessions the source has nothing for],
+    "days": {day: {code: [close, value, volume]}} (``volume``, the matched shares, since
+    v1.20.0: a day saved before has two-element rows), "empty": [sessions the source has nothing for],
     "pre": {"day": the newest session fetched, "factor": {code: raw close / adjusted close
     on that session}}}``. The factor undoes VNDirect's adjustment for an announced ex-date
     that has not come yet, so ``series`` is on the price board's basis (``te.levels`` is
@@ -128,10 +132,13 @@ class MarketCloses:
         wanted = sessions(through)
         return sum(1 for d in wanted if d in data["days"] or d in data["empty"]), len(wanted)
 
-    def update(self, through: str, *, fetch=None, budget: float = BUDGET_OFF, today: str | None = None) -> tuple[int, str]:
+    def update(self, through: str, *, fetch=None, budget: float = BUDGET_OFF, today: str | None = None,
+               volumes: bool = False) -> tuple[int, str]:
         """Download the missing sessions up to ``through`` (newest first) for ``budget``
         seconds at most; first, once a day, the last saved session again, to re-base the
-        stocks VNDirect has adjusted since. Returns (sessions fetched, error or "")."""
+        stocks VNDirect has adjusted since. With ``volumes``, the last ``VOLUME_SESSIONS + 1``
+        sessions saved without volumes (before v1.20.0) are fetched again too (``vnbot.dotbien``).
+        Returns (sessions fetched, error or "")."""
         fetch = fetch or fetch_day
         today = today or _now().strftime("%Y-%m-%d")
         started = time.monotonic()
@@ -148,7 +155,7 @@ class MarketCloses:
             if not fresh:
                 return 0, f"nguồn giá chưa trả phiên {last[8:10]}/{last[5:7]}"
             self._note_pre(data, last, rows)
-            for code, (old, _value) in list(data["days"][last].items()):
+            for code, (old, _value, *_vol) in list(data["days"][last].items()):
                 new = fresh.get(code)
                 if new and old and abs(new / old - 1) > te.REBASE_PCT / 100:
                     ratio = new / old
@@ -159,7 +166,9 @@ class MarketCloses:
             time.sleep(FETCH_PAUSE)
         data["basis"] = today
         wanted = sessions(through, HISTORY_SESSIONS + KEEP_EXTRA)
-        missing = [d for d in reversed(wanted) if d not in data["days"] and d not in data["empty"]]
+        redo = set(sessions(through, VOLUME_SESSIONS + 1)) if volumes else set()
+        missing = [d for d in reversed(wanted) if d not in data["empty"]
+                   and (d not in data["days"] or (d in redo and not self._has_volume(data["days"][d])))]
         for day in missing:
             if time.monotonic() - started > budget:
                 break
@@ -173,7 +182,7 @@ class MarketCloses:
                 if day < today:
                     data["empty"].append(day)        # a past session without data: not asked again
                 continue
-            data["days"][day] = {r["code"]: [r["close"], r["value"]] for r in rows}
+            data["days"][day] = {r["code"]: self._row(r) for r in rows}
             data["floors"].update({r["code"]: r["floor"] for r in rows if r.get("floor")})
             self._note_pre(data, day, rows)
             time.sleep(FETCH_PAUSE)
@@ -196,10 +205,75 @@ class MarketCloses:
                 count[code] = count.get(code, 0) + 1
         value: dict[str, float] = {}
         for d in recent:
-            for code, (_close, val) in data["days"][d].items():
+            for code, (_close, val, *_vol) in data["days"][d].items():
                 value[code] = value.get(code, 0.0) + (val or 0.0) / max(len(recent), 1)
         ranked = sorted((c for c in value if count.get(c, 0) >= MIN_CLOSES and value[c] > 0), key=lambda c: -value[c])
         return ranked[:size]
+
+    @staticmethod
+    def _row(r: dict) -> list:
+        """A saved row: [close, value] plus the matched volume when the source gave one."""
+        row = [r["close"], r["value"]]
+        if r.get("volume") is not None:
+            row.append(r["volume"])
+        return row
+
+    @staticmethod
+    def _has_volume(rows: dict) -> bool:
+        return any(len(v) >= 3 for v in rows.values())
+
+    def volume_progress(self, through: str) -> tuple[int, int]:
+        """(sessions saved with volumes, sessions wanted) of the ``VOLUME_SESSIONS + 1`` up to ``through``."""
+        data = self._read()
+        wanted = sessions(through, VOLUME_SESSIONS + 1)
+        have = sum(1 for d in wanted if d in data["empty"] or (d in data["days"] and self._has_volume(data["days"][d])))
+        return have, len(wanted)
+
+    def volumes(self, as_of: str, n: int = VOLUME_SESSIONS) -> dict[str, dict]:
+        """Per stock, the matched volumes and values of the last ``n`` saved sessions up to and
+        including ``as_of``, oldest first: ``{code: {"days": [...], "volume": [...], "value": [...],
+        "floor": exchange}}``; a session the stock did not trade is left out of its lists."""
+        data = self._read()
+        days = sorted(d for d in data["days"] if d <= as_of)[-n:]
+        out: dict[str, dict] = {}
+        for d in days:
+            for code, row in data["days"][d].items():
+                if len(row) < 3 or not row[2]:
+                    continue
+                entry = out.setdefault(code, {"days": [], "volume": [], "value": [], "floor": data["floors"].get(code)})
+                entry["days"].append(d)
+                entry["volume"].append(row[2])
+                entry["value"].append(row[1] or 0.0)
+        return out
+
+    def rs_scores(self, as_of: str) -> dict[str, int]:
+        """The RS score (1-99) of every stock with ``RS_SESSIONS + 1`` closes up to ``as_of``: the
+        percentile, among them, of twice the return of the last ``RS_QUARTER`` sessions plus the
+        return of the ``RS_QUARTER`` before (the newest quarter counts double, as IBD's rating
+        weights it). {} while the history is short."""
+        data = self._read()
+        days = sorted(d for d in data["days"] if d <= as_of)
+        if len(days) < RS_SESSIONS + 1:
+            return {}
+        recent = days[-(RS_SESSIONS + 1):]
+        pre = data["pre"]["factor"] if data["pre"].get("day", "") <= as_of else {}
+        closes: dict[str, list[float]] = {}
+        for d in recent:
+            for code, row in data["days"][d].items():
+                if row[0]:
+                    closes.setdefault(code, []).append(row[0] * pre.get(code, 1.0) if code in pre else row[0])
+        raw = {}
+        for code, series in closes.items():
+            if len(series) < RS_SESSIONS + 1 or series[-1 - RS_QUARTER] <= 0 or series[0] <= 0:
+                continue
+            q1 = series[-1] / series[-1 - RS_QUARTER] - 1
+            q2 = series[-1 - RS_QUARTER] / series[0] - 1
+            raw[code] = 2 * q1 + q2
+        if len(raw) < 2:
+            return {}
+        ranked = sorted(raw, key=lambda c: raw[c])
+        n = len(ranked)
+        return {code: max(1, min(99, round((i + 0.5) / n * 99))) for i, code in enumerate(ranked)}
 
     def series(self, codes, as_of: str) -> tuple[dict[str, list[float]], dict[str, str], dict[str, float]]:
         """({code: closes up to ``as_of``, oldest first}, {code: exchange}, {code: average value})."""
@@ -209,7 +283,7 @@ class MarketCloses:
         pre = data["pre"]["factor"] if data["pre"].get("day", "") <= as_of or not days else {}
         closes = {c: [] for c in wanted}
         for d in days:
-            for code, (close, _val) in data["days"][d].items():
+            for code, (close, _val, *_vol) in data["days"][d].items():
                 if code in wanted and close:
                     closes[code].append(round(close * pre.get(code, 1.0), 1) if code in pre else close)
         recent = days[-VALUE_SESSIONS:]

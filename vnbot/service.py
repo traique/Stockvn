@@ -178,6 +178,7 @@ class DailyScheduler:
         self._stv_tries = 0
         self._stv_try_day = ""
         self._stv_market_next = 0.0
+        self._history_next = 0.0                             # the market history top-up (vnbot.dotbien)
         self._stv_market_tries = 0
         self._stv_market_day = ""
         self._stv_scan_next = 0.0
@@ -723,6 +724,27 @@ class DailyScheduler:
         day = self._stv_market_due() if time.time() >= self._stv_market_next else None
         if day:
             self._stv_market(day)
+        self._market_history()
+
+    def _market_history(self) -> None:
+        """The market-wide history of closes and volumes (``vnbot.dotbien``, the RS score of
+        ``/soi``) topped up once a day after the close, so the evening's ``/dotbien`` answers at
+        once; a failed day is tried again at the next tick."""
+        from vnbot import dotbien
+
+        stamp = self.settings.data_dir / "last_market_history.txt"
+        day = dotbien.topup_due(self.settings.data_dir, stamp=stamp)
+        if not day or time.time() < self._history_next:
+            return
+        try:
+            have, want, error = dotbien.fill_history(self.settings.data_dir)
+        except Exception as exc:  # noqa: BLE001 - tried again later
+            logger.warning("Lịch sử toàn thị trường: %s", exc)
+            have, want, error = 0, 1, str(exc)
+        if have >= want and not error:
+            write_text_atomic(stamp, day)
+        else:
+            self._history_next = time.time() + 600
 
     def _stv_scan_due(self) -> bool:
         from tradingagents.market import vn_rules

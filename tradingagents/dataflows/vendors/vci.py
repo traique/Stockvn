@@ -139,6 +139,7 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
 
 
 BOARD_CHUNK = 400
+BOARD_VOLUME_KEYS = ("accumulatedVolume", "totalVolume", "matchVol", "accumulatedVol")
 
 
 def fetch_board(symbols) -> dict[str, dict]:
@@ -167,8 +168,12 @@ def fetch_board(symbols) -> dict[str, dict]:
                 return value if value > 0 else None
 
             board = str(info.get("board") or "").upper()
+            # The session's matched volume so far, under whichever name the board gives it
+            # (``vnbot.dotbien`` in the session); None when the board has no such field.
+            volume = next((num(match.get(k)) for k in BOARD_VOLUME_KEYS if match.get(k) is not None), None)
             out[symbol] = {"price": num(match.get("matchPrice")), "ref": num(info.get("refPrice")),
-                           "exchange": {"HSX": "HOSE", "HOSE": "HOSE", "HNX": "HNX"}.get(board, "UPCOM" if board else None)}
+                           "exchange": {"HSX": "HOSE", "HOSE": "HOSE", "HNX": "HNX"}.get(board, "UPCOM" if board else None),
+                           "volume": volume}
     return out
 
 
