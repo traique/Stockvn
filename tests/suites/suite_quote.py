@@ -67,6 +67,20 @@ def fake_tick(code, day):
 
 
 quote._bars, quote._tick = fake_bars, fake_tick
+STOCK_DAYS = {}                  # VNDirect's sessions as traded: code -> rows (Date, Close, Ref, High, Low, Volume)
+VND_DOWN = set()
+
+
+def fake_stock_days(code, start, end):
+    CALLS.append(("vnd", code, start, end))
+    if code in VND_DOWN:
+        raise VendorUnavailableError("VNDirect request failed: timeout")
+    rows = [r for r in STOCK_DAYS.get(code, []) if start <= r["Date"] <= end]
+    return pd.DataFrame(rows, columns=["Date", "Exchange", "Ref", "Ceiling", "Floor", "Open", "High", "Low", "Close",
+                                       "Volume", "Value", "PutThroughVolume"])
+
+
+quote._stock_days = fake_stock_days
 
 # ── 1. which messages are a price lookup ──
 cases = {"FPT": ["FPT"], "fpt hpg": ["FPT", "HPG"], "Giá FPT?": ["FPT"], "gia fpt": ["FPT"], "/FPT": ["FPT"],
@@ -74,7 +88,8 @@ cases = {"FPT": ["FPT"], "fpt hpg": ["FPT", "HPG"], "Giá FPT?": ["FPT"], "gia f
          "vn-index": ["VNINDEX"], "VNI": ["VNINDEX"], "vn30 hnx": ["VN30", "HNX"], "upcom": ["UPCOM"]}
 for text, want in cases.items():
     t.ok(f"{text!r} is a price lookup: {want}", quote.stock_codes(text) == want, quote.stock_codes(text))
-for text in ("FPT có nên mua", "hello", "help", "ok", "", "/", "giá", "giá vàng hôm nay", "E1VFVN30", "alt status"):
+for text in ("FPT có nên mua", "hello", "help", "ok", "", "/", "giá", "giá vàng hôm nay", "E1VFVN30", "alt status",
+             "7d", "14D", "FPT có nên mua 7d"):
     t.ok(f"{text!r} is not", quote.stock_codes(text) is None, quote.stock_codes(text))
 
 # ── 2. during the session: the tick ──
@@ -173,8 +188,8 @@ help_text = bot._help()
 for text in ("hello", "FPT có nên mua không", "/khongcolenhnay"):
     bot._handle(msg(111, 111, text))
     t.ok(f"Telegram {text!r}: the command list as before", last(111) == help_text, last(111)[:80])
-t.ok("the command list names the lookup", "FPT · FPT HPG - gõ mã là có giá realtime · /alt btc - giá coin trên OKX"
-     in help_text)
+t.ok("the command list names the lookup", "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc - giá coin OKX"
+     in help_text, help_text[:300])
 n = len(CALLS)
 for text in ("/alt btc", "alt btc", "Alt BTC", "altcoin eth"):
     bot._handle(msg(111, 111, text))
@@ -203,10 +218,90 @@ while zoom.queue.empty() and time.monotonic() < end:
 got = zoom.queue.get_nowait()[1] if not zoom.queue.empty() else ""
 t.ok("Zoom 'fpt' (the '/' Zoom adds): the price back to Zoom", "🔴 FPT: 45.300 -400 (-0,88%)" in got, got)
 
-# ── 6. the docs page lists it ──
+# ── 6. several sessions: "FPT 7d" ──
+periods = {"FPT 7d": (["FPT"], 7), "fpt 14D": (["FPT"], 14), "fpt hpg 7d": (["FPT", "HPG"], 7), "/fpt 7d": (["FPT"], 7),
+           "giá FPT 7 ngày": (["FPT"], 7), "FPT 7ngày": (["FPT"], 7), "FPT 2w": (["FPT"], 10), "FPT 2 tuần": (["FPT"], 10),
+           "VNINDEX 1m": (["VNINDEX"], 22), "7d FPT": (["FPT"], 7), "FPT 10 phiên": (["FPT"], 10), "FPT": (["FPT"], None)}
+for text, want in periods.items():
+    t.ok(f"{text!r}: {want}", quote.parse_lookup(text) == want, quote.parse_lookup(text))
+t.ok("stock_codes still gives the codes of 'FPT 7d'", quote.stock_codes("FPT 7d") == ["FPT"])
+
+# VNDirect's sessions as traded, with each session's reference; an ex-date on 20/11 (cash dividend 1.000đ)
+DAYS7 = ["2026-11-11", "2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20"]
+CLOSE7 = [50_000, 50_500, 51_000, 50_000, 49_000, 49_500, 48_500, 47_000]
+REF7 = [49_800, 50_000, 50_500, 51_000, 50_000, 49_000, 49_500, 47_500]          # 20/11: 48.500 - 1.000
+STOCK_DAYS["FPT"] = [{"Date": d, "Exchange": "HOSE", "Ref": float(r), "Ceiling": 0.0, "Floor": 0.0, "Open": float(c),
+                      "High": float(c + 300), "Low": float(c - 300), "Close": float(c), "Volume": 1_000_000.0 * (i + 1),
+                      "Value": 0.0, "PutThroughVolume": 0.0} for i, (d, c, r) in enumerate(zip(DAYS7, CLOSE7, REF7))]
+CALLS.clear()
+r = quote.stocks_reply("FPT 7d", now=at("2026-11-21", 20, 0))
+lines = r.splitlines()
+t.ok("FPT 7d on a weekend: the header, the last 7 sessions as traded, newest first",
+     lines[0] == "📅 Giá 7 phiên gần nhất · lúc 20:00 21/11 (giá đóng cửa)"
+     and lines[2].startswith("🔴 FPT: 47.000 ") and "sau 7 phiên (12/11 – 20/11)" in lines[2]
+     and lines[5] == "   20/11: 47.000 🔴 -1,05% · KL 8,00 triệu · GDKHQ"
+     and lines[6] == "   19/11: 48.500 🔴 -2,02% · KL 7,00 triệu" and lines[11] == "   12/11: 50.500 🟢 +1,00% · KL 2,00 triệu", r)
+growth = 1.0
+for c, ref in zip(CLOSE7[1:], REF7[1:]):
+    growth *= c / ref
+t.ok("...across an ex-date: the % compounded over each session's reference, no VND difference, the ex-date named",
+     f"FPT: 47.000 {quote._signed((growth - 1) * 100, 2)}% sau 7 phiên" in lines[2]
+     and lines[3] == "   Qua ngày GDKHQ 20/11: % cả kỳ cộng dồn theo giá tham chiếu từng phiên, không tính phần chia cổ tức/quyền", r)
+t.ok("...high, low (with their days), the average volume", lines[4] == "   Cao nhất 51.300 (13/11) · Thấp nhất 46.700 (20/11) · KL TB 5,00 triệu", lines[4])
+t.ok("...VNDirect asked, not DNSE, no tick outside the session", [c[0] for c in CALLS] == ["vnd"], CALLS)
+t.ok("...the footer: traded prices, the other periods", "Giá khớp thực tế từng phiên (VNDirect)" in r and "Kỳ khác: FPT 14d" in r)
+r = quote.stocks_reply("FPT 3d", now=at("2026-11-19", 20, 0))
+t.ok("no ex-date in the window: the VND change against the first session's reference, and the %",
+     "🔴 FPT: 48.500 -1.500 (-3,00%) sau 3 phiên (17/11 – 19/11)" in r and "Qua ngày GDKHQ" not in r and "GDKHQ" not in r, r)
+
+# in the session: VNDirect has not posted today; DNSE's forming bar and the last match close it
+# VNDirect's 18/11 and 19/11 as DNSE's fake bars have them (no ex-date)
+STOCK_DAYS["FPT"] = [{"Date": d, "Exchange": "HOSE", "Ref": ref, "Ceiling": 0.0, "Floor": 0.0, "Open": o, "High": h, "Low": lo,
+                      "Close": c, "Volume": v, "Value": 0.0, "PutThroughVolume": 0.0}
+                     for d, ref, o, h, lo, c, v in (("2026-11-18", 47_000.0, 47_000.0, 47_500.0, 46_800.0, 46_950.0, 16_204_800.0),
+                                                    ("2026-11-19", 46_950.0, 46_950.0, 47_950.0, 45_600.0, 45_700.0, 18_437_700.0))]
+TICKS[("FPT", "2026-11-20")] = 45_300
+CALLS.clear()
+r = quote.stocks_reply("fpt 3d", now=at("2026-11-20", 10, 32))
+lines = r.splitlines()
+t.ok("in the session: the header says so, today's row from the last match against DNSE's previous close, '(đang khớp)'",
+     lines[0] == "📅 Giá 3 phiên gần nhất · lúc 10:32 20/11 (phiên hôm nay theo giá khớp, đang chạy)"
+     and lines[4] == "   20/11: 45.300 🔴 -0,88% · KL 15,67 triệu (đang khớp)", r)
+t.ok("...the period against the first session's reference",
+     lines[2] == "🔴 FPT: 45.300 -1.700 (-3,62%) sau 3 phiên (18/11 – 20/11)", lines[2])
+t.ok("...today's high/low from the forming bar; the session's volume out of the average",
+     lines[3] == "   Cao nhất 47.950 (19/11) · Thấp nhất 44.650 (20/11) · KL TB 17,32 triệu", lines[3])
+t.ok("...asked: VNDirect, DNSE's bars, the tick", {c[0] for c in CALLS} == {"vnd", "bars", "tick"}, CALLS)
+del TICKS[("FPT", "2026-11-20")]
+
+# an index, VNDirect down, unknown, too many sessions
+CALLS.clear()
+r = quote.stocks_reply("VNINDEX 2d", now=at("2026-11-21", 20, 0))
+t.ok("an index: DNSE's points, the reference the close before, VNDirect not asked",
+     "🔴 VNINDEX: 1.688,79 điểm -0,83 (-0,05%) sau 1 phiên (19/11 – 20/11)" in r
+     and "   20/11: 1.688,79 🔴 -0,05% · KL 719,80 triệu" in r and "   19/11: 1.689,62 · KL 642,17 triệu" in r
+     and not [c for c in CALLS if c[0] == "vnd"], r)
+VND_DOWN.add("FPT")
+r = quote.stocks_reply("FPT 2d", now=at("2026-11-21", 20, 0))
+VND_DOWN.clear()
+t.ok("VNDirect down: DNSE's adjusted bars, said so", "🔴 FPT: 45.000 -1.950 (-4,15%) sau 2 phiên (19/11 – 20/11)" in r
+     and "Mã ghi giá DNSE đã điều chỉnh cổ tức/thưởng" in r, r)
+r = quote.stocks_reply("XYZ 7d", now=at("2026-11-21", 20, 0))
+t.ok("an unknown code: said so, the coin hint", "❔ XYZ: không có mã này trên HOSE/HNX/UPCoM" in r and "Giá coin: gõ alt btc" in r, r)
+r = quote.stocks_reply("FPT 100d", now=at("2026-11-21", 20, 0))
+t.ok("more than 60 sessions: 60, said so", r.splitlines()[0].startswith("📅 Giá 60 phiên gần nhất")
+     and "(Mỗi lần xem tối đa 60 phiên.)" in r, r[:200])
+r = quote.stocks_reply("NEW 7d", now=at("2026-11-21", 20, 0))
+t.ok("a stock listed for fewer sessions than asked: its sessions, no change without a reference",
+     "⚪ NEW: 11.000 · 1 phiên từ ngày niêm yết (20/11 – 20/11)" in r and "   20/11: 11.000 · KL 120.000" in r, r)
+bot._handle(msg(111, 111, "fpt 2d"))
+t.ok("Telegram 'fpt 2d': the sessions", last(111).startswith("📅 Giá 2 phiên gần nhất"), last(111)[:80])
+
+# ── 7. the docs page lists it ──
 from vnbot import pages  # noqa: E402
 
-t.ok("/docs lists 'FPT · FPT HPG' and 'alt btc · alt eth sol'",
-     "<code>FPT · FPT HPG</code>" in pages.docs_body() and "<code>alt btc · alt eth sol</code>" in pages.docs_body())
+t.ok("/docs lists 'FPT · FPT HPG', 'FPT 7d · FPT 14d' and 'alt btc · alt eth sol'",
+     "<code>FPT · FPT HPG</code>" in pages.docs_body() and "<code>FPT 7d · FPT 14d</code>" in pages.docs_body()
+     and "<code>alt btc · alt eth sol</code>" in pages.docs_body())
 
 t.done()

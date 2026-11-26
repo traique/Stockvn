@@ -25,13 +25,28 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.19.0"
-RELEASED = "2026-11-21"
-RELEASE_BUILD = "c498248"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.21.0"
+RELEASED = "2026-11-27"
+RELEASE_BUILD = "69c396d"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.21.0", "2026-11-27", (
+        "Giá nhiều phiên: FPT 7d · FPT 14d · fpt hpg 7d · FPT 2w (10 phiên) · VNINDEX 1m (22 phiên), tối đa 60",
+        "Giá khớp thực tế từng phiên (VNDirect), % so với tham chiếu của phiên như bảng giá, KL từng phiên",
+        "Thay đổi cả kỳ, cao/thấp nhất kèm ngày, KL trung bình; ngày GDKHQ được ghi, % không tính phần chia",
+        "Trong giờ giao dịch phiên hôm nay theo giá khớp gần nhất; chỉ số và khi VNDirect lỗi: nến DNSE",
+    )),
+    ("v1.20.0", "2026-11-26", (
+        "/dotbien: đột biến khối lượng toàn thị trường, KL phiên ≥ 150% TB20 (/dotbien 200 đổi ngưỡng)",
+        "/soi FPT: soi nhanh một mã, không gọi AI: giá/TC/trần/sàn, KL so MA20, khối ngoại (CP), TB 20 phiên, P/B",
+        "/soi: điểm RS 1-99 so với toàn thị trường (6 tháng, quý gần nhất gấp đôi), SEPA bắt buộc, CANSLIM",
+        "/soi: nhận định nhanh từ MA20/MA50, RSI, MACD, Bollinger, khối lượng, biên độ 5 phiên; đang giữ / mua mới",
+        "/camap FPT: dòng tiền cá mập theo tick DNSE: cá mập ≥ 1 tỷ, sói, cừu; mua/bán chủ động; lệnh lớn nhất",
+        "Lịch sử giá toàn thị trường lưu thêm khối lượng; tự tải sau 15:30, lệnh đầu tiên tải phần còn thiếu",
+        "Khối ngoại theo CP từng phiên từ VNDirect; tick khớp lệnh DNSE (đơn vị 10 CP)",
+    )),
     ("v1.19.0", "2026-11-21", (
         "Gõ mã là có giá realtime: FPT · fpt hpg · giá FPT · VNINDEX (tối đa 5 mã), Telegram và Zoom",
         "Giá khớp gần nhất của DNSE, +/- và % so với tham chiếu, mở/cao/thấp, khối lượng; không gọi AI",
