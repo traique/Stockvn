@@ -5,6 +5,10 @@ Commands (Vietnamese, like lananh-main's bot):
     /phantich MÃ [YYYY-MM-DD]  full multi-agent analysis (minutes); the system
                                decision arrives first, the report after
     /nhanh MÃ                  the quantitative engine's decision only (seconds)
+    /soi MÃ                    the quick card of a stock (vnbot.soi): session, foreign, P/B, RS,
+                               SEPA/CANSLIM, shark flow, a reading - code only
+    /dotbien [NGƯỠNG]          the volume-spike list of the market (vnbot.dotbien)
+    /camap MÃ                  the session's big orders, buy against sell (vnbot.camap)
     /theodoi [MÃ1,MÃ2,...]     show or set the daily watchlist
     /trangthai                 queue and AI provider status
     /danhmuc /lenh /hieuchinh  the trading bot: books, next session's orders, calibration
@@ -107,31 +111,33 @@ HELP = (
     "FPT · FPT HPG - gõ mã là có giá realtime · /alt btc - giá coin trên OKX\n"
     "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút); thêm 2026-10-01: tại ngày đó\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
-    "/phanbien FPT - AI phản biện quyết định của hệ thống (1 lượt gọi AI); /phanbien - AI phản biện đúng bao nhiêu\n"
+    "/soi FPT - soi nhanh một mã: giá/trần/sàn, KL so MA20, khối ngoại, P/B, RS, SEPA/CANSLIM, cá mập, nhận định\n"
+    "/dotbien - đột biến khối lượng toàn thị trường (KL ≥ 150% TB20) · /camap FPT - dòng tiền cá mập\n"
+    "/phanbien FPT - AI phản biện quyết định hệ thống (1 lượt AI) · /phanbien - AI đúng bao nhiêu\n"
     "/dinhgia FPT - định giá bot tự tính: vùng, Bear/Base/Bull, có gì đổi · /dinhgia - mã theo dõi (/dg)\n"
-    "/theodoi FPT,HPG,VCB - đặt danh sách báo cáo tự động mỗi ngày · /theodoi - xem\n"
+    "/theodoi FPT,HPG,VCB - danh sách báo cáo tự động mỗi ngày · /theodoi - xem\n"
     "/trangthai - hàng đợi và trạng thái các nhà cung cấp AI\n"
     "/phienban - phiên bản đang chạy, mã bản dựng và có gì mới\n"
-    "/danhmuc - danh mục bot (paper, và tài khoản thật nếu bật chế độ tín hiệu)\n"
+    "/danhmuc - danh mục bot (paper, và tài khoản thật ở chế độ tín hiệu)\n"
     "/lenh - lệnh bot đặt cho phiên tới\n"
     "/chay - chạy ngay phiên đã đóng gần nhất (không đợi {trade_time})\n"
     "/hieuchinh - ngưỡng đang dùng và kết quả tự hiệu chỉnh gần đây\n"
-    "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA, kết quả bóng · /vikhongmua FPT - "
-    "một mã · /vikhongmua dunglai 120 - dựng lại 120 phiên (thêm vn100: rổ VN100)\n"
-    "/khop mua FPT 100 56300 - báo đã khớp lệnh thật, cả lô lẻ (bán: /khop ban ...; thêm ngày YYYY-MM-DD nếu khớp hôm trước)\n"
+    "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA, kết quả bóng · /vikhongmua FPT · "
+    "/vikhongmua dunglai 120 [vn100] - dựng lại 120 phiên\n"
+    "/khop mua FPT 100 56300 [YYYY-MM-DD] - báo đã khớp lệnh thật, cả lô lẻ (bán: /khop ban ...)\n"
     "/von 500000000 - đặt tiền mặt tài khoản thật\n"
-    "/thuong FPT 150 - báo số cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về tài khoản thật\n"
-    "\nSiêu tín hiệu (sieutinhieu.vn, bật bằng SIEUTINHIEU=1; danh mục và watchlist riêng):\n"
+    "/thuong FPT 150 - cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về tài khoản thật\n"
+    "\nSiêu tín hiệu (sieutinhieu.vn, SIEUTINHIEU=1; danh mục và watchlist riêng):\n"
     "/stv - tổng quan, so với các sổ của bot · /stv FPT - tín hiệu một mã\n"
     "/stvdanhmuc - sổ ảo so sánh Siêu tín hiệu (danh mục tiền thật: /ts)\n"
     "/stvtheodoi - watchlist riêng (60 mã): bo NVL · them HAG · dat MÃ1,MÃ2,... · macdinh · hoantac\n"
     "/stvquet - quét danh mục Tài sản + watchlist ngay\n"
-    "/stvdoichieu - đổi chiều trong phiên (bot ước tính, mọi mã theo dõi); ngoài giờ: mức đổi chiều phiên tới\n"
-    "/stvthitruong - bot quét 300 mã thanh khoản cao: mã đổi chiều trong phiên, so với trang\n"
+    "/stvdoichieu - đổi chiều trong phiên (bot ước tính); ngoài giờ: mức đổi chiều phiên tới\n"
+    "/stvthitruong - bot quét 300 mã thanh khoản cao: đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay bây giờ\n\n"
     "AI thẩm định tín hiệu (Gemini qua 9Router, cần SIEUTINHIEU=1; ghi lại để kiểm chứng, không phải lệnh đặt):\n"
-    "/thamdinh - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến về danh mục, thành tích tới nay\n"
-    "/thamdinh chay - chạy ngay (trong phiên: giá khớp hôm nay; sau 15:10: tín hiệu đã chốt) · "
+    "/thamdinh - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến danh mục, thành tích\n"
+    "/thamdinh chay - chạy ngay (trong phiên: giá khớp; sau 15:10: tín hiệu đã chốt) · "
     "/thamdinh lichsu - các phiên gần đây\n"
     "/thamdinh tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
@@ -564,6 +570,18 @@ class TelegramBot:
                 self.send(chat_id, self._zoom_pairing(command, args, from_zoom=user_id == ZOOM_USER))
             elif command == "/nhanh":
                 self.send(chat_id, quick_text(*(args.split()[:2] or [""])))
+            elif command in ("/soi", "/phantichnhanh", "/ptn"):
+                from vnbot import soi
+
+                self.send(chat_id, soi.command(args, self.settings.data_dir, progress=lambda text: self.send(chat_id, text)))
+            elif command in ("/dotbien", "/khoiluong"):
+                from vnbot import dotbien
+
+                self.send(chat_id, dotbien.command(args, self.settings.data_dir))
+            elif command == "/camap":
+                from vnbot import camap
+
+                self.send(chat_id, camap.command(args))
             elif command in ("/dinhgia", "/dg"):
                 self._dinhgia(chat_id, args)
             elif command == "/theodoi":

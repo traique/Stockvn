@@ -1878,15 +1878,15 @@ class TaiSan:
         "/tsthuong FPT 15 - cổ phiếu thưởng đã về · /tscotuc FPT 2000 [số cp] - cổ tức tiền đã về (đồng/cp)\n"
         "/tsnap 50000000 · /tsrut 10000000 - nạp/rút tiền · /tstien 1268895 - đặt tiền mặt theo số dư CTCK\n"
         "/tscatlo FPT 52000 [60000] - mức cắt lỗ [mục tiêu] của anh · /tscatlo FPT xoa\n"
-        "/tskiemtra FPT [GIÁ] [KL] [CẮTLỖ] - kiểm tra một lệnh mua định làm có nằm trong ngân sách rủi ro (bot không khuyên mua)\n"
-        "/tsgiu FPT 52000 lý do... - giữ một mã dù bot báo ⛔/🔴: bắt buộc có cắt lỗ và lý do, bot chấm sau 5/10/20 phiên\n"
-        "/tssan 6000000 [lý do] - sàn tài sản để bot nhắc (mặc định 60% vốn gốc; không khoá lệnh) · /tssan - xem\n"
-        "/tsmuctieu 2026-12-24 · /tsmuctieu xoa · /tsmuctieu - mốc hoàn vốn; bot đặt số đo cạnh mốc, không dự báo\n"
+        "/tskiemtra FPT [GIÁ] [KL] [CẮTLỖ] - lệnh mua định làm có trong ngân sách rủi ro không (bot không khuyên mua)\n"
+        "/tsgiu FPT 52000 lý do... - giữ một mã dù bot báo ⛔/🔴: phải có cắt lỗ và lý do, bot chấm sau 5/10/20 phiên\n"
+        "/tssan 6000000 [lý do] - sàn tài sản để bot nhắc (mặc định 60% vốn gốc) · /tssan - xem\n"
+        "/tsmuctieu 2026-12-24 · xoa · /tsmuctieu - mốc hoàn vốn; bot đặt số đo cạnh mốc\n"
         "/tsnhatky - 20 dòng gần nhất · /tshuy - huỷ dòng cuối · /tshuy 27 - huỷ dòng số 27\n"
-        "/tsxuat - file Excel (Zoom: link tải) · /tsnhap - gửi file .xlsx kèm lệnh này, rồi /tsnhap xacnhan\n"
+        "/tsxuat - file Excel (Zoom: link tải) · /tsnhap - gửi file .xlsx kèm lệnh, rồi /tsnhap xacnhan\n"
         "/tsnguong 25 40 - ngưỡng cảnh báo tỷ trọng một mã (%)\n"
-        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - tuỳ chọn: thẻ anh nhập thay thẻ "
-        "bot tự tính khi báo Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
+        "/tsdinhgia CTG 27904 30164 33309 [eab 26039] [han 30/10/2026] [nguon ...] - thẻ anh nhập thay thẻ bot "
+        "khi báo Rẻ/Đắt · /tsdinhgia - xem · /tsdinhgia CTG xoa"
     )
 
     # ── recording (the commands and the web page share these) ──

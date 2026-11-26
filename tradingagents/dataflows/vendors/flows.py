@@ -13,7 +13,12 @@ All public and keyless, verified against live responses on 14/10/2026:
   proprietary net value. Dates are MM/dd/yyyy; a page holds 30 rows.
 - VNDirect ``api-finfo.vndirect.com.vn/v4/stock_prices``: every HOSE stock's
   bar for one day, from which breadth (advances, declines, ceilings) and the
-  share of stocks above their averages are computed.
+  share of stocks above their averages are computed; every listed stock's
+  close, matched value and volume of one day (``fetch_market_day``); one
+  stock's sessions with their reference, ceiling and floor (``fetch_stock_days``).
+- VNDirect ``api-finfo.vndirect.com.vn/v4/foreigns``: one stock's daily foreign
+  buy/sell in shares and value (``fetch_foreign_days``; checked live 26/11/2026:
+  FPT bought 3.041.259, sold 2.724.576 shares).
 - Vietcap ``trading.vietcap.com.vn/api/price/symbols/getByGroup?group=VN30``:
   the current members of an index basket.
 
@@ -213,25 +218,90 @@ def fetch_hose_day(day: str) -> pd.DataFrame:
 
 def fetch_market_day(day: str) -> list[dict]:
     """Every listed stock's session ``day`` (HOSE, HNX, UPCoM) in one request: ``{code,
-    floor, close (adjusted, VND), raw (the close as traded, VND), value (matched, VND)}``;
-    [] when the day is not out (yet). The adjusted closes are on the basis of the day they
-    are fetched - VNDirect also adjusts them for an ANNOUNCED ex-date still to come, so on
-    the latest session ``raw / close`` is the factor that puts the series back on the
-    board's basis until that ex-date (``vnbot.market_scan.MarketCloses``)."""
+    floor, close (adjusted, VND), raw (the close as traded, VND), value (matched, VND),
+    volume (matched shares, put-through deals excluded)}``; [] when the day is not out
+    (yet). The adjusted closes are on the basis of the day they are fetched - VNDirect also
+    adjusts them for an ANNOUNCED ex-date still to come, so on the latest session
+    ``raw / close`` is the factor that puts the series back on the board's basis until that
+    ex-date (``vnbot.market_scan.MarketCloses``)."""
     body = http.get_json(
         VNDIRECT_PRICES, vendor="VNDirect", timeout=40, retries=0,     # the caller asks again later
-        params={"q": f"date:{day}~type:STOCK", "size": 3000, "fields": "code,floor,adClose,close,nmValue,date"},
+        params={"q": f"date:{day}~type:STOCK", "size": 3000,
+                "fields": "code,floor,adClose,close,nmValue,nmVolume,date"},
     )
     out = []
     for r in (body or {}).get("data") or []:
         code = str(r.get("code") or "").upper()
         close, value, raw = _num(r.get("adClose")), _num(r.get("nmValue")), _num(r.get("close"))
+        volume = _num(r.get("nmVolume"))
         if not code or not close > 0 or str(r.get("date") or day)[:10] != day:
             continue
         out.append({"code": code, "floor": str(r.get("floor") or "").upper(), "close": round(close * 1000),
                     "raw": round(raw * 1000) if raw > 0 else round(close * 1000),
-                    "value": value if value > 0 else 0.0})
+                    "value": value if value > 0 else 0.0, "volume": volume if volume > 0 else 0.0})
     return out
+
+
+STOCK_DAY_COLUMNS = ["Date", "Exchange", "Ref", "Ceiling", "Floor", "Open", "High", "Low", "Close", "Volume",
+                     "Value", "PutThroughVolume"]
+VNDIRECT_FOREIGN = "https://api-finfo.vndirect.com.vn/v4/foreigns"
+FOREIGN_COLUMNS = ["Date", "ForeignBuyVol", "ForeignSellVol", "ForeignNetVol", "ForeignBuyVal", "ForeignSellVal",
+                   "ForeignRoom"]
+
+
+def fetch_stock_days(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """One stock's sessions between two dates (inclusive), as traded (unadjusted, VND), newest
+    last: the reference, ceiling and floor of each session, OHLC, matched volume and value
+    (put-through deals apart). VNDirect posts a session a few minutes after the close
+    (~15:11); during the session the newest row is the previous session's. Empty frame when
+    the code has no session in the window."""
+    body = http.get_json(
+        VNDIRECT_PRICES, vendor="VNDirect", timeout=20,
+        params={"q": f"code:{symbol.upper()}~date:gte:{start}~date:lte:{end}", "size": 1000, "sort": "date",
+                "fields": "code,date,floor,basicPrice,ceilingPrice,floorPrice,open,high,low,close,nmVolume,nmValue,"
+                          "ptVolume"},
+    )
+    rows = []
+    for r in (body or {}).get("data") or []:
+        close = _num(r.get("close"))
+        if not close > 0:
+            continue
+        rows.append({
+            "Date": str(r.get("date") or "")[:10],
+            "Exchange": str(r.get("floor") or "").upper(),
+            "Ref": _num(r.get("basicPrice")) * 1000, "Ceiling": _num(r.get("ceilingPrice")) * 1000,
+            "Floor": _num(r.get("floorPrice")) * 1000,
+            "Open": _num(r.get("open")) * 1000, "High": _num(r.get("high")) * 1000, "Low": _num(r.get("low")) * 1000,
+            "Close": close * 1000, "Volume": _num(r.get("nmVolume")), "Value": _num(r.get("nmValue")),
+            "PutThroughVolume": _num(r.get("ptVolume")),
+        })
+    return _day_frame(rows, STOCK_DAY_COLUMNS)
+
+
+def _day_frame(rows: list[dict], columns: list[str]) -> pd.DataFrame:
+    """Like ``_frame`` with ``Date`` kept as YYYY-MM-DD text (the callers compare with session days)."""
+    frame = _frame(rows, columns)
+    if not frame.empty:
+        frame["Date"] = frame["Date"].dt.strftime("%Y-%m-%d")
+    return frame
+
+
+def fetch_foreign_days(symbol: str, size: int = 30) -> pd.DataFrame:
+    """The newest ``size`` sessions of foreign trading of one stock (VNDirect), oldest first:
+    bought and sold shares, net shares, bought and sold value (VND), the room still open
+    (shares). The session's row is out soon after the close."""
+    body = http.get_json(
+        VNDIRECT_FOREIGN, vendor="VNDirect", timeout=20,
+        params={"q": f"code:{symbol.upper()}", "sort": "tradingDate:desc", "size": max(1, min(int(size), 1000))},
+    )
+    rows = [{
+        "Date": str(r.get("tradingDate") or "")[:10],
+        "ForeignBuyVol": _num(r.get("buyVol")), "ForeignSellVol": _num(r.get("sellVol")),
+        "ForeignNetVol": _num(r.get("netVol")),
+        "ForeignBuyVal": _num(r.get("buyVal")), "ForeignSellVal": _num(r.get("sellVal")),
+        "ForeignRoom": _num(r.get("currentRoom")),
+    } for r in (body or {}).get("data") or []]
+    return _day_frame(rows, FOREIGN_COLUMNS)
 
 
 def fetch_group(group: str) -> list[str]:

@@ -179,6 +179,13 @@ COMMANDS = (
      "Realtime price: type the code (up to 5, indices too)"),
     ("alt btc · alt eth sol", "Giá coin realtime trên OKX", "Realtime coin price on OKX"),
     ("nhanh FPT", "Quyết định của Quant Engine, không gọi AI", "Quant engine decision, no AI"),
+    ("soi FPT", "Soi nhanh một mã: giá/trần/sàn, khối lượng so MA20, khối ngoại, P/B, điểm RS, SEPA, CANSLIM, "
+     "dòng tiền cá mập, nhận định (không gọi AI)",
+     "Quick card of a stock: session, volume vs MA20, foreign flow, P/B, RS score, SEPA, CANSLIM, shark flow, a reading (no AI)"),
+    ("dotbien · dotbien 200", "Đột biến khối lượng toàn thị trường: KL phiên ≥ 150% (hoặc ngưỡng khác) trung bình 20 phiên",
+     "Volume spikes across the market: session volume ≥ 150% (or another threshold) of the 20-session average"),
+    ("camap FPT", "Dòng tiền cá mập của phiên: lệnh lớn mua/bán chủ động theo tick khớp lệnh",
+     "The session's shark flow: big orders, buyer- against seller-initiated, from the ticks"),
     ("phanbien FPT", "AI phản biện quyết định (1 lượt gọi AI)", "AI critique of the decision (one AI request)"),
     ("phanbien", "AI phản đối đúng bao nhiêu (kết quả bóng)", "How often the AI's objections were right"),
     ("phantich FPT", "Phân tích đầy đủ bằng các agent (~25 lượt AI)", "Full multi-agent analysis (~25 AI requests)"),
