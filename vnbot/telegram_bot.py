@@ -663,14 +663,14 @@ class TelegramBot:
         from vnbot.critic import default_llm
 
         if (args or "").strip():
-            raise ValueError("Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30).")
+            raise ValueError("Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30 và 11:30).")
         self.send(chat_id, "⏳ Radar đang quét VN100 + watchlist trên nến ngày gần nhất (1-2 phút; AI đọc tin mã đạt chuẩn)...")
         if self._critic_llm is None:
             try:
                 self._critic_llm = default_llm(self.settings)
             except Exception as exc:  # noqa: BLE001 - level 1 then
                 logger.warning("Radar: không có AI: %s", exc)
-        self.send(chat_id, radar.command(args, self.watchlist.get(), self._critic_llm))
+        self.send(chat_id, radar.command(args, self.watchlist.get(), self._critic_llm, data_dir=self.settings.data_dir))
 
     def _dinhgia(self, chat_id, args: str) -> None:
         """/dinhgia [MÃ]: the bot's own valuation card (vnbot.dinhgia), the owner's beside it."""

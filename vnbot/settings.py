@@ -128,6 +128,7 @@ class Settings:
     support_email: str = ""         # shown on the public pages a Zoom app needs (/privacy, /support)
     radar: bool = True              # the morning radar report (vnbot.radar) on session days
     radar_time: str = "09:30"       # HH:MM, Vietnam time
+    radar_noon_time: str = "11:30"  # the second send, at the end of the morning session
     extra: dict = field(default_factory=dict)
 
 
@@ -219,6 +220,7 @@ def load() -> Settings:
         support_email=(os.environ.get("SUPPORT_EMAIL") or "").strip(),
         radar=_flag("RADAR", True),
         radar_time=_hhmm("RADAR_TIME", "09:30"),
+        radar_noon_time=_hhmm("RADAR_NOON_TIME", "11:30"),
         daily_ai_mode=_choice("DAILY_AI_MODE", ("critic", "full", "off"), "critic"),
         daily_ai_max=max(0, _int("DAILY_AI_MAX", 5)),
         daily_ai_actions=tuple(

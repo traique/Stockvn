@@ -191,7 +191,7 @@ COMMANDS = (
     ("camap FPT", "Dòng tiền cá mập của phiên: lệnh lớn mua/bán chủ động theo tick khớp lệnh",
      "The session's shark flow: big orders, buyer- against seller-initiated, from the ticks"),
     ("radar", "Radar sáng ngay: VN100 + watchlist ở điểm uốn kỹ thuật (RSI, phân kỳ, nến rút chân, checklist, quân lệnh); "
-     "tự gửi 09:30 ngày giao dịch", "The morning radar now: VN100 + watchlist at a technical inflection; sent at 09:30 on session days"),
+     "tự gửi 09:30 và 11:30 ngày giao dịch", "The morning radar now: VN100 + watchlist at a technical inflection; sent at 09:30 and 11:30 on session days"),
     ("phanbien FPT", "AI phản biện quyết định (1 lượt gọi AI)", "AI critique of the decision (one AI request)"),
     ("phanbien", "AI phản đối đúng bao nhiêu (kết quả bóng)", "How often the AI's objections were right"),
     ("phantich FPT", "Phân tích đầy đủ bằng các agent (~25 lượt AI)", "Full multi-agent analysis (~25 AI requests)"),

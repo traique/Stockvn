@@ -97,6 +97,41 @@ def google_news(query: str, start_date: str, end_date: str, limit: int = 20) -> 
     return items[:limit]
 
 
+PRESS_SITES = ("cafef.vn", "vietstock.vn", "vneconomy.vn")
+
+
+def press_news(symbol: str, start_date: str, end_date: str, sites=PRESS_SITES, limit: int = 10) -> list[Headline]:
+    """The papers' own items on a stock: one Google News query a site (``"SYM" site:cafef.vn``), only
+    the titles that name the code (a site's unrelated items come back too), newest first, de-duplicated.
+    A site that fails is skipped; every site failing raises VendorUnavailableError."""
+    from tradingagents.dataflows.errors import VendorUnavailableError
+    from tradingagents.quant import report_format as rfmt
+
+    items: list[Headline] = []
+    failed = 0
+    for site in sites:
+        try:
+            found = google_news(f'"{symbol}" site:{site}', start_date, end_date, limit=limit)
+        except Exception:  # noqa: BLE001 - one paper down, the others read
+            failed += 1
+            continue
+        for h in found:
+            if rfmt.is_news_relevant(h.title, symbol, None):
+                items.append(Headline(title=h.title, source=h.source or site, published=h.published, url=h.url,
+                                      confirmed=True))
+    if failed == len(sites):
+        raise VendorUnavailableError(f"Google News failed for every paper ({', '.join(sites)})")
+    seen: set[str] = set()
+    out = []
+    for h in sorted(items, key=lambda h: h.published, reverse=True):
+        key = h.title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    return out[:limit]
+
+
 def _asp_date(raw: str | None) -> datetime | None:
     match = re.search(r"(-?\d{10,})", raw or "")
     if not match:

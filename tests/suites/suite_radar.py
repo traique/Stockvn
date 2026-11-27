@@ -8,8 +8,11 @@ the morning quote and the AI faked.
   misses, each block (Chiến sự, Tai mắt, the ex-date, Checklist papa, Quân lệnh at tick prices);
 - Tai mắt: level 2 from the fake AI (JSON, E scored), level 1 when the AI raises, answers no JSON, or
   there is no AI (E unscored, one-off profit flagged by code), a bank (no figures);
-- the scheduler: due from 09:30 to 11:30 on a session day, once (the stamp), retried three times then
-  given up with a message, RADAR=0 off; /radar on Telegram and Zoom; the help and /docs.
+- the headlines: the bot's feeds and the papers (CafeF, Vietstock, VnEconomy by Google News, faked) merged,
+  no repeat, the ones naming the code printed as "Tin mới liên quan" (5, newest first); a paper down;
+- the scheduler: the morning send from 09:30 to 11:30 and the noon one from 11:30 to 13:00 on a session
+  day, each once (its stamp), the noon one reusing the morning's AI lines (the cache, one AI call a day),
+  retried three times then given up with a message, RADAR=0 off; /radar on Telegram and Zoom.
 """
 import json
 import time
@@ -156,12 +159,78 @@ t.ok("level 1 lines: the figures with their source, the one-off flag",
 
 class Headline:
     def __init__(self, title, source, published):
-        self.title, self.source, self.published, self.confirmed = title, source, published, True
+        self.title, self.source, self.published, self.confirmed = title, source, published, None
 
 
 NEWS = {"PHR": [Headline("PHR lãi lớn nhờ bán đất cho THACO", "CafeF", datetime(2026, 11, 15)),
                 Headline("Giá cao su giảm tuần thứ ba", "VnExpress", datetime(2026, 11, 20))]}
 fake_news = lambda code, end: list(NEWS.get(code, []))  # noqa: E731
+
+# the merged headlines: the bot's feeds and the papers (vn_news.press_news), no repeat, naming the code first
+from datetime import timezone  # noqa: E402
+
+from tradingagents.dataflows import news as news_mod  # noqa: E402
+from tradingagents.dataflows.vendors import vn_news  # noqa: E402
+
+UTC = timezone.utc
+BOT_FEED = [vn_news.Headline("PHR: Nghị quyết HĐQT số 69", "Công bố thông tin (VCI)", datetime(2026, 11, 17, tzinfo=UTC), confirmed=True),
+            vn_news.Headline("Giá cao su lập đỉnh 10 năm", "Dân Việt", datetime(2026, 11, 21, tzinfo=UTC))]
+PRESS = [vn_news.Headline("Cao su Phước Hòa (PHR) báo lãi tăng 64%, lợi nhuận cốt lõi lao dốc", "CafeF", datetime(2026, 11, 15, tzinfo=UTC), confirmed=True),
+         vn_news.Headline("PHR: Nghị quyết HĐQT số 69", "Vietstock", datetime(2026, 11, 17, tzinfo=UTC), confirmed=True),
+         vn_news.Headline("PHR - Chuyển đổi đất mở ra dư địa tăng trưởng", "VnEconomy", datetime(2026, 11, 13, tzinfo=UTC), confirmed=True)]
+PRESS_DOWN = {"on": False}
+news_mod.collect_company_news = lambda symbol, start, end, limit: (list(BOT_FEED), [])
+
+
+def fake_press(symbol, start, end, sites=None, limit=10):
+    from tradingagents.dataflows.errors import VendorUnavailableError
+
+    if PRESS_DOWN["on"]:
+        raise VendorUnavailableError("Google News failed for every paper")
+    return list(PRESS)
+
+
+real_press = vn_news.press_news
+vn_news.press_news = fake_press
+merged = radar.headlines("PHR", "2026-11-27")
+t.ok("headlines: the bot's feeds and the papers merged, the repeated title once, the ones naming PHR first, newest first",
+     [h.title[:22] for h in merged] == ["PHR: Nghị quyết HĐQT s", "Cao su Phước Hòa (PHR)", "PHR - Chuyển đổi đất m", "Giá cao su lập đỉnh 10"],
+     [h.title[:22] for h in merged])
+block = radar.news_lines(merged, "PHR")
+t.ok("the news block: up to 5 naming the code, newest first, source and day",
+     block == ["Tin mới liên quan:", "• 17/11 Công bố thông tin (VCI): PHR: Nghị quyết HĐQT số 69",
+               "• 15/11 CafeF: Cao su Phước Hòa (PHR) báo lãi tăng 64%, lợi nhuận cốt lõi lao dốc",
+               "• 13/11 VnEconomy: PHR - Chuyển đổi đất mở ra dư địa tăng trưởng"], block)
+PRESS_DOWN["on"] = True
+t.ok("the papers down: the bot's feeds alone", [h.source for h in radar.headlines("PHR", "2026-11-27")] == ["Công bố thông tin (VCI)", "Dân Việt"])
+PRESS_DOWN["on"] = False
+t.ok("no headline naming the code: said so", radar.news_lines([BOT_FEED[1]], "PHR")[0].startswith("Tin mới liên quan: không có tin nào nêu PHR"))
+# press_news itself: a site's unrelated items dropped, one site down skipped, every site down raises
+GN = {"cafef.vn": [vn_news.Headline("Cao su Phước Hòa (PHR) báo lãi", "CafeF", datetime(2026, 11, 15, tzinfo=UTC)),
+                   vn_news.Headline("Cập nhật ngành hoá chất", "CafeF", datetime(2026, 11, 26, tzinfo=UTC))],
+      "vietstock.vn": [vn_news.Headline("Cao su Phước Hòa (PHR) báo lãi", "Vietstock", datetime(2026, 11, 16, tzinfo=UTC))],
+      "vneconomy.vn": None}
+real_google = vn_news.google_news
+
+
+def fake_google(query, start, end, limit=20):
+    site = query.split("site:")[1]
+    if GN.get(site) is None:
+        raise RuntimeError("timeout")
+    return list(GN[site])
+
+
+vn_news.google_news = fake_google
+got = real_press("PHR", "2026-11-13", "2026-11-27")
+t.ok("press_news: only titles naming the code, the newest copy of a repeated title, VnEconomy down skipped",
+     [(h.source, h.title) for h in got] == [("Vietstock", "Cao su Phước Hòa (PHR) báo lãi")], [(h.source, h.title) for h in got])
+GN["cafef.vn"] = GN["vietstock.vn"] = None
+try:
+    real_press("PHR", "2026-11-13", "2026-11-27")
+    t.ok("every paper down: raises", False)
+except Exception as exc:  # noqa: BLE001
+    t.ok("every paper down: raises", "every paper" in str(exc), exc)
+vn_news.google_news = real_google
 PROMPTS = []
 
 
@@ -237,9 +306,10 @@ t.ok("Chiến sự: RSI oversold with the divergence, under EMA20 by %, support 
      and ". Hỗ trợ 26.500, kháng cự " in text and "(30 phiên)." in text
      and "Lực cầu: nến phiên trước rút chân 77% với volume gấp 1,8 lần MA20, dấu hiệu bên mua chặn đà rơi (stopping volume)." in text
      and "So với thị trường: VN-Index mất 3,42% còn PHR chỉ mất 0,73%, tức PHR chịu đòn tốt hơn mặt bằng chung." in text, text)
-t.ok("Tai mắt: the AI's lines, the signal-day note with this morning's volume against MA20 and the foreign session",
+t.ok("Tai mắt: the AI's lines, the news block, the signal-day note with this morning's volume against MA20 and the foreign session",
      "Tai mắt\nLãi Q3 433 tỷ chủ yếu từ 470 tỷ thu nhập khác" in text
-     and "Tín hiệu được chấm trên nến ngày 26/11. Sáng nay KL tới 09:30: 49.200 cp (10% MA20); khối ngoại phiên 26/11 bán ròng 15.200 cp." in text, text)
+     and "Tin mới liên quan:\n• 15/11 CafeF: PHR lãi lớn nhờ bán đất cho THACO\nTín hiệu được chấm" in text
+     and "Tín hiệu được chấm trên nến ngày 26/11. Hôm nay KL tới 09:30: 49.200 cp (10% MA20); khối ngoại phiên 26/11 bán ròng 15.200 cp." in text, text)
 t.ok("the ex-date inside the window, with the amount",
      "Ngày 13/11 là GDKHQ (Trả cổ tức bằng tiền mặt - Đợt 1 2026 - 1,500 VND 1.500 đ/cp): phần giá giảm hôm đó là chia, không phải bán." in text, text)
 t.ok("Checklist papa: A B ✓, E ✗ from the AI, G ✗ with the MA note, C ✓ with the value, the verdict",
@@ -259,6 +329,26 @@ text = radar.report(NOW, ["PHR"], None, bars=fake_bars, morning=fake_morning, ne
 t.ok("nobody over the threshold: the quiet opening, the scan line says so, no block",
      text.splitlines()[0] == "Radar im lặng. Không mã nào đạt chuẩn, hôm nay giữ tiền là một vị thế."
      and "không mã nào đạt 90/100. Gần ngưỡng: PHR 80, CTG 40, UPP 40." in text and "━━ PHR" not in text, text)
+CALLS_AI = {"n": 0}
+
+
+class CountingLLM(FakeLLM):
+    def invoke(self, messages):
+        CALLS_AI["n"] += 1
+        return super().invoke(messages)
+
+
+cache = radar.IntelCache(DATA)
+text = radar.report(NOW, ["PHR"], CountingLLM(GOOD), bars=fake_bars, morning=fake_morning, news=fake_news, cache=cache)
+noon = radar.report(at("2026-11-27", 11, 30), ["PHR"], CountingLLM(GOOD), bars=fake_bars, morning=fake_morning, news=fake_news,
+                    noon=True, cache=cache)
+t.ok("the noon report: said so, the morning session's volume, the AI's lines from the morning's cache (one AI call)",
+     "27/11/2026, 11:30 (kết thúc phiên sáng) | VN-Index" in noon and "Hôm nay KL phiên sáng: 49.200 cp (10% MA20)" in noon
+     and "Tai mắt\nLãi Q3 433 tỷ chủ yếu từ 470 tỷ thu nhập khác" in noon and CALLS_AI["n"] == 1, (CALLS_AI, noon[:300]))
+t.ok("...the cache keeps level 2 only, one day", cache.get("2026-11-27", "PHR")["level"] == 2 and cache.get("2026-11-26", "PHR") is None)
+cache.put("2026-11-27", "UPP", {"lines": ["x"], "level": 1, "supportive": None, "one_off": False, "source": "s"})
+t.ok("...a level-1 answer is not kept (the AI asked again next time)", cache.get("2026-11-27", "UPP") is None)
+(DATA / "radar_intel.json").unlink()
 QUOTES["VNINDEX"] = {"price": 1_700.0, "ref": 1_687.45, "volume": None, "day": "2026-11-27"}
 text = radar.report(NOW, ["PHR"], None, bars=fake_bars, morning=fake_morning, news=fake_news)
 t.ok("VN-Index up this morning: the calm opening", text.splitlines()[0] == "Trận địa yên. Radar có mã, chờ ATC xác nhận rồi mới tính.", text.splitlines()[0])
@@ -279,16 +369,34 @@ CLOCK = {"t": at("2026-11-27", 9, 29)}
 vn_rules.now_vn = lambda: CLOCK["t"]
 t.ok("09:29: not due", sched._radar_due() is None)
 CLOCK["t"] = at("2026-11-27", 9, 30)
-t.ok("09:30 on a session day: due", sched._radar_due() == "2026-11-27")
+t.ok("09:30 on a session day: the morning send due", sched._radar_due() == ("2026-11-27", "morning"))
+CALLS_AI["n"] = 0
+sched._critic_llm = CountingLLM(GOOD)
 sched.tick()
 t.ok("the tick sends the report to the report chats and stamps the day",
      len(SENT) == 1 and SENT[0].startswith("Địch rũ tới chân thành") and "━━ PHR · 80/100 ━━" in SENT[0]
      and (DATA / "last_radar.txt").read_text(encoding="utf-8") == "2026-11-27", [x[:60] for x in SENT])
 sched.tick()
 t.ok("...once a day", len(SENT) == 1)
-(DATA / "last_radar.txt").unlink()
 CLOCK["t"] = at("2026-11-27", 11, 30)
-t.ok("11:30: too late, skipped", sched._radar_due() is None)
+t.ok("11:30: the noon send due", sched._radar_due() == ("2026-11-27", "noon"))
+sched.tick()
+t.ok("...sent with the noon layout, the AI not asked again (the morning's cache), its own stamp",
+     len(SENT) == 2 and "(kết thúc phiên sáng)" in SENT[1] and "━━ PHR · 80/100 ━━" in SENT[1] and CALLS_AI["n"] == 1
+     and (DATA / "last_radar_noon.txt").read_text(encoding="utf-8") == "2026-11-27", (CALLS_AI, SENT[1][:120]))
+sched.tick()
+t.ok("...once", len(SENT) == 2 and sched._radar_due() is None)
+CLOCK["t"] = at("2026-11-27", 13, 0)
+(DATA / "last_radar_noon.txt").unlink()
+t.ok("13:00: too late for the noon send", sched._radar_due() is None)
+(DATA / "last_radar.txt").unlink()
+(DATA / "radar_intel.json").unlink()
+CLOCK["t"] = at("2026-11-27", 11, 30)
+t.ok("11:30 with the morning not sent (the bot was down): the morning slot is over, the noon one due",
+     sched._radar_due() == ("2026-11-27", "noon"))
+(DATA / "last_radar_noon.txt").write_text("2026-11-27", encoding="utf-8")
+t.ok("...nothing more once the noon is stamped", sched._radar_due() is None)
+(DATA / "last_radar_noon.txt").unlink()
 CLOCK["t"] = at("2026-11-28", 9, 40)
 t.ok("a Saturday: not due", sched._radar_due() is None)
 CLOCK["t"] = at("2026-11-27", 9, 40)
@@ -326,7 +434,7 @@ bot._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/radar"})
 t.ok("Telegram /radar: the progress line, then the report", sent(111)[0].startswith("⏳ Radar đang quét VN100 + watchlist")
      and "━━ PHR · 80/100 ━━" in sent(111)[1], [x[:60] for x in sent(111)])
 bot._handle({"chat": {"id": 111}, "from": {"id": 111}, "text": "/radar FPT"})
-t.ok("/radar with a word: the usage", sent(111)[-1] == "⚠️ Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30).", sent(111)[-1])
+t.ok("/radar with a word: the usage", sent(111)[-1] == "⚠️ Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30 và 11:30).", sent(111)[-1])
 bot._handle({"chat": {"id": 222}, "from": {"id": 222}, "text": "/radar"})
 t.ok("a stranger: refused", sent(222)[-1].startswith("Bot chưa cho phép"))
 t.ok("the help names /radar, still one message", "/radar - radar sáng" in bot._help() and len(bot._help()) <= tb.MAX_MESSAGE)

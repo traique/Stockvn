@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.23.0"
 RELEASED = "2026-11-27"
-RELEASE_BUILD = "23d4456"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "f855bf0"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
@@ -36,6 +36,8 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Radar sáng 09:30 ngày giao dịch (RADAR_TIME): quét VN100 + watchlist trên nến hôm trước, gửi chat và Zoom",
         "Điểm 0-100: RSI quá bán, phân kỳ dương, nến rút chân + volume, hơn VN-Index, thanh khoản, EMA20, MA50; từ 70",
         "Mỗi mã: Chiến sự, Tai mắt (1 lượt AI đọc số liệu VCI + tin 2 tuần; lỗi thì số liệu), Checklist, Quân lệnh",
+        "Tin mới liên quan dưới Tai mắt: bài nêu mã của CafeF, Vietstock, VnEconomy và nguồn của bot, kèm nguồn, ngày",
+        "Gửi lại lúc 11:30 kết thúc phiên sáng (RADAR_NOON_TIME): bối cảnh phiên sáng, AI lấy lại từ bản 09:30",
         "Ngày GDKHQ trong 45 ngày được nêu kèm số chia; /radar chạy ngay; RADAR=0 tắt",
     )),
     ("v1.22.0", "2026-11-27", (

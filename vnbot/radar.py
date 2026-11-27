@@ -3,7 +3,9 @@
 At ``RADAR_TIME`` (09:30, Vietnam) on a session day the scheduler scans VN100 plus the
 watchlist on the previous session's closed candle - the signal is scored on yesterday's bar,
 this morning's prices are only the context - and sends one report to the report chats and
-Zoom (``DailyScheduler._radar``); ``/radar`` sends it now. Code only, except one block.
+Zoom (``DailyScheduler._radar``); at ``RADAR_NOON_TIME`` (11:30) the same again with the
+morning session's trading as the context, the AI's lines of the morning reused
+(``IntelCache``); ``/radar`` sends it now. Code only, except one block.
 
 The score of a stock (0-100, every point explained; ``SCORE_MIN`` to be named):
 
@@ -58,6 +60,9 @@ ENTRY_LOW, ENTRY_HIGH, STOP_UNDER = 1.02, 1.03, 0.98
 PROBE_PCT = 5                  # % of NAV of the probe
 NEWS_DAYS = 14
 NEWS_LIMIT = 12
+NEWS_SHOWN = 5                 # headlines printed in the block
+NOON_DEFAULT = "11:30"         # RADAR_NOON_TIME: the second send, at the end of the morning session
+NOON_WINDOW_END = "13:00"
 OTHER_INCOME_SHARE = 0.5       # other income over this share of the net profit: "not from the core business"
 MAX_NAMED = 5                  # stocks written up in one report
 NEAR_MISSES = 3                # the best under the threshold, named with their score only
@@ -271,11 +276,49 @@ def ex_dates(code: str, start: str, end: str) -> list[dict]:
 
 
 def headlines(code: str, end: str) -> list:
+    """The stock's news of the last ``NEWS_DAYS`` days: the bot's feeds (VCI disclosures, CafeF research
+    and company news, Google News) and the papers' own items (``vn_news.press_news``: CafeF, Vietstock,
+    VnEconomy), the ones naming the code first, newest first, no repeat."""
     from tradingagents.dataflows.news import collect_company_news
+    from tradingagents.dataflows.vendors import vn_news
+    from tradingagents.quant import report_format as rfmt
 
     start = (datetime.strptime(end, "%Y-%m-%d") - timedelta(days=NEWS_DAYS)).strftime("%Y-%m-%d")
-    items, _failed = collect_company_news(code, start, end, NEWS_LIMIT)
-    return items
+    items: list = []
+    try:
+        items += collect_company_news(code, start, end, NEWS_LIMIT)[0]
+    except Exception as exc:  # noqa: BLE001 - the papers alone then
+        logger.warning("Radar %s: tin của bot lỗi: %s", code, exc)
+    try:
+        items += vn_news.press_news(code, start, end, limit=NEWS_LIMIT)
+    except Exception as exc:  # noqa: BLE001 - the bot's feeds alone then
+        logger.warning("Radar %s: báo lỗi: %s", code, exc)
+    seen: set[str] = set()
+    out = []
+    for h in items:
+        key = (h.title or "").lower().strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    out.sort(key=lambda h: (rfmt.is_news_relevant(h.title, code, h.confirmed), h.published or datetime.min.replace(tzinfo=None)
+                            if h.published is None else h.published), reverse=True)
+    return out[:NEWS_LIMIT]
+
+
+def news_lines(items: list, code: str) -> list[str]:
+    """The "Tin mới liên quan" block: up to ``NEWS_SHOWN`` items naming the code, newest first, source and day."""
+    from tradingagents.quant import report_format as rfmt
+
+    named = [h for h in items if rfmt.is_news_relevant(h.title, code, h.confirmed)]
+    named.sort(key=lambda h: h.published or datetime.min.replace(tzinfo=None) if h.published is None else h.published, reverse=True)
+    if not named:
+        return [f"Tin mới liên quan: không có tin nào nêu {code} trong {NEWS_DAYS} ngày qua (CafeF, Vietstock, VnEconomy, VCI)."]
+    out = ["Tin mới liên quan:"]
+    for h in named[:NEWS_SHOWN]:
+        when = h.published.strftime("%d/%m") if h.published else "?"
+        out.append(f"• {when} {h.source}: {h.title}")
+    return out
 
 
 # ─── "Tai mắt": level 2 (the AI) over level 1 (the figures) ───────────────────
@@ -312,7 +355,7 @@ def figures_lines(fund: dict | None) -> list[str]:
 
 def _prompt(code: str, fund: dict | None, items: list, end: str) -> str:
     parts = [f"Mã: {code}. Ngày: {end}.", "Số liệu quý mới nhất (VCI):"] + figures_lines(fund)
-    parts.append(f"Tiêu đề tin {NEWS_DAYS} ngày qua (nguồn, ngày):")
+    parts.append(f"Tiêu đề tin {NEWS_DAYS} ngày qua (nguồn, ngày; CafeF, Vietstock, VnEconomy, VCI, Google News):")
     if not items:
         parts.append("(không có tin nào)")
     for h in items[:NEWS_LIMIT]:
@@ -335,30 +378,71 @@ def ask_ai(code: str, fund: dict | None, items: list, end: str, llm) -> dict:
     return {"lines": lines, "supportive": bool(data.get("supportive")), "one_off": bool(data.get("one_off"))}
 
 
-def intel(code: str, end: str, llm=None, *, news=None) -> dict:
-    """The "Tai mắt" block: ``{lines, level (2 or 1), supportive (True/False, None unscored), source}``."""
+def intel(code: str, end: str, llm=None, *, news=None, items: list | None = None) -> dict:
+    """The "Tai mắt" block: ``{lines, level (2 or 1), supportive (True/False, None unscored), source}``.
+    ``items``: the headlines already fetched (else ``news``/``headlines`` fetches them)."""
     try:
         fund = fundamentals(code)
     except Exception as exc:  # noqa: BLE001 - the block without the figures
         logger.warning("Radar %s: VCI lỗi: %s", code, exc)
         fund = None
     if llm is not None:
-        try:
-            items = (news or headlines)(code, end)
-        except Exception as exc:  # noqa: BLE001 - the AI reads the figures alone
-            logger.warning("Radar %s: tin lỗi: %s", code, exc)
-            items = []
+        if items is None:
+            try:
+                items = (news or headlines)(code, end)
+            except Exception as exc:  # noqa: BLE001 - the AI reads the figures alone
+                logger.warning("Radar %s: tin lỗi: %s", code, exc)
+                items = []
         try:
             got = ask_ai(code, fund, items, end, llm)
             return {"lines": got["lines"], "level": 2, "supportive": got["supportive"], "one_off": got["one_off"],
-                    "source": "AI đọc số liệu VCI và tin 2 tuần"}
+                    "source": "AI đọc số liệu VCI và tin 2 tuần", "items": items}
         except Exception as exc:  # noqa: BLE001 - level 1 instead, said so
             logger.warning("Radar %s: AI lỗi, dùng số liệu: %s", code, exc)
             why = str(exc)[:80]
     else:
         why = "chưa cấu hình AI"
+        if items is None:
+            try:
+                items = (news or headlines)(code, end)
+            except Exception as exc:  # noqa: BLE001 - the block without the headlines
+                logger.warning("Radar %s: tin lỗi: %s", code, exc)
+                items = []
     return {"lines": figures_lines(fund), "level": 1, "supportive": None,
-            "one_off": bool(fund and fund["one_off"]), "source": f"số liệu VCI, AI không trả lời ({why})"}
+            "one_off": bool(fund and fund["one_off"]), "source": f"số liệu VCI, AI không trả lời ({why})", "items": items}
+
+
+class IntelCache:
+    """The day's "Tai mắt" answers on disk (``radar_intel.json``): the noon send reuses the morning's AI
+    lines instead of asking again; a level-1 answer is not kept, so the next run tries the AI again."""
+
+    def __init__(self, data_dir):
+        from pathlib import Path
+
+        self.path = Path(data_dir) / "radar_intel.json" if data_dir else None
+
+    def _read(self) -> dict:
+        if self.path is None:
+            return {}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def get(self, day: str, code: str) -> dict | None:
+        got = (self._read().get(day) or {}).get(code)
+        return got if isinstance(got, dict) and got.get("level") == 2 else None
+
+    def put(self, day: str, code: str, value: dict) -> None:
+        if self.path is None or value.get("level") != 2:
+            return
+        from vnbot.jobs import write_text_atomic
+
+        data = {d: v for d, v in self._read().items() if d == day}      # one day kept
+        data.setdefault(day, {})[code] = {k: value[k] for k in ("lines", "level", "supportive", "one_off", "source")}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(self.path, json.dumps(data, ensure_ascii=False))
 
 
 # ─── the report ──────────────────────────────────────────────────────────────
@@ -429,11 +513,13 @@ def stock_block(s: dict, ctx: dict, tai_mat: dict, exes: list[dict], morning: di
     out += ["", "Tai mắt"] + tai_mat["lines"]
     if tai_mat["level"] == 1:
         out.append(f"(Mức 1: {tai_mat['source']}.)")
+    out += news_lines(tai_mat.get("items") or [], code)
     note = f"Tín hiệu được chấm trên nến ngày {_ddmm(s['day'])}."
     if morning:
         vol = morning.get("volume")
         ratio = f" ({vol / s['vol_avg'] * 100:.0f}% MA20)" if vol and s["vol_avg"] else ""
-        note += f" Sáng nay KL tới {morning['at']}: {_vn(vol) + ' cp' if vol else 'chưa có'}{ratio}"
+        when = "KL phiên sáng" if morning.get("noon") else f"KL tới {morning['at']}"
+        note += f" Hôm nay {when}: {_vn(vol) + ' cp' if vol else 'chưa có'}{ratio}"
         if morning.get("foreign") is not None:
             f = morning["foreign"]
             side = "bán ròng" if f["net"] < 0 else "mua ròng" if f["net"] > 0 else "cân bằng"
@@ -492,7 +578,8 @@ def _morning(code: str, now: datetime) -> dict | None:
         return None
     out = {"at": now.strftime("%H:%M"), "price": q["price"], "ref": q["ref"],
            "pct": (q["price"] / q["ref"] - 1) * 100 if q["ref"] else None,
-           "volume": q["volume"] if q["day"] == now.strftime("%Y-%m-%d") else None, "foreign": None}
+           "volume": q["volume"] if q["day"] == now.strftime("%Y-%m-%d") else None, "foreign": None,
+           "noon": now.strftime("%H:%M") >= NOON_DEFAULT}
     try:
         frame = flows.fetch_foreign_days(code, 3)
         rows = [r for r in frame.to_dict("records") if r["ForeignBuyVol"] or r["ForeignSellVol"]]
@@ -512,8 +599,11 @@ def _exchange(code: str) -> str | None:
 
 
 def report(now: datetime, watchlist, llm=None, *, bars=None, scan_fn=None, morning=_morning, news=None,
-           events=ex_dates, exchange=_exchange, score_min: float = SCORE_MIN) -> str:
-    """The morning report at ``now`` (every data function replaceable by the tests)."""
+           events=ex_dates, exchange=_exchange, score_min: float = SCORE_MIN, noon: bool = False,
+           cache: IntelCache | None = None) -> str:
+    """The report at ``now``: the morning one, or with ``noon`` the one at the end of the morning session
+    (the same signal, this morning's trading as the context, the AI's lines from ``cache`` when the
+    morning run kept them). Every data function is replaceable by the tests."""
     from tradingagents.market import vn_rules
     from vnbot import quote
     from vnbot.quote import _vn
@@ -533,12 +623,14 @@ def report(now: datetime, watchlist, llm=None, *, bars=None, scan_fn=None, morni
     except Exception as exc:  # noqa: BLE001
         logger.info("Radar: VN-Index sáng nay: %s", exc)
     head = [opening(vni_now["pct"] if vni_now else None, len(named))]
-    line = f"{now:%d/%m/%Y, %H:%M}"
+    line = f"{now:%d/%m/%Y, %H:%M}" + (" (kết thúc phiên sáng)" if noon else "")
     if vni_now:
         line += f" | VN-Index {_vn(vni_now['price'], 2)} ({_pct(vni_now['pct'], 2)})"
     blocks = []
     for s in named:
         m = morning(s["code"], now) if morning else None
+        if m and noon:
+            m["noon"] = True
         if m:
             line += f" | {s['code']} {_price(m['price'])} ({_pct(m['pct'], 2)})" + (f", KL {_vn(m['volume'])} cp" if m.get("volume") else "")
         try:
@@ -550,7 +642,19 @@ def report(now: datetime, watchlist, llm=None, *, bars=None, scan_fn=None, morni
             ex = exchange(s["code"])
         except Exception:  # noqa: BLE001
             ex = None
-        blocks.append(stock_block(s, {"exchange": ex}, intel(s["code"], today, llm, news=news), exes, m))
+        kept = cache.get(today, s["code"]) if cache else None
+        if kept:
+            try:
+                kept["items"] = (news or headlines)(s["code"], today)
+            except Exception as exc:  # noqa: BLE001 - the block without the headlines
+                logger.warning("Radar %s: tin lỗi: %s", s["code"], exc)
+                kept["items"] = []
+            got = kept
+        else:
+            got = intel(s["code"], today, llm, news=news)
+            if cache:
+                cache.put(today, s["code"], got)
+        blocks.append(stock_block(s, {"exchange": ex}, got, exes, m))
     head.append(line)
     out = head + ["", f"Radar quét {scope} ({len(codes)} mã) trên nến ngày {_ddmm(signal_day)}: "
                   + (f"{len(named)} mã đạt chuẩn (từ {score_min:.0f}/100): " + ", ".join(f"{s['code']} {s['score']}" for s in named)
@@ -565,10 +669,12 @@ def report(now: datetime, watchlist, llm=None, *, bars=None, scan_fn=None, morni
     return "\n".join(out)
 
 
-def command(args: str, watchlist, llm=None, now: datetime | None = None) -> str:
-    """/radar (Telegram and Zoom): the report now."""
+def command(args: str, watchlist, llm=None, now: datetime | None = None, data_dir=None) -> str:
+    """/radar (Telegram and Zoom): the report now (the noon layout from 11:30 on)."""
     from tradingagents.market import vn_rules
 
     if (args or "").strip():
-        raise ValueError("Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30).")
-    return report(now or vn_rules.now_vn(), watchlist, llm)
+        raise ValueError("Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30 và 11:30).")
+    now = now or vn_rules.now_vn()
+    noon = now.astimezone(vn_rules.VN_TZ).strftime("%H:%M") >= NOON_DEFAULT
+    return report(now, watchlist, llm, noon=noon, cache=IntelCache(data_dir) if data_dir else None)

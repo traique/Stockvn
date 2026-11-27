@@ -179,10 +179,12 @@ class DailyScheduler:
         self._stv_try_day = ""
         self._stv_market_next = 0.0
         self._history_next = 0.0                             # the market history top-up (vnbot.dotbien)
-        self._radar_stamp = settings.data_dir / "last_radar.txt"     # the morning radar (vnbot.radar)
+        # the morning radar (vnbot.radar): two sends a session day, each with its stamp
+        self._radar_stamps = {"morning": settings.data_dir / "last_radar.txt",
+                              "noon": settings.data_dir / "last_radar_noon.txt"}
         self._radar_next = 0.0
         self._radar_tries = 0
-        self._radar_day = ""
+        self._radar_key = ""
         self._stv_market_tries = 0
         self._stv_market_day = ""
         self._stv_scan_next = 0.0
@@ -729,16 +731,16 @@ class DailyScheduler:
         if day:
             self._stv_market(day)
         self._market_history()
-        day = self._radar_due() if time.time() >= self._radar_next else None
-        if day:
-            self._radar(day)
+        due = self._radar_due() if time.time() >= self._radar_next else None
+        if due:
+            self._radar(*due)
 
     RADAR_RETRY_SECONDS = 600
     RADAR_TRIES = 3
 
-    def _radar_due(self) -> str | None:
-        """The day of the morning radar when it is due: a session day from ``radar_time`` to
-        ``radar.WINDOW_END``, once (the stamp)."""
+    def _radar_due(self) -> tuple[str, str] | None:
+        """(day, slot) of the radar send due now: "morning" from ``radar_time`` to ``radar.WINDOW_END``,
+        "noon" from ``radar_noon_time`` to ``radar.NOON_WINDOW_END``, each once a session day (its stamp)."""
         from tradingagents.market import vn_rules
         from vnbot import radar
 
@@ -746,32 +748,40 @@ class DailyScheduler:
             return None
         now = vn_rules.now_vn()
         day, hhmm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
-        if not vn_rules.is_session_day(day) or hhmm < self.settings.radar_time or hhmm >= radar.WINDOW_END:
+        if not vn_rules.is_session_day(day):
             return None
-        return None if self._read(self._radar_stamp) == day else day
+        for slot, start, end in (("morning", self.settings.radar_time, radar.WINDOW_END),
+                                 ("noon", self.settings.radar_noon_time, radar.NOON_WINDOW_END)):
+            if start <= hhmm < end and self._read(self._radar_stamps[slot]) != day:
+                return day, slot
+        return None
 
-    def _radar(self, day: str) -> None:
-        """Send the radar; a failure is retried in 10 minutes, three times, then the day is skipped."""
+    def _radar(self, day: str, slot: str = "morning") -> None:
+        """Send the radar of ``slot``; a failure is retried in 10 minutes, three times, then the slot is
+        skipped for the day."""
         from vnbot import radar
 
-        if self._radar_day != day:
-            self._radar_day, self._radar_tries = day, 0
+        key = f"{day}:{slot}"
+        if self._radar_key != key:
+            self._radar_key, self._radar_tries = key, 0
         try:
             llm = None
             try:
                 llm = self.critic_llm()
             except Exception as exc:  # noqa: BLE001 - level 1 then (the report says so)
                 logger.warning("Radar: không có AI: %s", exc)
-            text = radar.report(self._now_vn(), self.watchlist.get(), llm)
+            text = radar.report(self._now_vn(), self.watchlist.get(), llm, noon=slot == "noon",
+                                cache=radar.IntelCache(self.settings.data_dir))
         except Exception as exc:  # noqa: BLE001 - tried again, then given up for the day
             self._radar_tries += 1
-            logger.exception("Radar sáng %s lỗi (lần %d)", day, self._radar_tries)
+            logger.exception("Radar %s %s lỗi (lần %d)", slot, day, self._radar_tries)
             if self._radar_tries < self.RADAR_TRIES:
                 self._radar_next = time.time() + self.RADAR_RETRY_SECONDS
                 return
-            text = f"⚠️ Radar sáng {day[8:10]}/{day[5:7]} không chạy được sau {self._radar_tries} lần: {exc}. Gõ /radar để thử lại."
+            text = (f"⚠️ Radar {'sáng' if slot == 'morning' else 'cuối phiên sáng'} {day[8:10]}/{day[5:7]} không chạy được "
+                    f"sau {self._radar_tries} lần: {exc}. Gõ /radar để thử lại.")
         self._radar_tries, self._radar_next = 0, 0.0
-        write_text_atomic(self._radar_stamp, day)
+        write_text_atomic(self._radar_stamps[slot], day)
         self.notify(text)
 
     @staticmethod
