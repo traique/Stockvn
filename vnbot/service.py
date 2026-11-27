@@ -179,6 +179,10 @@ class DailyScheduler:
         self._stv_try_day = ""
         self._stv_market_next = 0.0
         self._history_next = 0.0                             # the market history top-up (vnbot.dotbien)
+        self._radar_stamp = settings.data_dir / "last_radar.txt"     # the morning radar (vnbot.radar)
+        self._radar_next = 0.0
+        self._radar_tries = 0
+        self._radar_day = ""
         self._stv_market_tries = 0
         self._stv_market_day = ""
         self._stv_scan_next = 0.0
@@ -725,6 +729,56 @@ class DailyScheduler:
         if day:
             self._stv_market(day)
         self._market_history()
+        day = self._radar_due() if time.time() >= self._radar_next else None
+        if day:
+            self._radar(day)
+
+    RADAR_RETRY_SECONDS = 600
+    RADAR_TRIES = 3
+
+    def _radar_due(self) -> str | None:
+        """The day of the morning radar when it is due: a session day from ``radar_time`` to
+        ``radar.WINDOW_END``, once (the stamp)."""
+        from tradingagents.market import vn_rules
+        from vnbot import radar
+
+        if not self.settings.radar:
+            return None
+        now = vn_rules.now_vn()
+        day, hhmm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+        if not vn_rules.is_session_day(day) or hhmm < self.settings.radar_time or hhmm >= radar.WINDOW_END:
+            return None
+        return None if self._read(self._radar_stamp) == day else day
+
+    def _radar(self, day: str) -> None:
+        """Send the radar; a failure is retried in 10 minutes, three times, then the day is skipped."""
+        from vnbot import radar
+
+        if self._radar_day != day:
+            self._radar_day, self._radar_tries = day, 0
+        try:
+            llm = None
+            try:
+                llm = self.critic_llm()
+            except Exception as exc:  # noqa: BLE001 - level 1 then (the report says so)
+                logger.warning("Radar: không có AI: %s", exc)
+            text = radar.report(self._now_vn(), self.watchlist.get(), llm)
+        except Exception as exc:  # noqa: BLE001 - tried again, then given up for the day
+            self._radar_tries += 1
+            logger.exception("Radar sáng %s lỗi (lần %d)", day, self._radar_tries)
+            if self._radar_tries < self.RADAR_TRIES:
+                self._radar_next = time.time() + self.RADAR_RETRY_SECONDS
+                return
+            text = f"⚠️ Radar sáng {day[8:10]}/{day[5:7]} không chạy được sau {self._radar_tries} lần: {exc}. Gõ /radar để thử lại."
+        self._radar_tries, self._radar_next = 0, 0.0
+        write_text_atomic(self._radar_stamp, day)
+        self.notify(text)
+
+    @staticmethod
+    def _now_vn():
+        from tradingagents.market import vn_rules
+
+        return vn_rules.now_vn()
 
     def _market_history(self) -> None:
         """The market-wide history of closes and volumes (``vnbot.dotbien``, the RS score of

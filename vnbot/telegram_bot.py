@@ -9,6 +9,7 @@ Commands (Vietnamese, like lananh-main's bot):
                                SEPA/CANSLIM, shark flow, a reading - code only
     /dotbien [NGƯỠNG]          the volume-spike list of the market (vnbot.dotbien)
     /camap MÃ                  the session's big orders, buy against sell (vnbot.camap)
+    /radar                     the morning radar now: VN100 + watchlist at a technical inflection (vnbot.radar)
     /theodoi [MÃ1,MÃ2,...]     show or set the daily watchlist
     /trangthai                 queue and AI provider status
     /danhmuc /lenh /hieuchinh  the trading bot: books, next session's orders, calibration
@@ -114,7 +115,7 @@ HELP = (
     "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút); thêm 2026-10-01: tại ngày đó\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
     "/soi FPT - soi nhanh một mã: giá/trần/sàn, KL so MA20, khối ngoại, P/B, RS, SEPA/CANSLIM, cá mập, nhận định\n"
-    "/dotbien - đột biến khối lượng toàn thị trường (KL ≥ 150% TB20) · /camap FPT - dòng tiền cá mập\n"
+    "/dotbien - đột biến KL toàn thị trường (≥150% TB20) · /camap FPT - cá mập · /radar - radar sáng\n"
     "/phanbien FPT - AI phản biện quyết định hệ thống (1 lượt AI) · /phanbien - AI đúng bao nhiêu\n"
     "/dinhgia FPT - định giá bot tự tính: vùng, Bear/Base/Bull, có gì đổi · /dinhgia - mã theo dõi (/dg)\n"
     "/theodoi FPT,HPG,VCB - danh sách báo cáo tự động mỗi ngày · /theodoi - xem\n"
@@ -584,6 +585,8 @@ class TelegramBot:
                 from vnbot import camap
 
                 self.send(chat_id, camap.command(args))
+            elif command == "/radar":
+                self._radar(chat_id, args)
             elif command in ("/dinhgia", "/dg"):
                 self._dinhgia(chat_id, args)
             elif command == "/theodoi":
@@ -653,6 +656,21 @@ class TelegramBot:
         ahead = self.jobs.position(job.id)
         wait = f" (đang có {ahead} lượt chờ trước)" if ahead else ""
         self.send(chat_id, f"⏳ Đã nhận {code} ngày {day}{wait}. Quyết định hệ thống sẽ tới trước, báo cáo đầy đủ của các agent tới sau vài phút.")
+
+    def _radar(self, chat_id, args: str) -> None:
+        """/radar: the morning radar now (vnbot.radar), on this chat's lane (a minute or two)."""
+        from vnbot import radar
+        from vnbot.critic import default_llm
+
+        if (args or "").strip():
+            raise ValueError("Dùng: /radar (quét VN100 + watchlist ngay, như bản tin 09:30).")
+        self.send(chat_id, "⏳ Radar đang quét VN100 + watchlist trên nến ngày gần nhất (1-2 phút; AI đọc tin mã đạt chuẩn)...")
+        if self._critic_llm is None:
+            try:
+                self._critic_llm = default_llm(self.settings)
+            except Exception as exc:  # noqa: BLE001 - level 1 then
+                logger.warning("Radar: không có AI: %s", exc)
+        self.send(chat_id, radar.command(args, self.watchlist.get(), self._critic_llm))
 
     def _dinhgia(self, chat_id, args: str) -> None:
         """/dinhgia [MÃ]: the bot's own valuation card (vnbot.dinhgia), the owner's beside it."""
