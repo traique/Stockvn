@@ -67,6 +67,26 @@ def fake_ticker(inst_id):
 
 
 quote._okx_ticker = fake_ticker
+# daily candles (UTC), newest first: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm]
+DAY_MS = 86_400_000
+T0 = 1795219200000                                   # 2026-11-21 00:00 UTC
+BTC_CLOSES = [55_000, 56_100, 55_539, 57_200, 58_000, 58_931.8]          # 21/11 .. 26/11, the last still running
+CANDLES = {"BTC-USDT-SWAP": [[str(T0 + i * DAY_MS), str(c), str(c * 1.02), str(c * 0.97), str(c), "1", "1",
+                              str(1e9 * (i + 1)), "0" if i == len(BTC_CLOSES) - 1 else "1"]
+                             for i, c in enumerate(BTC_CLOSES)][::-1],
+           "PEPE-USDT": [[str(T0 + 4 * DAY_MS), "0.0000034", "0.0000036", "0.0000033", "0.0000035", "1", "2e6", "2000000", "1"],
+                         [str(T0 + 5 * DAY_MS), "0.0000035", "0.0000036", "0.0000034", "0.0000034418", "1", "5e5", "500000", "0"]][::-1]}
+CANDLES_ASKED: list[tuple] = []
+
+
+def fake_candles(inst_id, limit):
+    CANDLES_ASKED.append((inst_id, limit))
+    if inst_id not in CANDLES:
+        return None
+    return CANDLES[inst_id][:limit]
+
+
+quote._okx_candles = fake_candles
 
 
 def wait_for(cond, seconds=10.0):
@@ -218,6 +238,43 @@ bot._handle(m(111, 111, "/alt btc-usdt-swap eth"))
 t.ok("/alt btc-usdt-swap eth: both prices (OKX's instId understood as BTC), the context once",
      "BTC: 58,931.8" in last(111) and "ETH: 1,621.78" in last(111) and len(SEEN) == n + 2
      and last(111).count("trả lời btc") == 1, last(111))
+# several days: "/alt btc 7d" - OKX's daily candles (faked), never the child
+for words, want in ((["btc", "7d"], (["BTC"], 7)), (["BTC", "eth", "14D"], (["BTC", "ETH"], 14)), (["sol", "1m"], (["SOL"], 30)),
+                    (["btc", "2w"], (["BTC"], 14)), (["btc", "7", "ngày"], (["BTC"], 7)), (["1inch", "3d"], (["1INCH"], 3)),
+                    (["btc"], (["BTC"], None)), (["7d"], None)):
+    t.ok(f"coin_lookup {words}: {want}", quote.coin_lookup(words) == want, quote.coin_lookup(words))
+t.ok("coin_symbols leaves the period out", quote.coin_symbols(["btc", "7d"]) == ["BTC"])
+n = len(SEEN)
+CANDLES_ASKED.clear()
+bot._handle(m(111, 111, "/alt btc 5d"))
+lines = last(111).splitlines()
+t.ok("/alt btc 5d: 6 candles asked (the day before the window too), the child not asked",
+     CANDLES_ASKED == [("BTC-USDT-SWAP", 6)] and len(SEEN) == n, (CANDLES_ASKED, len(SEEN), n))
+t.ok("...the head: the coin, the days, UTC candles", lines[0] == "🪙 Altcoin › giá BTC 5 ngày"
+     and lines[1].startswith("📅 5 ngày gần nhất trên OKX lúc ") and lines[1].endswith("(nến ngày UTC, mở 07:00 giờ VN)"), lines[:2])
+t.ok("...the period against the close before it, the span, the contract",
+     lines[3] == f"🟢 BTC: 58,931.8 USDT {(58_931.8 / 55_000 - 1) * 100:+.2f}% sau 5 ngày (22/11 – 26/11, hợp đồng USDT-SWAP)", lines[3])
+t.ok("...high and low with their days, the average volume of the closed days",
+     lines[4] == "   Cao nhất 60,110.436 (26/11) · Thấp nhất 53,872.83 (23/11) · KL TB 3.50 tỷ USDT/ngày", lines[4])
+t.ok("...each day newest first, its change, volume; today '(đang chạy)'",
+     lines[5] == "   26/11: 58,931.8 🟢 +1.61% · KL 6.00 tỷ USDT (đang chạy)"
+     and lines[6] == "   25/11: 58,000 🟢 +1.40% · KL 5.00 tỷ USDT"
+     and lines[8] == "   23/11: 55,539 🔴 -1.00% · KL 3.00 tỷ USDT"
+     and lines[9] == "   22/11: 56,100 🟢 +2.00% · KL 2.00 tỷ USDT", lines[5:10])
+bot._handle(m(111, 111, "alt pepe foo 7d"))
+t.ok("'alt pepe foo 7d': the spot pair's few days (no day before: 'từ ngày niêm yết'), an unknown coin said so",
+     "⚪ PEPE: 0.0000034418 USDT · 2 ngày từ ngày niêm yết (25/11 – 26/11, spot USDT)" in last(111)
+     and "   26/11: 0.0000034418 🔴 -1.66% · KL 500,000 USDT (đang chạy)" in last(111)
+     and "❔ FOO: OKX không có cặp FOO-USDT" in last(111) and len(SEEN) == n, last(111))
+bot._handle(m(111, 111, "/alt btc 365d"))
+t.ok("more than 90 days: 90, said so", "📅 90 ngày gần nhất" in last(111) and "(Mỗi lần xem tối đa 90 ngày.)" in last(111)
+     and CANDLES_ASKED[-1] == ("BTC-USDT-SWAP", 91), last(111)[:200])
+CANDLES_OK = quote._okx_candles
+quote._okx_candles = lambda inst, limit: (_ for _ in ()).throw(RuntimeError("OKX 50011: Too Many Requests"))
+bot._handle(m(111, 111, "/alt eth 7d"))
+quote._okx_candles = CANDLES_OK
+t.ok("OKX failing for the candles: said so", "⚠️ ETH: chưa lấy được giá OKX, thử lại sau ít phút" in last(111), last(111))
+
 OKX_ERR = quote._okx_ticker
 quote._okx_ticker = lambda inst: (_ for _ in ()).throw(RuntimeError("OKX 50011: Too Many Requests"))
 bot._handle(m(111, 111, "/alt eth"))

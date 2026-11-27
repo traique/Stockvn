@@ -135,8 +135,14 @@ class Bridge:
         ``reply(text)`` answers in that chat."""
         words = args.lower().split()
         cmd = words[0] if words else ""
-        coins = None if cmd in NOT_COINS else quote.coin_symbols(args.split())
-        if coins:
+        lookup = None if cmd in NOT_COINS else quote.coin_lookup(args.split())
+        if lookup:
+            coins, days = lookup
+            if days is not None:              # "/alt btc 7d": the daily candles, no context from the child
+                text = f"{PREFIX}giá {' '.join(coins[:quote.MAX_SYMBOLS])} {days} ngày\n{quote.coins_history_text(coins, days)}"
+                for part in parts(text):
+                    reply(part)
+                return
             self._coins(coins, key, source, reply)
             return
         if not self.enabled:
