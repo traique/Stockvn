@@ -38,6 +38,10 @@ t.ok("assistant on by default", hoidap.enabled())
 # ── the facts, every source faked ──
 QUOTES = {"FPT": {"code": "FPT", "price": 45300.0, "ref": 45700.0, "open": 45600.0, "high": 46000.0, "low": 44650.0,
                   "volume": 15670800, "day": "2026-11-20", "index": False},
+          "HPG": {"code": "HPG", "price": 20450.0, "ref": 20450.0, "open": 20300.0, "high": 20500.0, "low": 20150.0,
+                  "volume": 15650000, "day": "2026-11-20", "index": False},
+          "VCB": {"code": "VCB", "price": 60000.0, "ref": 59500.0, "open": 59500.0, "high": 60200.0, "low": 59400.0,
+                  "volume": 2000000, "day": "2026-11-20", "index": False},
           "VNINDEX": {"code": "VNINDEX", "price": 1688.79, "ref": 1689.62, "open": None, "high": None, "low": None,
                       "volume": None, "day": "2026-11-20", "index": True}}
 
@@ -193,7 +197,8 @@ bot._handle(msg(111, 111, "FPT"))
 t.ok("codes only: the price, not the companion", sent[-1][1].startswith("💹 Giá realtime"), sent[-1][1][:60])
 bot._handle(msg(111, 111, "/start"))
 t.ok("/start: the welcome, not the wall of commands", sent[-1][1].startswith("👋 Chào anh") and "/trogiup" in sent[-1][1] and len(sent[-1][1]) < 900, sent[-1][1][:80])
-t.ok("/trogiup names the companion, still one message", "Hỏi gì cũng được" in help_text and len(help_text) <= tb.MAX_MESSAGE)
+t.ok("/trogiup names the companion, still one message even with the altcoin line",
+     "Nhắn tự nhiên, không cần nhớ lệnh" in help_text and len(help_text) + 60 <= tb.MAX_MESSAGE, len(help_text))
 os.environ["HOIDAP"] = "0"
 bot._handle(msg(111, 111, "FPT có nên mua không"))
 t.ok("HOIDAP=0: the command list as before", sent[-1][1] == help_text)
@@ -202,5 +207,75 @@ t.ok("/hoi still works when off", sent[-1][1].startswith("🤝 "))
 del os.environ["HOIDAP"]
 bot._handle(msg(222, 222, "FPT có nên mua không"))
 t.ok("a stranger gets nothing from the companion", "chưa cho phép" in sent[-1][1])
+
+# ── plain words that mean a command (no AI), the judgement questions left to the companion ──
+ROUTES = {"soi FPT": ("/soi", "FPT"), "Định giá FPT?": ("/dinhgia", "FPT"), "cá mập hpg": ("/camap", "hpg"),
+          "đột biến": ("/dotbien", ""), "đột biến 200": ("/dotbien", "200"), "radar hôm nay": ("/radar", ""),
+          "/phân tích FPT": ("/phantich", "FPT"), "nhanh FPT": ("/nhanh", "FPT"), "xem FPT": ("/xem", "FPT"),
+          "FPT sao rồi?": ("/xem", "FPT"), "fpt hpg hôm nay": ("/xem", "FPT HPG"), "VCB ra sao": ("/xem", "VCB"),
+          "giá FPT bao nhiêu": ("/gia", "FPT"), "FPT bao nhiêu": ("/gia", "FPT"), "danh mục của anh sao rồi?": ("/ts", ""),
+          "tài sản": ("/ts", ""), "vì sao chưa mua FPT": ("/vikhongmua", "FPT"), "vì sao chưa mua": ("/vikhongmua", ""),
+          "Lệnh bot phiên tới?": ("/lenh", ""), "trạng thái bot": ("/trangthai", ""), "theo dõi FPT,HPG": ("/theodoi", "FPT,HPG"),
+          "FPT có nên mua không": None, "FPT thế nào, có ổn không": None, "hôm nay thị trường thế nào": None,
+          "mua cao bán thấp": None, "danh mục FPT có ổn không": None, "tôi đang lỗ VCB, nên làm gì": None, "xem": None}
+got = {q: hoidap.route(q, ["FPT"]) for q in ROUTES}
+t.ok("route: plain words -> the command; judgement -> the companion", got == ROUTES,
+     {q: (got[q], ROUTES[q]) for q in ROUTES if got[q] != ROUTES[q]})
+t.ok("plain_words strips diacritics", hoidap.plain_words("Định giá FPT, cá mập?") == "dinh gia fpt ca map")
+
+# ── /xem: the one card ──
+card = hoidap.overview("FPT", NOW, account=Account(), data_dir=DATA, monitor=Monitor())
+t.ok("/xem card: header, price, Quant block, holding, alerts, pointers",
+     card.startswith("🔎 FPT · tất cả bot biết lúc 10:32 20/11 (không gọi AI)") and "🔴 FPT: 45.300" in card
+     and "🤖 Quyết định của bot" in card and "THEO DÕI (WATCH)" in card and "💼 anh đang giữ FPT 500 cp" in card
+     and "🔔 Cảnh báo hôm nay về mã này:" in card and "- 09:40 ⛔" in card and "/soi FPT" in card
+     and "FPT có nên mua không?" in card, card)
+try:
+    hoidap.overview("XYZ", NOW, data_dir=DATA)
+    t.ok("/xem of an unknown code refused", False)
+except ValueError as exc:
+    t.ok("/xem of an unknown code refused", "Không có mã XYZ" in str(exc))
+t.ok("related footer: the held stock, once, with the pointers",
+     hoidap.related(["FPT", "HPG"], Account(), NOW).startswith("💼 FPT: anh đang giữ FPT 500 cp")
+     and "/xem FPT" in hoidap.related(["FPT"], Account(), NOW) and hoidap.related(["HPG"], Account(), NOW) == ""
+     and hoidap.related(["FPT"], None, NOW) == "")
+
+# ── the bot: routing, /xem, grouped spelling, the suggestion, the footer ──
+from vnbot import soi  # noqa: E402
+
+soi.command = lambda args, data_dir, now=None, progress=None: f"SOI {args}"
+bot._handle(msg(111, 111, "soi fpt"))
+t.ok("'soi fpt' runs /soi (no AI), with the held position below", sent[-1][1].startswith("SOI fpt") and "💼 FPT: anh đang giữ FPT 500 cp" in sent[-1][1], sent[-1][1])
+bot._handle(msg(111, 111, "FPT sao rồi?"))
+t.ok("'FPT sao rồi?' is /xem", sent[-1][1].startswith("🔎 FPT · tất cả bot biết") and sent[-2][1].startswith("⏳ Đang gom tất cả về FPT"), sent[-1][1][:80])
+bot._handle(msg(111, 111, "/xem FPT HPG VCB MWG"))
+t.ok("/xem: at most 3 codes, one card each", sum(1 for c, x in sent[-6:] if x.startswith("🔎 ")) == 3)
+bot._handle(msg(111, 111, "/xem"))
+t.ok("/xem without a code: the usage", sent[-1][1].startswith("⚠️ Nhập mã cổ phiếu, ví dụ: /xem FPT"))
+bot._handle(msg(111, 111, "FPT"))
+t.ok("the price reply drags the held position along", sent[-1][1].startswith("💹 Giá realtime") and "\n\n💼 FPT: anh đang giữ FPT 500 cp" in sent[-1][1] and "/xem FPT" in sent[-1][1], sent[-1][1])
+bot._handle(msg(111, "zoom:abc", "/hôm nay thị trường thế nào"))
+t.ok("Zoom '/hôm nay ...' is not read as a typo of /hoi: the companion", sent[-1][1].startswith("🤝 "), sent[-1][1][:80])
+bot._handle(msg(111, 111, "giá FPT bao nhiêu"))
+t.ok("'giá FPT bao nhiêu' is the price", sent[-1][1].startswith("💹 Giá realtime"))
+bot._handle(msg(111, 111, "/gia"))
+t.ok("/gia without a code: the usage", sent[-1][1].startswith("⚠️ Nhập mã cổ phiếu, ví dụ: /gia FPT"))
+called = []
+bot._taisan = lambda chat_id, command, args, message, from_zoom: called.append((command, args))
+bot._handle(msg(111, 111, "danh mục của anh sao rồi?"))
+t.ok("'danh mục của anh sao rồi?' is /ts", called[-1] == ("/ts", ""), called)
+bot._handle(msg(111, 111, "/ts mua FPT 100 56300"))
+t.ok("'/ts mua ...' is /tsmua", called[-1] == ("/tsmua", "FPT 100 56300"), called)
+bot._handle(msg(111, 111, "/taisan kiemtra FPT 56300 100"))
+t.ok("'/taisan kiemtra ...' is /tskiemtra", called[-1] == ("/tskiemtra", "FPT 56300 100"), called)
+bot._handle(msg(111, 111, "/bot lenh"))
+t.ok("'/bot lenh' is /lenh (the trading bot is off here)", sent[-1][1] == "⚠️ Bot giao dịch đang tắt (TRADE_MODE=off)." or "Bot giao dịch" in sent[-1][1], sent[-1][1])
+t.ok("regroup leaves the rest alone", tb.regroup("/stv", "FPT") == ("/stv", "FPT") and tb.regroup("/ts", "") == ("/ts", "")
+     and tb.regroup("/bot", "xyz") == ("/bot", "xyz") and tb.regroup("/stv", "quet") == ("/stvquet", ""))
+bot._handle(msg(111, 111, "/dinhgai FPT"))
+t.ok("a mistyped command: the closest suggested, with its argument", sent[-1][1].startswith("❓ Không có lệnh /dinhgai. Ý anh là /dinhgia FPT?"), sent[-1][1])
+bot._handle(msg(111, 111, "/khongcolenhnay"))
+t.ok("nothing close: the command list", sent[-1][1] == bot._help())
+t.ok("the help names /xem and the grouped spelling", "/xem FPT" in bot._help() and "/ts mua ... = /tsmua" in bot._help() and len(bot._help()) <= tb.MAX_MESSAGE, len(bot._help()))
 
 t.done()

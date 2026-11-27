@@ -19,6 +19,14 @@ the figures given, says when it does not know, and never gives an order: the tra
 of the bot stays the Quant Engine's (``/nhanh``), the discipline rules stay vnbot.kyluat's.
 Without a provider, or the budget spent, the answer is the facts alone, said so - never the
 command list. ``HOIDAP=0`` turns the assistant off (free text then shows the command list again).
+
+Before the AI, ``route`` reads the plain words that mean a command (``soi FPT``, ``định giá
+FPT``, ``cá mập HPG``, ``đột biến``, ``radar``, ``danh mục``, ``vì sao chưa mua``, ``FPT sao rồi``,
+``giá FPT bao nhiêu``...) and the bot runs that command at once, no AI request: a question of
+fact gets the figures, a question of judgement ("có nên", "làm gì", "vì sao", "đánh giá"...)
+gets the companion. ``/xem MÃ`` (also "FPT sao rồi", "xem FPT") is the one card of everything
+the bot knows about a stock (``overview``): price, the Quant Engine's decision, the valuation
+card, the Tài sản position, the day's alerts on it - no AI.
 """
 
 from __future__ import annotations
@@ -80,6 +88,39 @@ _STOP = {"MUA", "BAN", "CAO", "KHI", "NAM", "BAO", "SAO", "DAU", "HAY", "THI", "
 _WORD = re.compile(r"[A-Za-z0-9]{3}")
 _SPLIT = re.compile(r"[\s,;:.!?()\[\]\"'/+&]+")
 
+# ─── plain words that mean a command (matched on the text without diacritics) ───
+# (command, the openings that mean it; the rest of the message is its argument)
+COMMAND_WORDS = (
+    ("/soi", ("soi nhanh", "soi")),
+    ("/dinhgia", ("dinh gia", "dg")),
+    ("/camap", ("ca map", "camap", "dong tien ca map")),
+    ("/dotbien", ("dot bien khoi luong", "dot bien", "dotbien", "khoi luong dot bien")),
+    ("/radar", ("radar",)),
+    ("/phantich", ("phan tich day du", "phan tich", "phantich")),
+    ("/phanbien", ("phan bien", "phanbien")),
+    ("/nhanh", ("nhanh", "quyet dinh bot", "quyet dinh")),
+    ("/xem", ("xem", "tong quan", "tat ca ve")),
+    ("/gia", ("gia",)),
+    ("/theodoi", ("theo doi", "watchlist")),
+    ("/lenh", ("lenh bot phien toi", "lenh bot", "lenh phien toi", "lenh")),
+    ("/trangthai", ("trang thai",)),
+    ("/phienban", ("phien ban",)),
+    ("/ts", ("danh muc", "tai san", "ts")),
+    ("/vikhongmua", ("vi sao chua mua", "vi sao khong mua", "vi sao chua co mua", "tai sao chua mua", "tai sao khong mua",
+                     "sao chua mua")),
+)
+# words that ask for a judgement: the companion (AI), never a bare command
+JUDGEMENT = ("co nen", "nen ", " nen", "lam gi", "tai sao", "vi sao", "danh gia", "nhan xet", "y kien", "rui ro",
+             "giu hay", "ban hay", "mua hay", "co on", "hop ly", "khuyen", "chien luoc", "ke hoach", "giai thich",
+             "nghia la", "sao lai", "co dang", "co tot", "tot khong", "xau", "lo qua", "so ", "lo lang", "dang lo")
+# words that only ask how a stock (or the portfolio) is doing: /xem (or /ts), no AI
+STATUS_WORDS = {"sao", "roi", "the", "nao", "hom", "nay", "ra", "tinh", "hinh", "dang", "gio", "luc", "nhu", "thi",
+                "cua", "anh", "toi", "em", "minh", "la", "co", "gi", "moi", "khong", "khoe", "on", "chua", "hien", "tai"}
+PRICE_WORDS_PLAIN = {"gia", "bao", "nhieu", "khop", "dong", "cua", "hom", "nay", "cao", "thap", "bay", "gio", "luc", "la",
+                     "bao nhieu"}
+# the trailing words /ts takes as "the portfolio now" ("danh mục của anh sao rồi?")
+_TS_TAIL = STATUS_WORDS | {"tien", "that", "ca", "danh", "muc", "tai", "san"}
+
 
 def enabled() -> bool:
     return (os.environ.get("HOIDAP") or "1").strip().lower() not in ("0", "off", "false", "no")
@@ -117,6 +158,77 @@ def codes_in(text: str, known: list[str] | tuple[str, ...] = ()) -> list[str]:
             if code not in out:
                 out.append(code)
     return out[:MAX_CODES]
+
+
+def plain_words(text: str) -> str:
+    """``text`` in lower case without diacritics ("Định giá FPT?" -> "dinh gia fpt"), words apart."""
+    import unicodedata
+
+    low = (text or "").replace("đ", "d").replace("Đ", "D")
+    ascii_ = unicodedata.normalize("NFD", low).encode("ascii", "ignore").decode()
+    return " ".join(w for w in _SPLIT.split(ascii_.lower()) if w)
+
+
+def _code_words(words: list[str], original: str, known) -> tuple[list[str], list[str]]:
+    """(the codes among ``words``, the other words). A three-letter word is a code when typed in
+    capitals in the original, known (watchlist, holdings), or not a common Vietnamese word."""
+    caps = {w.upper() for w in _SPLIT.split(original or "") if w.isupper()}
+    known_set = {k.upper() for k in known}
+    codes, rest = [], []
+    for w in words:
+        up = w.upper()
+        plain_word = w.lower() in STATUS_WORDS or w.lower() in PRICE_WORDS_PLAIN     # "roi", "nao": never a code
+        if _WORD.fullmatch(up) and any(ch.isalpha() for ch in up) and (up in caps or up in known_set
+                                                                        or (up not in _STOP and not plain_word)):
+            if up not in codes:
+                codes.append(up)
+        else:
+            rest.append(w)
+    return codes, rest
+
+
+def route(text: str, known: list[str] | tuple[str, ...] = ()) -> tuple[str, str] | None:
+    """The command a plain message means, as (command, argument), or None when it is a question
+    for the companion (or nothing the bot recognises). ``known``: the codes the bot follows."""
+    body = (text or "").strip()
+    if body.startswith("/"):
+        body = body[1:]
+    plain = plain_words(body)
+    if not plain:
+        return None
+    for command, openings in COMMAND_WORDS:
+        for opening in openings:
+            if plain == opening or plain.startswith(opening + " "):
+                rest = body.split(None, len(opening.split()))[len(opening.split()):]
+                arg = rest[0].strip(" ?.!") if rest else ""
+                if command == "/ts":
+                    # "danh mục của anh sao rồi?": the overview; "danh mục FPT ..." is not a command
+                    return ("/ts", "") if all(w in _TS_TAIL for w in plain_words(arg).split()) else None
+                if command == "/xem" and not arg:
+                    return None
+                if command in ("/radar", "/dotbien", "/lenh", "/trangthai", "/phienban", "/vikhongmua"):
+                    tail = plain_words(arg).split()
+                    if all(w in STATUS_WORDS | {"bot", "phien", "toi", "ngay", "bay"} for w in tail):
+                        arg = "" if command != "/dotbien" or not arg.isdigit() else arg
+                        if command == "/dotbien" and tail and tail[0].isdigit():
+                            arg = tail[0]
+                if command in ("/gia", "/xem"):
+                    codes, rest_words = _code_words(plain_words(arg).split(), arg, known)
+                    if not codes or any(w not in PRICE_WORDS_PLAIN | STATUS_WORDS for w in rest_words):
+                        return None
+                    return command, " ".join(codes)
+                return command, arg
+    padded = f" {plain} "
+    if any(j in padded or padded.startswith(" " + j) for j in JUDGEMENT):
+        return None
+    codes, rest = _code_words(plain.split(), body, known)
+    if not codes or len(codes) > MAX_CODES:
+        return None
+    if rest and all(w in PRICE_WORDS_PLAIN for w in rest) and any(w in ("gia", "bao", "nhieu", "khop") for w in rest):
+        return "/gia", " ".join(codes)
+    if rest and all(w in STATUS_WORDS for w in rest):
+        return "/xem", " ".join(codes)
+    return None
 
 
 def _wants(text: str, words) -> bool:
@@ -313,6 +425,63 @@ def context(question: str, now: datetime, *, codes: list[str], account=None, dat
     if watchlist:
         parts.append("Watchlist: " + ", ".join(list(watchlist)[:30]) + ".")
     return "\n".join(parts), kept
+
+
+def overview(code: str, now: datetime, *, account=None, data_dir=None, monitor=None) -> str:
+    """``/xem MÃ``: everything the bot knows about one stock on one card, no AI."""
+    from tradingagents.market import vn_rules
+
+    now = now.astimezone(vn_rules.VN_TZ)
+    day = now.strftime("%Y-%m-%d")
+    lines = stock_lines(code, now, account=account, data_dir=data_dir)
+    if lines is None:
+        raise ValueError(f"Không có mã {code} trên HOSE/HNX/UPCoM.")
+    out = [f"🔎 {code} · tất cả bot biết lúc {now:%H:%M %d/%m} (không gọi AI)"]
+    for line in lines:
+        if line.startswith("Quant Engine ("):
+            out += ["", "🤖 Quyết định của bot (Quant Engine, trên nến đóng cửa):"]
+            out += [x for x in line.partition(": ")[2].splitlines() if x.strip()]
+        elif line.startswith("Định giá bot"):
+            out += ["", "📐 " + line]
+        elif line.startswith("Tài sản:"):
+            out += ["", "💼 " + line.partition(": ")[2]]
+        else:
+            out.append(line)
+    try:
+        rows = [r for r in (monitor.today(day) if monitor is not None else []) if code in str(r.get("text", ""))]
+    except Exception:  # noqa: BLE001
+        rows = []
+    if rows:
+        out += ["", "🔔 Cảnh báo hôm nay về mã này:"] + [f"- {r.get('at', '')} {r.get('text', '')}"[:300] for r in rows[-ALERTS_SHOWN:]]
+    out += ["", f"Soi kỹ: /soi {code} · định giá: /dinhgia {code} · cá mập: /camap {code} · AI phản biện: /phanbien {code}",
+            f"Hỏi ý kiến: nhắn \"{code} có nên mua không?\" (1 lượt AI). Tham khảo, không phải lệnh đặt."]
+    return "\n".join(out)
+
+
+def held_line(account, code: str, now: datetime) -> str:
+    """One line of the Tài sản position in ``code`` for the related footer; "" when not held or no portfolio."""
+    if account is None:
+        return ""
+    try:
+        if code not in account.book().holdings:
+            return ""
+        return holding_lines(account, code, now)[0].partition(": ")[2]
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Hỏi đáp: vị thế %s: %s", code, exc)
+        return ""
+
+
+def related(codes: list[str], account, now: datetime) -> str:
+    """The lines a stock answer drags along: the Tài sản position in it (when held) and where to see
+    the rest; "" when nothing is held. Appended by the bot to the price, /nhanh, /soi, /dinhgia replies."""
+    held = [(c, held_line(account, c, now)) for c in codes]
+    held = [(c, line) for c, line in held if line]
+    if not held:
+        return ""
+    out = [f"💼 {c}: {line}" for c, line in held]
+    first = held[0][0]
+    out.append(f"Tất cả về {first}: /xem {first} · hỏi ý kiến: nhắn \"{first} có nên giữ không?\"")
+    return "\n".join(out)
 
 
 # ─── the answer ──────────────────────────────────────────────────────────────

@@ -27,13 +27,18 @@ from pathlib import Path
 
 VERSION = "v1.24.0"
 RELEASED = "2026-11-27"
-RELEASE_BUILD = "b91dc18"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "239a3b2"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v1.24.0", "2026-11-27", (
-        "Người đồng hành: nhắn tự nhiên (FPT có nên mua không? · danh mục sao rồi?) hoặc /hoi câu hỏi",
+        "Không cần nhớ lệnh: lời thường nghĩa là lệnh nào bot chạy ngay lệnh đó, không AI (soi FPT, định giá FPT,",
+        "FPT sao rồi?, giá FPT bao nhiêu, danh mục, vì sao chưa mua, radar...); gõ sai lệnh bot gợi ý lệnh gần nhất",
+        "/xem FPT: tất cả về một mã trên một thẻ - giá, quyết định bot, định giá, vị thế Tài sản, cảnh báo hôm nay",
+        "Gõ gộp theo nhóm: /ts mua ... = /tsmua ..., /stv quet = /stvquet, /bot lenh = /lenh",
+        "Tra giá, /nhanh, /soi, /dinhgia về mã đang giữ luôn kèm vị thế trong Tài sản và lối sang /xem",
+        "Người đồng hành: câu hỏi ý kiến (FPT có nên mua không? · tôi đang lỗ VCB, nên làm gì?) hoặc /hoi",
         "Bot gom giá, Quant Engine, định giá, Tài sản, cảnh báo hôm nay rồi trả lời bằng 1 lượt AI",
         "Nhớ 6 lượt hội thoại trong 2 ngày (/hoi quen xoá); không có AI hay hết hạn mức: trả lời bằng số liệu",
         "HOIDAP=0 tắt (tin lạ trả bảng lệnh như trước); /start là lời chào ngắn, /trogiup vẫn đủ lệnh",
