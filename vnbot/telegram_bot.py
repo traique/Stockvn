@@ -17,7 +17,8 @@ Commands (Vietnamese, like lananh-main's bot):
     /von SỐ_TIỀN               set the real book's cash (signal mode)
     /id                        your Telegram id (to put in TELEGRAM_ALLOWED_IDS)
     /alt <lệnh>                the altcoin bot (ALTCOIN_ENABLED=1), through vnbot.altcoin_bridge;
-                               /alt btc, /alt eth sol: a coin's realtime price on OKX (vnbot.quote)
+                               /alt btc, /alt eth sol: a coin's realtime price on OKX (vnbot.quote);
+                               /alt btc 7d: its last 7 daily candles
     FPT · FPT HPG · giá FPT    a message of stock codes only: their realtime price (vnbot.quote);
     FPT 7d · FPT HPG 14d       with a period: the last N sessions of each
 
@@ -109,7 +110,7 @@ _MD_NOISE = re.compile(r"(\*\*|__|^#+\s*)", re.MULTILINE)
 
 HELP = (
     "TradingAgents VN {version} - phân tích cổ phiếu HOSE/HNX/UPCoM.\n\n"
-    "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc - giá coin OKX\n"
+    "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc · /alt btc 7d - giá coin OKX\n"
     "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút); thêm 2026-10-01: tại ngày đó\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
     "/soi FPT - soi nhanh một mã: giá/trần/sàn, KL so MA20, khối ngoại, P/B, RS, SEPA/CANSLIM, cá mập, nhận định\n"
@@ -132,10 +133,10 @@ HELP = (
     "/stv - tổng quan, so với các sổ của bot · /stv FPT - tín hiệu một mã\n"
     "/stvdanhmuc - sổ ảo so sánh Siêu tín hiệu (danh mục tiền thật: /ts)\n"
     "/stvtheodoi - watchlist riêng (60 mã): bo NVL · them HAG · dat MÃ1,MÃ2,... · macdinh · hoantac\n"
-    "/stvquet - quét danh mục Tài sản + watchlist ngay\n"
+    "/stvquet - quét danh mục Tài sản + watchlist\n"
     "/stvdoichieu - đổi chiều trong phiên (bot ước tính); ngoài giờ: mức đổi chiều phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: đổi chiều trong phiên, so với trang\n"
-    "/stvsang - bản tin sáng ngay bây giờ\n\n"
+    "/stvsang - bản tin sáng ngay\n\n"
     "AI thẩm định tín hiệu (Gemini qua 9Router, cần SIEUTINHIEU=1; ghi lại để kiểm chứng, không phải lệnh đặt):\n"
     "/thamdinh - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến danh mục, thành tích\n"
     "/thamdinh chay - chạy ngay (trong phiên: giá khớp; sau 15:10: tín hiệu đã chốt) · "

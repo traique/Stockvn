@@ -25,13 +25,18 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.21.0"
+VERSION = "v1.22.0"
 RELEASED = "2026-11-27"
-RELEASE_BUILD = "69c396d"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "f1b3e4a"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.22.0", "2026-11-27", (
+        "Giá coin nhiều ngày: alt btc 7d · alt btc eth 14d · alt sol 2w (14 ngày) · alt btc 1m (30 ngày), tối đa 90",
+        "Nến ngày OKX theo UTC (mở 07:00 giờ VN): giá đóng cửa, % mỗi ngày, KL USDT; hôm nay ghi (đang chạy)",
+        "Thay đổi cả kỳ, cao/thấp nhất kèm ngày, KL trung bình; chạy cả khi bot Altcoin tắt",
+    )),
     ("v1.21.0", "2026-11-27", (
         "Giá nhiều phiên: FPT 7d · FPT 14d · fpt hpg 7d · FPT 2w (10 phiên) · VNINDEX 1m (22 phiên), tối đa 60",
         "Giá khớp thực tế từng phiên (VNDirect), % so với tham chiếu của phiên như bảng giá, KL từng phiên",

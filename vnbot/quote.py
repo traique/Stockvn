@@ -22,6 +22,12 @@ Coin ("alt btc", "/alt btc", "alt eth sol", on Telegram and Zoom; vnbot.altcoin_
 OKX - hợp đồng USDT-SWAP mà bot Altcoin giao dịch, không có thì cặp spot USDT -, % thay đổi, cao,
 thấp và khối lượng 24h. API công khai, không cần khoá, không qua bot Altcoin (chạy cả khi Altcoin
 tắt). "BTCUSDT", "BTC-USDT", "BTC/USDT:USDT" đều hiểu là BTC.
+
+Coin nhiều ngày ("alt btc 7d", "alt btc eth 14d", "alt sol 1m", "alt btc 7 ngày"): nến ngày OKX theo UTC (mở
+07:00 giờ Việt Nam; crypto giao dịch cả tuần nên d là ngày lịch, w: 7 ngày, m: 30 ngày; tối đa
+``MAX_COIN_DAYS``), mới nhất trước: giá đóng cửa, % so với ngày trước, khối lượng USDT; nến hôm nay còn
+chạy ghi "(đang chạy)". Đầu khối: thay đổi cả kỳ so với giá đóng cửa của ngày trước kỳ, cao/thấp nhất,
+khối lượng trung bình.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -43,6 +49,9 @@ PERIOD_UNITS = {"d": 1, "ngay": 1, "ngày": 1, "phien": 1, "phiên": 1, "w": 5, 
                 "m": 22, "thang": 22, "tháng": 22}
 PRICE_WORDS = ("giá", "gia", "price")
 OKX_TICKER = "https://www.okx.com/api/v5/market/ticker"
+OKX_CANDLES = "https://www.okx.com/api/v5/market/candles"
+MAX_COIN_DAYS = 90                 # "alt btc 7d": tối đa bấy nhiêu ngày (OKX trả tới 300 nến một lần)
+COIN_PERIOD_UNITS = {"d": 1, "ngay": 1, "ngày": 1, "w": 7, "tuan": 7, "tuần": 7, "m": 30, "thang": 30, "tháng": 30}
 OKX_TIMEOUT = 8
 OKX_UNKNOWN = "51001"            # OKX: mã hợp đồng không tồn tại
 
@@ -456,16 +465,47 @@ def _history_reply(codes: list[str], sessions: int, now: datetime) -> str:
 
 def coin_symbols(words: list[str]) -> list[str] | None:
     """Các coin của "/alt btc eth" (theo thứ tự, không trùng): BTCUSDT, BTC-USDT-SWAP, BTC/USDT:USDT là
-    BTC. None khi có một chữ không phải dạng mã coin (khi đó "/alt" trả bảng lệnh như cũ)."""
+    BTC. None khi có một chữ không phải dạng mã coin (khi đó "/alt" trả bảng lệnh như cũ). Một kỳ ("7d")
+    được bỏ qua ở đây: ``coin_lookup`` đọc nó."""
+    parsed = coin_lookup(words)
+    return parsed[0] if parsed else None
+
+
+_COIN_PERIOD = re.compile(r"(\d{1,3})(d|ngay|ngày|w|tuan|tuần|m|thang|tháng)")
+
+
+def _coin_period(word: str, following: str = "") -> tuple[int, bool] | None:
+    """(số ngày, dùng cả chữ kế tiếp) của một kỳ coin: "7d", "2w", "1m", "7ngày"; hoặc "7" rồi "ngày"."""
+    low = word.lower().strip("?!.,")
+    found = _COIN_PERIOD.fullmatch(low)
+    if found:
+        return int(found.group(1)) * COIN_PERIOD_UNITS[found.group(2)], False
+    unit = following.lower().strip("?!.,")
+    if low.isdigit() and len(low) <= 3 and unit in COIN_PERIOD_UNITS and len(unit) > 1:
+        return int(low) * COIN_PERIOD_UNITS[unit], True
+    return None
+
+
+def coin_lookup(words: list[str]) -> tuple[list[str], int | None] | None:
+    """(các coin, số ngày của kỳ hoặc None) của "/alt btc eth 7d"; None khi có một chữ không phải mã coin."""
     coins: list[str] = []
-    for word in words:
-        word = word.upper().strip("?!.,")
+    days = None
+    i = 0
+    while i < len(words):
+        raw = words[i]
+        i += 1
+        period = _coin_period(raw, words[i] if i < len(words) else "")
+        if period is not None:                   # checked first: "14D" has the shape of a coin code
+            days, used_next = period
+            i += used_next
+            continue
+        word = raw.upper().strip("?!.,")
         base = word if word == "USDT" else _COIN_SUFFIX.sub("", word)
         if not _COIN.fullmatch(base):
             return None
         if base not in coins:
             coins.append(base)
-    return coins or None
+    return (coins, days) if coins else None
 
 
 def _okx_ticker(inst_id: str) -> dict | None:
@@ -494,6 +534,106 @@ def coin_quote(symbol: str) -> dict:
                 "low24h": row.get("low24h"), "volume_usdt": vol * last if swap else vol,
                 "ts": int(row.get("ts") or 0)}
     raise Unknown(symbol)
+
+
+def _okx_candles(inst_id: str, limit: int) -> list[list] | None:
+    """Nến ngày UTC của một instId, mới nhất trước (ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm);
+    None khi OKX không có instId đó."""
+    r = requests.get(OKX_CANDLES, params={"instId": inst_id, "bar": "1Dutc", "limit": limit}, timeout=OKX_TIMEOUT)
+    body = r.json()
+    if str(body.get("code")) == OKX_UNKNOWN:
+        return None
+    if str(body.get("code")) != "0":
+        raise RuntimeError(f"OKX {body.get('code')}: {body.get('msg') or r.status_code}")
+    return body.get("data") or []
+
+
+def coin_history(symbol: str, days: int) -> dict:
+    """``{symbol, inst, swap, rows, base}``: ``rows`` tối đa ``days`` nến ngày UTC cũ nhất trước, mỗi nến
+    ``{day (YYYY-MM-DD, UTC), open, high, low, close (chuỗi OKX), volume_usdt, live}``; ``base``: giá đóng cửa
+    của ngày ngay trước kỳ (None khi cặp mới niêm yết). Unknown khi OKX không có cả hợp đồng lẫn spot."""
+    for inst, swap in ((f"{symbol}-USDT-SWAP", True), (f"{symbol}-USDT", False)):
+        data = _okx_candles(inst, days + 1)
+        if not data:
+            continue
+        rows = []
+        for c in reversed(data):
+            try:
+                day = datetime.fromtimestamp(int(c[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+                volume = float(c[7]) if len(c) > 7 and c[7] not in (None, "") else 0.0
+                rows.append({"day": day, "open": c[1], "high": c[2], "low": c[3], "close": c[4],
+                             "volume_usdt": volume, "live": len(c) > 8 and str(c[8]) == "0"})
+            except (IndexError, TypeError, ValueError):
+                continue
+        if not rows:
+            continue
+        chosen = rows[-days:]
+        base = rows[-days - 1]["close"] if len(rows) > days else None
+        return {"symbol": symbol, "inst": inst, "swap": swap, "rows": chosen, "base": base}
+    raise Unknown(symbol)
+
+
+def _coin_history_lines(h: dict) -> list[str]:
+    """Một khối của "alt btc 7d": thay đổi cả kỳ, cao/thấp, KL trung bình, rồi từng ngày mới nhất trước."""
+    rows = h["rows"]
+    last = float(rows[-1]["close"])
+    span = f"{rows[0]['day'][8:10]}/{rows[0]['day'][5:7]} – {rows[-1]['day'][8:10]}/{rows[-1]['day'][5:7]}"
+    head = f"{h['symbol']}: {_okx_number(rows[-1]['close'])} USDT"
+    change = None
+    if h["base"] and float(h["base"]):
+        change = (last / float(h["base"]) - 1) * 100
+        head += f" {change:+.2f}% sau {len(rows)} ngày"
+    else:
+        head += f" · {len(rows)} ngày từ ngày niêm yết"
+    kind = "hợp đồng USDT-SWAP" if h["swap"] else "spot USDT"
+    out = [f"{_icon(change)} {head} ({span}, {kind})"]
+    high = max(rows, key=lambda r: float(r["high"]))
+    low = min(rows, key=lambda r: float(r["low"]))
+    summary = [f"Cao nhất {_okx_number(high['high'])} ({high['day'][8:10]}/{high['day'][5:7]})",
+               f"Thấp nhất {_okx_number(low['low'])} ({low['day'][8:10]}/{low['day'][5:7]})"]
+    volumes = [r["volume_usdt"] for r in rows if r["volume_usdt"] and not r["live"]]
+    if volumes:
+        summary.append(f"KL TB {_okx_volume(sum(volumes) / len(volumes))}/ngày")
+    out.append("   " + " · ".join(summary))
+    prev = [h["base"]] + [r["close"] for r in rows[:-1]]
+    for row, before in reversed(list(zip(rows, prev, strict=True))):
+        line = f"   {row['day'][8:10]}/{row['day'][5:7]}: {_okx_number(row['close'])}"
+        if before and float(before):
+            day_change = (float(row["close"]) / float(before) - 1) * 100
+            line += f" {_icon(day_change)} {day_change:+.2f}%"
+        if row["volume_usdt"]:
+            line += f" · KL {_okx_volume(row['volume_usdt'])}"
+        if row["live"]:
+            line += " (đang chạy)"
+        out.append(line)
+    return out
+
+
+def coins_history_text(coins: list[str], days: int, now: datetime | None = None) -> str:
+    """Giá nhiều ngày trên OKX của các coin (tối đa MAX_SYMBOLS), không có tiêu đề: người gọi thêm "🪙 Altcoin ›"."""
+    from tradingagents.market import vn_rules
+
+    now = (now or vn_rules.now_vn()).astimezone(vn_rules.VN_TZ)
+    capped = days > MAX_COIN_DAYS
+    days = max(1, min(days, MAX_COIN_DAYS))
+    more = len(coins) > MAX_SYMBOLS
+    coins = coins[:MAX_SYMBOLS]
+    lines = [f"📅 {days} ngày gần nhất trên OKX lúc {now:%H:%M %d/%m} (nến ngày UTC, mở 07:00 giờ VN)"]
+    if capped:
+        lines.append(f"(Mỗi lần xem tối đa {MAX_COIN_DAYS} ngày.)")
+    for symbol, result in zip(coins, _parallel(lambda c: coin_history(c, days), coins), strict=True):
+        lines.append("")
+        if isinstance(result, Unknown):
+            lines.append(f"❔ {symbol}: OKX không có cặp {symbol}-USDT (hợp đồng hay spot)")
+        elif isinstance(result, Exception):
+            logger.warning("Giá nhiều ngày OKX %s: %s", symbol, result)
+            lines.append(f"⚠️ {symbol}: chưa lấy được giá OKX, thử lại sau ít phút")
+        else:
+            lines.extend(_coin_history_lines(result))
+    if more:
+        lines.append(f"(Mỗi lần tra tối đa {MAX_SYMBOLS} coin.)")
+    lines += ["", "Kỳ khác: alt btc 14d · alt btc 2w (14 ngày) · alt btc 1m (30 ngày)."]
+    return "\n".join(lines)
 
 
 def _coin_lines(q: dict) -> list[str]:

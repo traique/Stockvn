@@ -188,7 +188,7 @@ help_text = bot._help()
 for text in ("hello", "FPT có nên mua không", "/khongcolenhnay"):
     bot._handle(msg(111, 111, text))
     t.ok(f"Telegram {text!r}: the command list as before", last(111) == help_text, last(111)[:80])
-t.ok("the command list names the lookup", "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc - giá coin OKX"
+t.ok("the command list names the lookup", "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc · /alt btc 7d - giá coin OKX"
      in help_text, help_text[:300])
 n = len(CALLS)
 for text in ("/alt btc", "alt btc", "Alt BTC", "altcoin eth"):
