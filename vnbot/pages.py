@@ -180,6 +180,8 @@ COMMANDS = (
     ("FPT 7d · FPT 14d", "Giá từng phiên của 7, 14... phiên gần nhất (w: tuần, m: tháng; tối đa 60 phiên)",
      "Price of each of the last 7, 14... sessions (w: weeks, m: months; up to 60)"),
     ("alt btc · alt eth sol", "Giá coin realtime trên OKX", "Realtime coin price on OKX"),
+    ("alt btc 7d · alt btc eth 1m", "Giá coin từng ngày trên OKX (nến ngày UTC; w: 7 ngày, m: 30 ngày; tối đa 90 ngày)",
+     "A coin's daily prices on OKX (UTC daily candles; w: 7 days, m: 30 days; up to 90)"),
     ("nhanh FPT", "Quyết định của Quant Engine, không gọi AI", "Quant engine decision, no AI"),
     ("soi FPT", "Soi nhanh một mã: giá/trần/sàn, khối lượng so MA20, khối ngoại, P/B, điểm RS, SEPA, CANSLIM, "
      "dòng tiền cá mập, nhận định (không gọi AI)",
