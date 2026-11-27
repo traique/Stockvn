@@ -109,7 +109,11 @@ fc._spend("groq")
 before = fc.usage_today()["total"]
 fc._refund("groq")
 t.ok("refund takes one back", fc.usage_today()["total"] == before - 1 and fc.usage_today()["by"].get("groq", 0) == 0)
-t.ok("connection error is a transport error", fc._transport_error(openai.APIConnectionError(request=None)))
+import httpx  # noqa: E402
+
+# openai >= 1.100 reads the request's headers in the error's constructor: a real request object
+t.ok("connection error is a transport error",
+     fc._transport_error(openai.APIConnectionError(request=httpx.Request("POST", "https://api.groq.com/v1/chat"))))
 t.ok("HTTP 500 is not refunded", not fc._transport_error(RuntimeError("x")))
 
 # ── Zoom: an unsigned request writes nothing to disk ──

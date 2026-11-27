@@ -46,6 +46,14 @@ phases = {"09:14": "ato", "09:15": "continuous", "11:29": "continuous", "11:30":
 got = {hm: R.session_phase(datetime(2026, 10, 21, int(hm[:2]), int(hm[3:]), tzinfo=R.VN_TZ)) for hm in phases}
 t.ok("session phases", got == phases, got)
 t.ok("2/9 holiday, 21/10 a session", not R.is_session_day("2026-09-02") and R.is_session_day("2026-10-21"))
+# a holiday weekday is closed all day: no "continuous" phase reads yesterday's last price as today's
+holiday = {hm: R.session_phase(datetime(2026, 9, 2, int(hm[:2]), int(hm[3:]), tzinfo=R.VN_TZ)) for hm in ("08:00", "10:00", "14:40")}
+t.ok("2/9 (a Wednesday): closed all day", set(holiday.values()) == {"closed"}, holiday)
+t.ok("not market hours on a holiday", not R.is_market_hours(datetime(2026, 9, 2, 10, 0, tzinfo=R.VN_TZ)))
+t.ok("Tết 2026: closed", R.session_phase(datetime(2026, 2, 18, 10, 0, tzinfo=R.VN_TZ)) == "closed")
+t.ok("next_session skips Tết", R.next_session("2026-02-13") == "2026-02-23")
+t.ok("closure_reason: holiday, weekend, session", (R.closure_reason("2026-09-02"), R.closure_reason("2026-10-24"),
+                                                     R.closure_reason("2026-10-21")) == ("nghỉ lễ", "cuối tuần", ""))
 t.ok("weekend not a session", not R.is_session_day("2026-10-24"))
 t.ok("30/4 and 1/5 holidays", not R.is_session_day("2026-04-30") and not R.is_session_day("2026-05-01"))
 t.ok("prev_session skips the weekend", R.prev_session("2026-10-26") == "2026-10-23")
