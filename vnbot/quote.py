@@ -400,7 +400,8 @@ def stocks_reply(text: str, now: datetime | None = None) -> str | None:
     if vn_rules.is_market_hours(now) and vn_rules.is_session_day(today):
         lines = [f"💹 Giá realtime lúc {now:%H:%M %d/%m} ({_PHASES.get(phase, 'trong phiên')})"]
     else:
-        lines = [f"💹 Giá lúc {now:%H:%M %d/%m} (ngoài giờ giao dịch: giá đóng cửa phiên gần nhất)"]
+        why = vn_rules.closure_reason(today)
+        lines = [f"💹 Giá lúc {now:%H:%M %d/%m} ({why + ', ' if why else ''}ngoài giờ giao dịch: giá đóng cửa phiên gần nhất)"]
     unknown = []
     for code, result in zip(codes, _parallel(lambda c: stock_quote(c, now), codes)):
         if isinstance(result, Unknown):

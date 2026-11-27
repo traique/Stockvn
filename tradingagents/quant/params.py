@@ -119,7 +119,7 @@ TUNABLE: dict[str, tuple[float, float, float]] = {
     "t1_sell_fraction": (0.0, 1.0, 0.25),
     "risk_per_trade_pct": (0.5, 2.5, 0.25),
     "max_positions": (3, 10, 1),
-    # Added 2026-10-23 (see BAO_CAO_RA_SOAT_2026-10-23.md, part C).
+    # Added 2026-10-23 (see docs/BAO_CAO_RA_SOAT_2026-10-23.md, part C).
     "breakout_projected_ok": (0, 1, 1),
     "confidence_sell_min": (0.55, 0.85, 0.025),
     "stop_atr_mult": (1.0, 3.0, 0.5),

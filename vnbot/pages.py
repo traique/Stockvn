@@ -175,6 +175,16 @@ Zoom and must be deleted in Zoom.</p></div>"""
 
 
 COMMANDS = (
+    ("soi FPT · định giá FPT · FPT sao rồi? · danh mục", "Nhắn tự nhiên, không cần nhớ lệnh: lời thường nghĩa là lệnh nào thì bot chạy "
+     "lệnh đó ngay (không AI); gõ sai lệnh bot gợi ý lệnh gần nhất",
+     "Plain words that mean a command run it at once (no AI); a mistyped command gets the closest one suggested"),
+    ("hoi FPT có nên mua không?", "Câu hỏi ý kiến, nhắn tự nhiên hoặc hoi ...: bot gom giá, Quant Engine, định giá, "
+     "danh mục Tài sản, cảnh báo hôm nay rồi trả lời (1 lượt AI); hoi quen: quên hội thoại",
+     "A question of judgement, in plain words or hoi ...: the bot gathers its own figures and answers (one AI request); hoi quen: forget the chat"),
+    ("xem FPT", "Tất cả về một mã trên một thẻ: giá, quyết định Quant Engine, thẻ định giá, vị thế Tài sản, cảnh báo hôm nay (không AI)",
+     "Everything the bot knows about one stock on one card: price, Quant decision, valuation, Tài sản position, today's alerts (no AI)"),
+    ("ts mua FPT 20 73891 · stv quet · bot lenh", "Gõ gộp theo nhóm: ts mua = tsmua, stv quet = stvquet, bot lenh = lenh",
+     "Grouped spelling: ts mua = tsmua, stv quet = stvquet, bot lenh = lenh"),
     ("FPT · FPT HPG", "Giá realtime: gõ mã là có (tối đa 5 mã, cả VNINDEX, VN30)",
      "Realtime price: type the code (up to 5, indices too)"),
     ("FPT 7d · FPT 14d", "Giá từng phiên của 7, 14... phiên gần nhất (w: tuần, m: tháng; tối đa 60 phiên)",

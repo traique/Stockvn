@@ -107,6 +107,19 @@ def prev_session(day: str) -> str:
     return d.isoformat()
 
 
+def next_session(day: str) -> str:
+    """The first session day after ``day``, by ``is_session_day`` (``add_sessions(day, 1)``)."""
+    return add_sessions(day, 1)
+
+
+def closure_reason(day: str) -> str:
+    """Why the exchanges are closed on ``day`` ("cuối tuần", "nghỉ lễ"), "" on a session day."""
+    d = datetime.strptime(day[:10], "%Y-%m-%d").date()
+    if d.weekday() >= 5:
+        return "cuối tuần"
+    return "nghỉ lễ" if not is_session_day(day) else ""
+
+
 ATO_START, ATO_END = time(9, 0), time(9, 15)
 MORNING_END = time(11, 30)
 AFTERNOON_START = time(13, 0)
@@ -218,10 +231,11 @@ def session_phase(at: datetime | None = None) -> str:
     """Which part of the trading day ``at`` falls in.
 
     One of: closed, pre_open, ato, continuous, lunch, atc, put_through, after_close.
-    Holidays are not modelled; the price feed simply has no bar on those days.
+    A weekend or a holiday of ``MARKET_HOLIDAYS`` (Tết, 30/4, 2/9...) is "closed" all
+    day, so nothing reads the previous session's last price as today's.
     """
     at = (at or now_vn()).astimezone(VN_TZ)
-    if at.weekday() >= 5:
+    if at.weekday() >= 5 or not is_session_day(at.strftime("%Y-%m-%d")):
         return "closed"
     t = at.time()
     if t < ATO_START:
@@ -242,7 +256,7 @@ def session_phase(at: datetime | None = None) -> str:
 
 
 def is_market_hours(at: datetime | None = None) -> bool:
-    """Whether today's daily bar may still change (9:00-15:00 on a weekday)."""
+    """Whether today's daily bar may still change (9:00-15:00 on a session day)."""
     return session_phase(at) in {"ato", "continuous", "lunch", "atc", "put_through"}
 
 

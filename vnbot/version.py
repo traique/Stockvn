@@ -25,13 +25,27 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.23.0"
+VERSION = "v1.24.0"
 RELEASED = "2026-11-27"
-RELEASE_BUILD = "f855bf0"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "239a3b2"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.24.0", "2026-11-27", (
+        "Không cần nhớ lệnh: lời thường nghĩa là lệnh nào bot chạy ngay lệnh đó, không AI (soi FPT, định giá FPT,",
+        "FPT sao rồi?, giá FPT bao nhiêu, danh mục, vì sao chưa mua, radar...); gõ sai lệnh bot gợi ý lệnh gần nhất",
+        "/xem FPT: tất cả về một mã trên một thẻ - giá, quyết định bot, định giá, vị thế Tài sản, cảnh báo hôm nay",
+        "Gõ gộp theo nhóm: /ts mua ... = /tsmua ..., /stv quet = /stvquet, /bot lenh = /lenh",
+        "Tra giá, /nhanh, /soi, /dinhgia về mã đang giữ luôn kèm vị thế trong Tài sản và lối sang /xem",
+        "Người đồng hành: câu hỏi ý kiến (FPT có nên mua không? · tôi đang lỗ VCB, nên làm gì?) hoặc /hoi",
+        "Bot gom giá, Quant Engine, định giá, Tài sản, cảnh báo hôm nay rồi trả lời bằng 1 lượt AI",
+        "Nhớ 6 lượt hội thoại trong 2 ngày (/hoi quen xoá); không có AI hay hết hạn mức: trả lời bằng số liệu",
+        "HOIDAP=0 tắt (tin lạ trả bảng lệnh như trước); /start là lời chào ngắn, /trogiup vẫn đủ lệnh",
+        "Giá đóng cửa 14:46: một lượt kiểm tra sau ATC, mã chạm stop/T1/T2/sàn ở giá đóng cửa báo ngay",
+        "Ngày nghỉ lễ (Tết, 30/4, 2/9, 24/11...): mọi pha phiên là đóng cửa, không cảnh báo nhầm, giá ghi rõ nghỉ",
+        "Trợ giúp gọn hơn (vừa một tin); báo cáo rà soát 23/10 chuyển vào docs/",
+    )),
     ("v1.23.0", "2026-11-27", (
         "Radar sáng 09:30 ngày giao dịch (RADAR_TIME): quét VN100 + watchlist trên nến hôm trước, gửi chat và Zoom",
         "Điểm 0-100: RSI quá bán, phân kỳ dương, nến rút chân + volume, hơn VN-Index, thanh khoản, EMA20, MA50; từ 70",
@@ -239,7 +253,7 @@ NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     )),
     ("v1.0.0", "2026-10-23", (
         "Bản phát hành đầu tiên: web, Telegram, Zoom, ba sổ ảo (Phòng thủ, Quant Engine, Động lượng), tín hiệu thật",
-        "Rà soát toàn bộ mã nguồn: 22 lỗi đã sửa, 64 kiểm tra hồi quy mới (BAO_CAO_RA_SOAT_2026-10-23.md)",
+        "Rà soát toàn bộ mã nguồn: 22 lỗi đã sửa, 64 kiểm tra hồi quy mới (docs/BAO_CAO_RA_SOAT_2026-10-23.md)",
         "Stop không sát hơn 3% giá; 6 tham số mới cho hiệu chỉnh đêm, 3 cho Phòng thủ (chỉ đổi tay)",
         "Backtest 2022-2025 các phương án: docs/backtest_2026-10-23",
     )),
