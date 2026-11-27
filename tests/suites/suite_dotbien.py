@@ -486,7 +486,7 @@ bot._handle(msg(222, 222, "/soi FPT"))
 t.ok("a stranger: refused", sent(222)[-1].startswith("Bot chưa cho phép"))
 help_text = bot._help()
 t.ok("the help lists the three, still one message", "/soi FPT - soi nhanh một mã" in help_text
-     and "/dotbien - đột biến khối lượng toàn thị trường" in help_text and "/camap FPT - dòng tiền cá mập" in help_text
+     and "/dotbien - đột biến KL toàn thị trường" in help_text and "/camap FPT - cá mập" in help_text
      and len(help_text) <= tb.MAX_MESSAGE, len(help_text))
 from vnbot import pages  # noqa: E402
 
