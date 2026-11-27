@@ -7,7 +7,8 @@
   change and % against the previous close, open/high/low/volume, Vietnamese numbers; an index with
   decimals and no tick asked; a match today before the chart has today's bar; a new listing (no
   previous close); an unknown code said so with the coin hint; DNSE down said so; at most 5 codes;
-- Telegram and Zoom: a message of codes gets the prices, anything else the command list as before,
+- Telegram and Zoom: a message of codes gets the prices, a sentence the companion (suite_hoidap), a lone
+  unknown command the command list as before,
   "/alt ..." with no bridge never read as codes, a stranger gets nothing.
 """
 import time
@@ -185,9 +186,12 @@ t.ok("Telegram 'FPT': the price, not the command list", last(111).startswith("�
 bot._handle(msg(111, 111, "giá fpt hpg"))
 t.ok("Telegram 'giá fpt hpg': both", "FPT: 45.300" in last(111) and "HPG: 20.450" in last(111), last(111))
 help_text = bot._help()
-for text in ("hello", "FPT có nên mua không", "/khongcolenhnay"):
+for text in ("hello", "/khongcolenhnay"):
     bot._handle(msg(111, 111, text))
     t.ok(f"Telegram {text!r}: the command list as before", last(111) == help_text, last(111)[:80])
+bot._handle(msg(111, 111, "FPT có nên mua không"))
+t.ok("Telegram 'FPT có nên mua không': the companion (vnbot.hoidap), not the command list",
+     last(111).startswith("🤝 ") and "FPT" in last(111), last(111)[:80])
 t.ok("the command list names the lookup", "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc · /alt btc 7d - giá coin OKX"
      in help_text, help_text[:300])
 n = len(CALLS)

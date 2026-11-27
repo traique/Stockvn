@@ -175,6 +175,9 @@ Zoom and must be deleted in Zoom.</p></div>"""
 
 
 COMMANDS = (
+    ("hoi FPT có nên mua không?", "Hỏi gì cũng được, nhắn tự nhiên (không cần lệnh): bot gom giá, Quant Engine, định giá, "
+     "danh mục Tài sản, cảnh báo hôm nay rồi trả lời (1 lượt AI); hoi quen: quên hội thoại",
+     "Ask anything in plain words (no command needed): the bot gathers its own figures and answers (one AI request); hoi quen: forget the chat"),
     ("FPT · FPT HPG", "Giá realtime: gõ mã là có (tối đa 5 mã, cả VNINDEX, VN30)",
      "Realtime price: type the code (up to 5, indices too)"),
     ("FPT 7d · FPT 14d", "Giá từng phiên của 7, 14... phiên gần nhất (w: tuần, m: tháng; tối đa 60 phiên)",

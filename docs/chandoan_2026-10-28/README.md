@@ -54,7 +54,7 @@ cắt lỗ / hết hạn.
 
 Không nới cổng độ tin cậy hay thị trường để có MUA. Ứng viên đáng thử trên sổ ảo: bỏ MUA breakout còn kháng cự phía trên, giữ
 pullback; từ v1.14.0 có **công tắc MUA breakout** (trang `/bot`, mặc định bật như cũ), mã bị tắt vẫn được chấm kết quả bóng ở nhóm
-riêng (README chính, mục Bot giao dịch). Lưu ý backtest 23/10 (`BAO_CAO_RA_SOAT_2026-10-23.md`, mục E): cho MUA mã phá đỉnh với mục tiêu
+riêng (README chính, mục Bot giao dịch). Lưu ý backtest 23/10 (`docs/BAO_CAO_RA_SOAT_2026-10-23.md`, mục E): cho MUA mã phá đỉnh với mục tiêu
 2R (`breakout_projected_ok=1`) tốt hơn ở đoạn train nhưng kém hơn ở đoạn test, nên đó không phải cách sửa miễn phí. Giới hạn: rổ hôm
 nay (thiên lệch sống sót), giá điều chỉnh, không tin tức/dòng tiền; mẫu nhỏ và dồn cụm (15 MUA thật năm cuối nằm trong 13 phiên của
 hai đợt 31/12 - 20/01 và 17/04 - 18/05; các mã cùng phiên không độc lập), t chỉ để tham khảo.

@@ -41,6 +41,12 @@ Each alert goes out once a day (kept in ``intraday_alerts.json``, so a restart
 does not repeat them). A price checked every few minutes can miss a brief dip
 through a stop between two reads.
 
+One more pass right after the ATC (from ``CLOSE_CHECK_FROM``, once a session): the
+closing price is set then, and a stop or target it reached in the ATC - where most of
+the day's selling lands - is said at 14:46 instead of with the evening run at 15:30,
+labelled "giá đóng cửa", so the owner can prepare the next session's order. The same
+once-a-day keys: a level already alerted on in the session is not repeated.
+
 The one reminder of the discipline layer (``vnbot.kyluat``) also goes out from here:
 on the day a ⛔/🔴 exit ticket of the Tài sản portfolio falls due, between 14:20 and
 14:45, when no sale is in the journal yet - once a ticket, whatever the interval, and
@@ -61,6 +67,7 @@ from vnbot.jobs import write_text_atomic
 logger = logging.getLogger(__name__)
 
 ACTIVE_PHASES = ("continuous",)
+CLOSE_CHECK_FROM = "14:46"     # the closing pass: the ATC has matched, the close is final
 
 
 def _fmt(value) -> str:
@@ -127,6 +134,8 @@ def read_alerts(path: Path, day: str) -> list[dict]:
 
 TAISAN_LABEL = "💼 Tài sản"
 FOOTER = "Bot im lặng = không có việc cần làm. Bot không tự đặt lệnh; các tài khoản ảo vẫn khớp theo nến ngày sau 15:05."
+CLOSE_FOOTER = ("Giá đóng cửa đã chốt (sau ATC). Bot không tự đặt lệnh; báo cáo và lệnh cho phiên tới chạy sau 15:05 - "
+                "đây là nhắc sớm để anh chuẩn bị lệnh.")
 
 
 class IntradayMonitor:
@@ -141,6 +150,7 @@ class IntradayMonitor:
         self.path = Path(settings.data_dir) / "intraday_alerts.json"
         self.zones_path = Path(settings.data_dir) / "valuation_zones.json"     # the last zone of each card
         self._last_check = 0.0
+        self._close_day = ""                # the day whose closing pass (after the ATC) ran
         self._stale_said = ""               # the day the bot's cards not rebuilt were logged
         self._thread = threading.Thread(target=self._loop, name="intraday", daemon=True)
 
@@ -208,8 +218,9 @@ class IntradayMonitor:
         ratio = float(marked) / float(close)
         return ratio if BASIS_MIN_RATIO <= ratio <= BASIS_MAX_RATIO else None
 
-    def check(self, day: str, now=None) -> list[str]:
-        """One pass: the alerts not sent yet today, sent and returned."""
+    def check(self, day: str, now=None, *, closing: bool = False) -> list[str]:
+        """One pass: the alerts not sent yet today, sent and returned. ``closing``: the pass after
+        the ATC, on the closing price (said so in every line and in the header)."""
         from tradingagents.market import vn_rules
         from tradingagents.trading.ledger import GAP_TOLERANCE_PCT, _rebased
 
@@ -236,7 +247,7 @@ class IntradayMonitor:
                 if not p:
                     continue
                 ex = self.exchange_of(pos.symbol)
-                where = f"{label} {pos.symbol}: giá {_fmt(p)}"
+                where = f"{label} {pos.symbol}: {'giá đóng cửa' if closing else 'giá'} {_fmt(p)}"
                 # Yesterday's close, the reference of today's band (a mark from another day is not).
                 ref = float(pos.last_price) if pos.last_date == prev and pos.last_price else None
                 stop, t1, t2 = pos.stop, pos.target1, pos.target2
@@ -313,22 +324,26 @@ class IntradayMonitor:
         sent |= {k for k, _ in new}
         texts = [text for _, text in new]
         if texts:                   # sent before the valuation cards are looked at (VCI, a price per card)
-            self._send(day, sent, texts)
+            self._send(day, sent, texts, closing=closing)
         try:
             zones = self._zone_alerts(day, price_of)     # their own memory, not the day's keys
         except Exception as exc:  # noqa: BLE001 - the other alerts went out
             logger.warning("Intraday: valuation card alerts failed: %s", exc)
             zones = []
         if zones:
-            self._send(day, sent, zones)
+            self._send(day, sent, zones, closing=closing)
         return texts + zones
 
-    def _send(self, day: str, keys: set[str], texts: list[str]) -> None:
+    def _send(self, day: str, keys: set[str], texts: list[str], *, closing: bool = False) -> None:
         from tradingagents.market import vn_rules
 
         at = vn_rules.now_vn().strftime("%H:%M")
         self._remember(day, keys, texts, at)
-        self.notify(f"🔔 Cảnh báo trong phiên {at} (không gọi AI)\n" + "\n".join(texts) + "\n" + FOOTER)
+        if closing:
+            head, foot = f"🔔 Giá đóng cửa {at} chạm mức cần để ý (sau ATC, không gọi AI)", CLOSE_FOOTER
+        else:
+            head, foot = f"🔔 Cảnh báo trong phiên {at} (không gọi AI)", FOOTER
+        self.notify(head + "\n" + "\n".join(texts) + "\n" + foot)
 
     def _bot_cards(self, day: str, tracked: list[str], latest: dict[str, dict] | None = None) -> dict[str, dict]:
         """The bot's cards of the tracked stocks usable today: built today or after the previous session's
@@ -550,15 +565,18 @@ class IntradayMonitor:
         phase = vn_rules.session_phase(now)
         if phase in (*ACTIVE_PHASES, "atc") and kyluat.TICKET_REMIND_FROM <= now.strftime("%H:%M") < kyluat.TICKET_REMIND_UNTIL:
             self.remind(now.strftime("%Y-%m-%d"), now)      # once a ticket; not bound to the interval
-        if phase not in ACTIVE_PHASES:
-            return
         on = self.switches.on("intraday") if self.switches is not None else self.settings.intraday_alerts
-        if not on:
+        day = now.strftime("%Y-%m-%d")
+        if phase == "put_through" and on and now.strftime("%H:%M") >= CLOSE_CHECK_FROM and self._close_day != day:
+            self._close_day = day           # once a session; the keys keep a restart from repeating an alert
+            self.check(day, now, closing=True)
+            return
+        if phase not in ACTIVE_PHASES or not on:
             return
         if time.time() - self._last_check < self.settings.intraday_interval_min * 60:
             return
         self._last_check = time.time()
-        self.check(now.strftime("%Y-%m-%d"))
+        self.check(day, now)
 
     def _loop(self) -> None:
         while True:

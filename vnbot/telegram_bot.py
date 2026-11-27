@@ -22,6 +22,9 @@ Commands (Vietnamese, like lananh-main's bot):
                                /alt btc 7d: its last 7 daily candles
     FPT · FPT HPG · giá FPT    a message of stock codes only: their realtime price (vnbot.quote);
     FPT 7d · FPT HPG 14d       with a period: the last N sessions of each
+    /hoi ... · any other text  the companion (vnbot.hoidap): the question answered from the bot's
+                               own figures with one AI request; a lone unknown command still
+                               gets the command list
 
 Only ids in TELEGRAM_ALLOWED_IDS are served; the analyses cost LLM quota.
 
@@ -46,7 +49,7 @@ from pathlib import Path
 
 import requests
 
-from vnbot import altcoin_bridge, quote
+from vnbot import altcoin_bridge, hoidap, quote
 from vnbot.jobs import Job, JobQueue
 from vnbot.service import Watchlist, check_request, quick_text
 from vnbot.settings import Settings
@@ -111,36 +114,38 @@ _MD_NOISE = re.compile(r"(\*\*|__|^#+\s*)", re.MULTILINE)
 
 HELP = (
     "TradingAgents VN {version} - phân tích cổ phiếu HOSE/HNX/UPCoM.\n\n"
+    "Hỏi gì cũng được, nhắn tự nhiên: \"FPT có nên mua không?\" · \"danh mục sao rồi?\" (hoặc /hoi ...) - "
+    "trả lời theo số liệu của bot, 1 lượt AI · /hoi quen - quên hội thoại\n"
     "FPT · FPT HPG - giá realtime · FPT 7d - 7 phiên gần nhất · /alt btc · /alt btc 7d - giá coin OKX\n"
     "/phantich FPT - phân tích đầy đủ bằng các agent AI (vài phút); thêm 2026-10-01: tại ngày đó\n"
     "/nhanh FPT - chỉ quyết định của hệ thống định lượng (vài giây)\n"
-    "/soi FPT - soi nhanh một mã: giá/trần/sàn, KL so MA20, khối ngoại, P/B, RS, SEPA/CANSLIM, cá mập, nhận định\n"
+    "/soi FPT - soi nhanh một mã: giá/trần/sàn, KL so MA20, khối ngoại, P/B, RS, SEPA/CANSLIM, nhận định\n"
     "/dotbien - đột biến KL toàn thị trường (≥150% TB20) · /camap FPT - cá mập · /radar - radar sáng\n"
     "/phanbien FPT - AI phản biện quyết định hệ thống (1 lượt AI) · /phanbien - AI đúng bao nhiêu\n"
     "/dinhgia FPT - định giá bot tự tính: vùng, Bear/Base/Bull, có gì đổi · /dinhgia - mã theo dõi (/dg)\n"
-    "/theodoi FPT,HPG,VCB - danh sách báo cáo tự động mỗi ngày · /theodoi - xem\n"
-    "/trangthai - hàng đợi và trạng thái các nhà cung cấp AI\n"
-    "/phienban - phiên bản đang chạy, mã bản dựng và có gì mới\n"
+    "/theodoi FPT,HPG,VCB - danh sách báo cáo tự động · /theodoi - xem\n"
+    "/trangthai - hàng đợi, nhà cung cấp AI, hạn mức\n"
+    "/phienban - phiên bản, mã bản dựng, có gì mới\n"
     "/danhmuc - danh mục bot (paper, và tài khoản thật ở chế độ tín hiệu)\n"
     "/lenh - lệnh bot đặt cho phiên tới\n"
     "/chay - chạy ngay phiên đã đóng gần nhất (không đợi {trade_time})\n"
-    "/hieuchinh - ngưỡng đang dùng và kết quả tự hiệu chỉnh gần đây\n"
-    "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA, kết quả bóng · /vikhongmua FPT · "
-    "/vikhongmua dunglai 120 [vn100] - dựng lại 120 phiên\n"
-    "/khop mua FPT 100 56300 [YYYY-MM-DD] - báo đã khớp lệnh thật, cả lô lẻ (bán: /khop ban ...)\n"
+    "/hieuchinh - ngưỡng đang dùng, kết quả tự hiệu chỉnh\n"
+    "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA · /vikhongmua FPT · "
+    "/vikhongmua dunglai 120 - dựng lại 120 phiên\n"
+    "/khop mua FPT 100 56300 [NGÀY] - báo đã khớp lệnh thật, cả lô lẻ (bán: /khop ban ...)\n"
     "/von 500000000 - đặt tiền mặt tài khoản thật\n"
-    "/thuong FPT 150 - cổ phiếu thưởng/cổ tức bằng cổ phiếu đã về tài khoản thật\n"
-    "\nSiêu tín hiệu (sieutinhieu.vn, SIEUTINHIEU=1; danh mục và watchlist riêng):\n"
+    "/thuong FPT 150 - cổ phiếu thưởng đã về tài khoản thật\n"
+    "\nSiêu tín hiệu (sieutinhieu.vn, SIEUTINHIEU=1):\n"
     "/stv - tổng quan, so với các sổ của bot · /stv FPT - tín hiệu một mã\n"
     "/stvdanhmuc - sổ ảo so sánh Siêu tín hiệu (danh mục tiền thật: /ts)\n"
     "/stvtheodoi - watchlist riêng (60 mã): bo NVL · them HAG · dat MÃ1,MÃ2,... · macdinh · hoantac\n"
     "/stvquet - quét danh mục Tài sản + watchlist\n"
-    "/stvdoichieu - đổi chiều trong phiên (bot ước tính); ngoài giờ: mức đổi chiều phiên tới\n"
+    "/stvdoichieu - đổi chiều trong phiên (bot ước tính); ngoài giờ: mức phiên tới\n"
     "/stvthitruong - bot quét 300 mã thanh khoản cao: đổi chiều trong phiên, so với trang\n"
     "/stvsang - bản tin sáng ngay\n\n"
-    "AI thẩm định tín hiệu (Gemini qua 9Router, cần SIEUTINHIEU=1; ghi lại để kiểm chứng, không phải lệnh đặt):\n"
+    "AI thẩm định tín hiệu (Gemini qua 9Router, cần SIEUTINHIEU=1; ghi lại để kiểm chứng):\n"
     "/thamdinh - phiên gần nhất: mã AI chọn, mã nên tránh, ý kiến danh mục, thành tích\n"
-    "/thamdinh chay - chạy ngay (trong phiên: giá khớp; sau 15:10: tín hiệu đã chốt) · "
+    "/thamdinh chay - chạy ngay (sau 15:10: tín hiệu đã chốt) · "
     "/thamdinh lichsu - các phiên gần đây\n"
     "/thamdinh tuan - bản tổng kết tuần gần nhất\n\n"
     "{taisan}\n\n"
@@ -148,6 +153,15 @@ HELP = (
     "Hành động và mọi mức giá do hệ thống định lượng chốt; các agent AI chỉ diễn giải."
 )
 
+
+WELCOME = (
+    "👋 Chào anh, đây là TradingAgents VN {version} - người đồng hành đầu tư cổ phiếu Việt Nam.\n\n"
+    "Anh cứ nhắn tự nhiên: \"FPT có nên mua không?\", \"danh mục của anh sao rồi?\", \"hôm nay thị trường thế nào?\" - "
+    "bot gom giá, quyết định Quant Engine, định giá, danh mục rồi trả lời (1 lượt AI).\n"
+    "Gõ mã là có giá: FPT · fpt hpg · FPT 7d. Quyết định của bot: /nhanh FPT · soi nhanh: /soi FPT · danh mục tiền thật: /ts.\n"
+    "Bot tự gửi: radar 09:30 và 11:30, cảnh báo trong phiên, giá đóng cửa chạm mức 14:46, báo cáo sau {trade_time}.\n"
+    "Toàn bộ lệnh: /trogiup. Bot không bao giờ tự đặt lệnh."
+)
 
 # The sender of a command typed in Zoom (vnbot.zoom checked it against ZOOM_ALLOWED_USERS).
 ZOOM_USER = "zoom"
@@ -218,6 +232,7 @@ class TelegramBot:
         self.switches = None      # vnbot.channels.Switches: the on/off of each channel (all on when None)
         self.taisan = None        # vnbot.taisan.TaiSan: the owner's real-money portfolio (/ts...)
         self.alt = None           # vnbot.altcoin_bridge.Bridge: the /alt commands (set by main_botkeep)
+        self.intraday = None      # vnbot.intraday.IntradayMonitor: today's alerts, for the companion (main_botkeep)
         # Commands of one chat run in order on one lane; a burst waits instead of
         # spawning a thread per message (the host has 2 GB).
         self._lanes = [ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"telegram-cmd-{i}")
@@ -240,6 +255,28 @@ class TelegramBot:
         altcoin = "/alt <lệnh> - bot Altcoin (OKX): gõ /alt để xem lệnh\n" if self.alt and self.alt.enabled else ""
         return HELP.format(trade_time=max(self.settings.trade_time, MIN_TRADE_TIME), version=VERSION,
                            taisan=TaiSan.HELP, altcoin=altcoin)
+
+    def _welcome(self) -> str:
+        from vnbot.settings import MIN_TRADE_TIME
+        from vnbot.version import VERSION
+
+        return WELCOME.format(version=VERSION, trade_time=max(self.settings.trade_time, MIN_TRADE_TIME))
+
+    def _llm(self):
+        """The provider chain for the one-request features (/phanbien, the companion), built once."""
+        from vnbot.critic import default_llm
+
+        if self._critic_llm is None:
+            self._critic_llm = default_llm(self.settings)
+        return self._critic_llm
+
+    def _hoidap(self, chat_id, text: str) -> None:
+        """The companion (vnbot.hoidap): runs on the chat's lane, seconds for the facts, one AI request."""
+        from vnbot import hoidap
+
+        self.send(chat_id, hoidap.answer(
+            text, chat_id, data_dir=self.settings.data_dir, llm_factory=self._llm, account=self.taisan,
+            monitor=self.intraday, watchlist=self.watchlist.get(), progress=lambda note: self.send(chat_id, note)))
 
     @property
     def enabled(self) -> bool:
@@ -563,8 +600,12 @@ class TelegramBot:
             self.send(chat_id, f"Bot chưa cho phép tài khoản này. Thêm {user_id} vào TELEGRAM_ALLOWED_IDS.")
             return
         try:
-            if command in ("/start", "/help", "/trogiup"):
+            if command == "/start":
+                self.send(chat_id, self._welcome())
+            elif command in ("/help", "/trogiup"):
                 self.send(chat_id, self._help())
+            elif command in ("/hoi", "/hoidap"):
+                self._hoidap(chat_id, args)
             elif command == "/phantich":
                 self._analyze(chat_id, args)
             elif command == "/phanbien":
@@ -622,7 +663,12 @@ class TelegramBot:
                 # A message of stock codes only ("FPT", "fpt hpg", "giá FPT"; Zoom adds the "/"): their
                 # price (vnbot.quote); anything else: the command list, as before.
                 prices = quote.stocks_reply(text) if command not in ("/alt", "/altcoin") else None
-                self.send(chat_id, prices if prices is not None else self._help())
+                if prices is not None:
+                    self.send(chat_id, prices)
+                elif command not in ("/alt", "/altcoin") and hoidap.enabled() and hoidap.is_question(text):
+                    self._hoidap(chat_id, text)       # a sentence: the companion, not the command list
+                else:
+                    self.send(chat_id, self._help())
         except ValueError as exc:
             self.send(chat_id, f"⚠️ {exc}")
         except Exception as exc:  # noqa: BLE001
@@ -753,7 +799,7 @@ class TelegramBot:
     def _critic(self, chat_id: int, args: str) -> None:
         """One AI request about the engine's decision (runs on the chat's command lane)."""
         from tradingagents.quant import engine
-        from vnbot.critic import CriticLog, default_llm
+        from vnbot.critic import CriticLog
 
         log = CriticLog(self.settings.data_dir)
         parts = args.split()
@@ -763,10 +809,8 @@ class TelegramBot:
         code, day = check_request(parts[0], parts[1] if len(parts) > 1 else None)
         self.send(chat_id, f"⏳ AI đang phản biện {code} ngày {day} (1 lượt gọi)...")
         result = engine.analyze(code, day)
-        if self._critic_llm is None:
-            self._critic_llm = default_llm(self.settings)
         log.settle_now()
-        self.send(chat_id, f"📊 {result.deterministic_summary}\n\n{log.review(day, result, self._critic_llm)}")
+        self.send(chat_id, f"📊 {result.deterministic_summary}\n\n{log.review(day, result, self._llm())}")
 
     def _trading(self, chat_id: int, command: str, args: str) -> None:
         if self.trader is None or self.settings.trade_mode == "off":
