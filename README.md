@@ -5,6 +5,7 @@ Hướng dẫn chạy TradingAgents VN liên tục trên Botkeep (hoặc bất k
 - **Trang web**: nhập mã cổ phiếu, xem hàng đợi, đọc báo cáo HTML của các agent, sửa danh sách theo dõi.
 - **Bot Telegram**: `/phantich`, `/phanbien`, `/nhanh`, `/dinhgia`, `/theodoi`, `/trangthai`, `/id`. Zoom Team Chat ngang hàng (tuỳ chọn), cùng bộ lệnh (mục **Lệnh trên Telegram và Zoom**).
 - **Đột biến khối lượng, soi nhanh một mã, dòng tiền cá mập** (v1.20.0): `/dotbien` liệt kê các mã có khối lượng phiên từ 150% trung bình 20 phiên trên toàn thị trường; `/soi FPT` trả thẻ giá/trần/sàn, khối lượng so MA20, khối ngoại, P/B, điểm RS, tiêu chí SEPA/CANSLIM, dòng tiền cá mập và nhận định nhanh; `/camap FPT` đọc lệnh lớn mua/bán chủ động theo tick khớp lệnh. Không gọi AI. Xem mục **Đột biến khối lượng, soi nhanh, cá mập**.
+- **Radar sáng** (v1.23.0): 09:30 mỗi ngày giao dịch và lại lúc 11:30 khi kết thúc phiên sáng, bot quét VN100 + watchlist trên nến ngày hôm trước, chấm điểm 0-100 và gửi các mã ở điểm uốn kỹ thuật kèm "Tai mắt" (một lượt AI đọc số liệu và tin, lỗi thì dùng số liệu VCI), tin mới của CafeF, Vietstock, VnEconomy, checklist và quân lệnh. `/radar` chạy ngay. Xem mục **Radar sáng**.
 - **Giá coin nhiều ngày** (v1.22.0): `alt btc 7d`, `alt btc eth 14d`, `alt sol 1m` trả giá đóng cửa từng ngày trên OKX (nến ngày UTC), % mỗi ngày, khối lượng USDT, thay đổi cả kỳ, cao/thấp.
 - **Giá nhiều phiên** (v1.21.0): `FPT 7d`, `FPT 14d`, `fpt hpg 7d`, `VNINDEX 1m` trả giá khớp thực tế từng phiên của N phiên gần nhất, % mỗi phiên so với tham chiếu như bảng giá, tổng thay đổi cả kỳ, cao/thấp, khối lượng.
 - **Gõ mã là có giá realtime** (v1.19.0): nhắn `FPT` (hoặc `fpt hpg`, `giá FPT`, `VNINDEX`, tối đa 5 mã) trên Telegram hay Zoom, bot trả giá khớp gần nhất, +/- và % so với tham chiếu, mở/cao/thấp, khối lượng; không gọi AI. Giá coin: `alt btc`, `alt eth sol` (Telegram gõ có `/` hay không đều được), giá OKX.
@@ -149,6 +150,7 @@ Botkeep tự đặt `SERVER_PORT`; chạy nơi khác thì dùng `PORT` hoặc `A
 | `/phantich FPT 2026-10-01` | Phân tích tại một ngày trong quá khứ (chỉ dùng dữ liệu có đến ngày đó) |
 | `/nhanh FPT` | Chỉ quyết định của Quant Engine, không gọi AI (vài giây) |
 | `/soi FPT` (hoặc `/phantichnhanh`) | **Soi nhanh một mã**, không gọi AI (5-20 giây): giá khớp, tham chiếu/trần/sàn, khối lượng so MA20, khối ngoại mua/bán/ròng (CP), giá trị và khối lượng trung bình 20 phiên, P/B, điểm RS, SEPA bắt buộc, CANSLIM, dòng tiền cá mập, nhận định nhanh. Xem mục **Đột biến khối lượng, soi nhanh, cá mập** |
+| `/radar` | **Radar sáng** ngay bây giờ: bản tin 09:30 hoặc, từ 11:30, bản kết thúc phiên sáng (xem mục **Radar sáng**), quét 1-2 phút, một lượt AI cho mỗi mã đạt chuẩn một ngày |
 | `/dotbien` · `/dotbien 200` | **Danh sách đột biến khối lượng** toàn thị trường: khối lượng khớp của phiên ≥ 150% (hoặc ngưỡng khác, 110-1000) trung bình 20 phiên trước, xếp theo tỷ lệ; chỉ mã có thanh khoản trung bình từ 1 tỷ/phiên |
 | `/camap FPT` | **Dòng tiền cá mập** của phiên: lệnh khớp chủ động gộp theo tick, chia cá mập (≥ 1 tỷ/lệnh), sói (200 triệu – 1 tỷ), cừu; mua ròng hay bán ròng, có xác nhận nhịp giá không, 5 lệnh lớn nhất |
 | `/dinhgia FPT` · `/dinhgia` (gõ tắt `/dg`) | **Định giá bot tự tính** của một mã (vùng Rẻ/Hợp lý/Đắt, MOS, Bear/eab/Base/Bull, độ tin cậy, có gì đổi so với lần xem trước) · bảng các mã theo dõi xếp theo MOS. Xem mục **Định giá bot tự tính** |
@@ -194,6 +196,7 @@ Một bộ lệnh, một bộ xử lý, cùng câu trả lời. Telegram gõ có
 | Phân tích đầy đủ | `/phantich FPT [YYYY-MM-DD]` (kèm file HTML) | `phantich FPT` (kèm link web) | `/vnbot phantich FPT` |
 | Quyết định Quant | `/nhanh FPT` | `nhanh FPT` | `/vnbot nhanh FPT` |
 | Soi nhanh, đột biến KL, cá mập | `/soi FPT` · `/dotbien` · `/camap FPT` | `soi FPT` · `dotbien` · `camap FPT` | `/vnbot soi FPT` · `/vnbot dotbien` |
+| Radar sáng | `/radar` | `radar` | `/vnbot radar` |
 | Định giá bot tự tính | `/dinhgia FPT` · `/dinhgia` · `/dg FPT` | `dinhgia FPT` · `dg FPT` | `/vnbot dinhgia FPT` |
 | AI phản biện | `/phanbien FPT` | `phanbien FPT` | `/vnbot phanbien FPT` |
 | Watchlist | `/theodoi FPT,HPG` | `theodoi FPT,HPG` | `/vnbot theodoi FPT,HPG` |
@@ -207,6 +210,55 @@ Một bộ lệnh, một bộ xử lý, cùng câu trả lời. Telegram gõ có
 | Ghép đôi Zoom | `/zoompair JID [tên]` · `/zoomxoa` · `/zoomstatus` | chỉ Telegram (bot trả "chỉ dùng được từ Telegram") | chỉ Telegram |
 
 Ngoài hai dòng cuối, chỉ khác ở file: trên Zoom báo cáo HTML của `/phantich` và Excel của `/tsxuat` là link trang web (cần mật khẩu) thay cho file; nhập Excel (`/tsnhap` kèm file `.xlsx`) chỉ qua Telegram hoặc trang `/taisan`.
+
+### Radar sáng (v1.23.0)
+
+Mỗi ngày giao dịch lúc **09:30** (`RADAR_TIME`), bot quét **VN100 + watchlist** trên **nến ngày hôm trước** (tín hiệu chấm trên nến đã đóng; giá sáng nay chỉ là bối cảnh) rồi gửi một bản tin vào các chat báo cáo và Zoom. Lúc **11:30** (`RADAR_NOON_TIME`) gửi lại bản **kết thúc phiên sáng**: cùng tín hiệu, bối cảnh là khối lượng và giá của phiên sáng, phần AI lấy lại từ bản 09:30 (không gọi AI lần hai). `/radar` gửi ngay (từ 11:30 theo bố cục phiên sáng). `RADAR=0` tắt. Bản tin không chạy được thì thử lại sau 10 phút, 3 lần; bản 09:30 bỏ qua sau 11:30, bản 11:30 bỏ qua sau 13:00.
+
+```
+Địch rũ tới chân thành. Chưa thấy tiền thật, ta chưa rút kiếm.
+27/11/2026, 09:30 | VN-Index 1.629,68 (-3,42%) | PHR 27.250 (-0,73%), KL 49.200 cp
+
+Radar quét VN100 + watchlist (103 mã) trên nến ngày 26/11: 1 mã đạt chuẩn (từ 70/100): PHR 80. Gần ngưỡng: DGC 60, VHC 50, GEX 50.
+
+━━ PHR · 80/100 ━━
+Chiến sự
+Kỹ thuật: RSI(14) 27,2 quá bán, có phân kỳ dương. Giá nằm dưới EMA20 (29.070) khoảng 5,6%. Hỗ trợ 26.500, kháng cự 32.850 (30 phiên).
+Lực cầu: nến phiên trước rút chân 73% với volume gấp 1,8 lần MA20, dấu hiệu bên mua chặn đà rơi (stopping volume).
+So với thị trường: VN-Index mất 3,42% còn PHR chỉ mất 0,73%, tức PHR chịu đòn tốt hơn mặt bằng chung.
+
+Tai mắt
+<3 dòng AI viết từ số liệu quý mới nhất của VCI và tiêu đề tin 2 tuần, mỗi dòng có nguồn và ngày>
+Tin mới liên quan:
+• 25/11 Công bố thông tin (VCI): PHR: Giấy chứng nhận đăng ký doanh nghiệp thay đổi lần thứ 9
+• 19/11 Chứng khoán Beta: PHR - Cập nhật KQKD Q3.2026: Doanh thu cao nhất từ năm 2022, biên lợi nhuận thu hẹp
+• 15/11 CafeF: Cao su Phước Hòa (PHR) báo lãi tăng 64%, lợi nhuận từ hoạt động cốt lõi bất ngờ "lao dốc" 96%
+Tín hiệu được chấm trên nến ngày 26/11. Hôm nay KL tới 09:30: 49.200 cp (4% MA20); khối ngoại phiên 26/11 bán ròng 15.200 cp.
+
+Checklist papa
+Mẫu hình + phân kỳ (A, B): ✓ ✓
+Tin hỗ trợ (E): ✗
+MA (G): ✗, giá đang dưới cả EMA20, chưa nói đến MA50 và MA100
+Thanh khoản TB20 trên 5 tỷ (C): ✓ (12,3 tỷ)
+Tổng thể: đây là điểm uốn kỹ thuật, chưa phải mã đủ chuẩn để mua theo checklist.
+
+Quân lệnh hôm nay
+PHR đóng cửa giữ trên 26.500 và volume từ 1,5x MA20 trở lên → mua thăm dò 5% NAV ở 27.050–27.300, stop 25.950, mục tiêu 29.050 (EMA20). R:R khoảng 1,6.
+Thủng 26.500 → bỏ, vì nền bị phá.
+VN-Index tiếp tục bị bán mạnh → án binh, không mua dù tín hiệu đẹp.
+Không mua đuổi trong phiên. Không bình quân giá xuống dưới 25.950.
+Lãi chủ yếu từ khoản khác, giá nằm dưới EMA20: đây là cú bật kỹ thuật, chưa phải đổi xu hướng. Chưa có xác nhận lúc ATC thì vào lệnh nghiêng về cờ bạc.
+```
+
+**Điểm 0-100**, mỗi điểm giải thích được: RSI(14) ≤ 30 là 20 điểm (≤ 35: 10); phân kỳ dương (đáy giá thấp hơn đáy 40 phiên trước mà RSI cao hơn) 20; nến rút chân (đóng cửa từ 60% biên độ trở lên) với volume ≥ 1,5× trung bình 20 phiên 20 (≥ 1,2×: 10); giảm ít hơn hoặc tăng nhiều hơn VN-Index phiên đó 10; giá trị khớp trung bình 20 phiên ≥ 5 tỷ 10; giá ≥ EMA20 10; giá ≥ MA50 10. Từ **70** mới được nêu tên (tối đa 5 mã); 3 mã gần ngưỡng chỉ ghi điểm. Hỗ trợ là đáy thấp nhất 30 phiên, kháng cự là đỉnh cao nhất 30 phiên.
+
+**Tin** của mỗi mã là tiêu đề 14 ngày từ các nguồn bot đã có (công bố thông tin VCI, báo cáo CTCK và tin doanh nghiệp trên CafeF, Google News) cộng với **bài của chính các báo** CafeF, Vietstock, VnEconomy (hỏi Google News theo từng báo, chỉ giữ bài nêu mã). Tối đa 5 bài nêu mã, mới nhất trước, in dưới khối Tai mắt kèm nguồn và ngày để đối chiếu; AI chỉ được trích từ danh sách này.
+
+**Tai mắt** có hai mức. Mức 2: với mỗi mã đạt chuẩn, bot gửi số liệu quý mới nhất của VCI (doanh thu, biên gộp, lợi nhuận hoạt động kinh doanh, thu nhập khác, LNST và so cùng kỳ) cùng các tiêu đề tin trên cho AI qua chuỗi 9Router → Groq → OpenRouter, một lượt một mã, nhận 3 dòng có nguồn, kèm tin có ủng hộ mua ngay không (mục E) và lãi có phải khoản một lần không. Mức 1, khi AI không trả lời hoặc trả lời sai định dạng: in chính số liệu ấy, tự đánh dấu "lãi chủ yếu không từ kinh doanh cốt lõi" khi thu nhập khác từ 50% LNST, và mục E ghi "chưa chấm". Ngân hàng, bảo hiểm không có dòng doanh thu nên chỉ nói "chưa đọc được".
+
+**Checklist papa**: A nến rút chân, B phân kỳ, C thanh khoản, E tin hỗ trợ (AI), G giá trên cả EMA20 và MA50. **Quân lệnh** là luật: mua thăm dò 5% NAV ở 2-3% trên hỗ trợ, chỉ khi đóng cửa giữ hỗ trợ và volume ≥ 1,5× MA20; stop 2% dưới hỗ trợ; mục tiêu EMA20 (kháng cự nếu EMA20 thấp hơn vùng mua); R:R từ các mức đó, giá theo bước giá của sàn. Ngày GDKHQ trong 45 ngày (sự kiện VCI) được nêu kèm số chia để không đọc nhầm phần giá giảm.
+
+Bot giao dịch và Quant Engine không đọc bản tin này.
 
 ### Đột biến khối lượng, soi nhanh, cá mập (v1.20.0, không gọi AI)
 
@@ -802,6 +854,7 @@ Kết quả `36/36 bộ đạt` là an toàn để cập nhật. Có ❌ thì đ
 | `stv`, `stv_catchup`, `stv_morning` | Siêu tín hiệu: lấy tín hiệu lịch sự, sổ ảo so sánh, bản tin sáng, tài khoản thật riêng, gửi Zoom rồi Telegram |
 | `quote` | Gõ mã là có giá (v1.19.0) và giá nhiều phiên (v1.21.0): tin nào là tra giá, `7d`/`14D`/`2w`/`1m`/`7 ngày`, giá khớp thực tế từng phiên với tham chiếu của phiên, ngày GDKHQ (% cộng dồn, không trừ phần chia cổ tức), trong phiên (tick + nến đang chạy), chỉ số, VNDirect lỗi thì DNSE, mã lạ, quá 60 phiên, mã mới niêm yết, Telegram và Zoom |
 | `version` | Số phiên bản trên web và Telegram/Zoom, mã bản dựng, báo khi cập nhật |
+| `radar` | Radar sáng (v1.23.0): RSI theo chuỗi, phân kỳ dương, nến rút chân + volume, điểm 0-100 từng thành phần, ngưỡng 70, gần ngưỡng; Tai mắt mức 2 (AI giả lập) và mức 1 khi AI lỗi hay sai định dạng; checklist; quân lệnh theo bước giá; GDKHQ; dòng sáng nay và khối ngoại; tin gộp từ các nguồn của bot và báo CafeF/Vietstock/VnEconomy (chỉ bài nêu mã, không trùng, báo lỗi), khối "Tin mới liên quan"; mã không đọc được; lịch 09:30 và 11:30 (kết thúc phiên sáng, AI lấy lại từ sáng), thử lại 3 lần, stamp riêng, tắt bằng RADAR=0; `/radar` Telegram và Zoom; trợ giúp và /docs |
 | `dotbien` | Đột biến khối lượng, soi nhanh, cá mập (v1.20.0, VNDirect/DNSE/VCI giả lập, FPT từ fixture 30/10/2026): lịch sử lưu thêm khối lượng và tải lại 21 phiên cũ thiếu khối lượng, danh sách sau giờ và trong phiên, ngưỡng, lọc thanh khoản, điểm RS theo phần trăm, SEPA/CANSLIM từ báo cáo đã công bố, nhận định theo bốn trạng thái MA, gộp tick thành lệnh và phân loại cá mập/sói/cừu, kết luận xác nhận hay ngược giá, lệnh Telegram/Zoom và trang /docs |
 | `valuation`, `valuation_card` | Định giá tham khảo (dữ liệu VCI ghi ngày 29/10/2026): P/B, P/E so với mọi phiên từ 2018 theo giá chưa điều chỉnh và sổ sách đã công bố; thẻ định giá ngân hàng (Base của hồ sơ CTG tính lại khớp ±0,5%, sổ sách trừ cổ tức tiền sau ngày khoá sổ trên số cổ phiếu trước ngày GDKHQ (TPB: cổ tức tiền và cổ phiếu cùng ngày), qua ngày chia thưởng, phát hành riêng lẻ/ESOP/quyền mua, ROE năm theo ngày công bố, nhãn FACT/THỐNG KÊ, hạn dùng, thẻ ngày cũ giữ lại chỉ khi đã có phiên của ngày đó); Output Guard bắt giá trị hợp lý không có trên thẻ (kể cả có nhãn, trong bảng, trong báo cáo cơ bản, cả khoảng 28.000-29.000) nhưng không bắt nhầm stop/T1/hỗ trợ/kháng cự của Quant sau Bull/Bear, phe Bull/Bear của mã không phải ngân hàng hay giá trị hợp lý/giá mục tiêu VCI; tối ngày GDKHQ chia thưởng VCI chưa đăng thì không nối phiên mới với số cổ phiếu cũ; thẻ tính sáng ngày GDKHQ (giá phiên trước) hết hạn ngay hôm đó, cảnh báo trong phiên không dùng mốc cũ; cầu dao VCI riêng, không chặn dòng tiền của Quant; không module nào của Quant Engine đọc thẻ |
 | `valuation_manual` | Thẻ định giá anh nhập (`/tsdinhgia`, Telegram và Zoom chung bộ xử lý, trang `/taisan`): số kiểu VN (`30.164`, `30,164`, `30164`; từ chối `30,1`), Bear < Base < Bull, eab, hạn dùng, lỗi; thẻ còn sau khi bán hết, huỷ dòng, reset; đường giá 30,7 → 30,1 → 30,3 → 33,4 ra đúng 2 cảnh báo, vùng đệm 0,5%, một Rẻ mỗi phiên, thẻ nhập lại bắt đầu từ vùng lúc lưu, khởi động lại không báo trùng, hôm sau không báo lại; hết hạn và qua GDKHQ thì báo một lần rồi ngừng, không hiện vùng/MOS trên mốc giá cũ; sự kiện VCI ngày 29/10/2026: ESOP, riêng lẻ, chuyển đổi trái phiếu không là GDKHQ, CTG 44,6% nhớ trước ngày GDKHQ; VCI lỗi: ⛔ gửi trước khi hỏi thẻ, không hỏi lại trong một giờ, một lần thử 5 giây sau cầu dao VCI; dòng vùng định giá không đẩy mất dòng stop/bán; chiều chấm của 🟢 Rẻ/🔺 Đắt; form web cần mật khẩu, chặn POST chéo trang, thẻ của bot cạnh thẻ ngân hàng và cờ lệch quá 10%; thẻ của bot (v1.17.0): báo cho mã watchlist và mã đang giữ, ghi «thẻ của bot», không hỏi VCI; thẻ anh nhập thay thẻ của bot; thẻ anh nhập hết hạn thì thẻ của bot thay ngay; thẻ của bot chưa tính lại sau phiên trước, qua GDKHQ hôm nay, mã không lập thẻ hay không theo dõi thì không báo; tính lại cùng mốc không báo lại, mốc khác bắt đầu từ vùng lúc đóng cửa; công tắc `zones_bot` tắt thì chỉ thẻ anh nhập báo; Bull sát Base (CTG 16/12/2025 +0,3%) báo Đắt từ Base +2%; thẻ anh nhập qua GDKHQ thì thẻ của bot báo từ khi tính lại; kết quả cảnh báo tách theo nguồn thẻ, 500 dòng riêng mỗi nguồn; Quant Engine không đọc thẻ |
