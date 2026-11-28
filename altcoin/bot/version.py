@@ -16,13 +16,21 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.4.0"
-RELEASED = "2026-11-28"
-RELEASE_BUILD = "2955c5e"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.5.0"
+RELEASED = "2026-11-29"
+RELEASE_BUILD = "6245435"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.5.0", "2026-11-29", (
+        "Sổ 'không AI' chạy ảo song song (NOAI_ENABLED): cùng ứng viên, cùng giá vào, không hỏi AI, rủi ro 1,0×, cầu dao 15% riêng, không tin từng lệnh – /alt compare và thẻ So sánh sổ (theo cặp tín hiệu, sai số theo ngày)",
+        "Cột book (main / noai) cho lệnh và đường vốn; mọi số liệu sổ chính lọc book=main; lệnh ghi sid của tín hiệu, lệnh noai ghi phán quyết AI",
+        "Sổ Grid spot chạy ảo (GRID_ENABLED, BTC-USDT + ETH-USDT, 100 USDT ảo mỗi sổ): khớp theo nến 1m đã đóng, giá phải đi qua mức, dừng khi phá vùng 5%, không tự đặt lại vùng (GRID_ROUND) – /alt grid, thẻ Grid, so với HODL và giữ USDT",
+        "Bản sao lên Google Sheets (SHEETS_ID, SHEETS_SA_JSON; Stockvn: ALT_…): alt_trades, alt_signals, alt_equity, grid_runs, grid_fills mỗi giờ, alt_summary 07:05; không ghi trùng, lỗi thì thử lại, không đọc ngược – /alt sheets",
+        "Đợt đo mới: mốc đỉnh cầu dao của sổ chính đặt lại về vốn lúc khởi động bản này (đỉnh cũ là trước đợt sụt 19,3%)",
+        "Mặc định khi MODE=live: x3 và 1%/lệnh (chạy ảo giữ x10 / 3%, tham số đợt đo không đổi)",
+    )),
     ("3.4.0", "2026-11-28", (
         "Cổng regime BTC khung NGÀY (BTC_DAILY_GATE): cấm long khi BTC ngày đang giảm, cấm short khi đang tăng – 29 ngày chạy ảo 320 long bóng -0,45R (t -4,2) dù cổng 1h cho qua",
         "Bối cảnh BTC thêm xu hướng ngày và % đổi 7 ngày (nến 1D đã đóng), gửi AI và lưu cùng tín hiệu; hai luật ứng viên long_btc_bear_1d / short_btc_bull_1d theo dõi bóng",
