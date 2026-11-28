@@ -136,7 +136,7 @@ HELP = (
     "/danhmuc - danh mục bot (ảo, và thật ở chế độ tín hiệu)\n"
     "/lenh - lệnh bot đặt cho phiên tới\n"
     "/chay - chạy ngay phiên đã đóng (không đợi {trade_time})\n"
-    "/hieuchinh - ngưỡng đang dùng, kết quả tự hiệu chỉnh\n"
+    "/hieuchinh - ngưỡng, hiệu chỉnh · /bangtinh - Sheets\n"
     "/vikhongmua - vì sao chưa có MUA: thị trường, cổng chặn, mã suýt MUA · /vikhongmua FPT · "
     "/vikhongmua dunglai 120 - dựng lại 120 phiên\n"
     "/khop mua FPT 100 56300 [NGÀY] - đã khớp lệnh thật (bán: /khop ban ...)\n"
@@ -196,7 +196,7 @@ STV_MOVED = {
 
 KNOWN_COMMANDS = tuple(dict.fromkeys(
     ("/start", "/help", "/trogiup", "/hoi", "/xem", "/gia", "/phantich", "/phanbien", "/nhanh", "/soi", "/dotbien", "/camap",
-     "/radar", "/dinhgia", "/dg", "/theodoi", "/trangthai", "/phienban", "/thamdinh", "/vikhongmua", "/id", "/alt",
+     "/radar", "/dinhgia", "/dg", "/theodoi", "/trangthai", "/phienban", "/thamdinh", "/vikhongmua", "/bangtinh", "/id", "/alt",
      "/zoompair", "/zoomxoa", "/zoomstatus", *BOT_COMMANDS, *STV_COMMANDS, *TAISAN_COMMANDS)))
 
 
@@ -741,6 +741,10 @@ class TelegramBot:
                 self._stv_watch(chat_id, args)
             elif command in ("/thamdinh", "/chonbong"):      # /chonbong: its name until v1.11.0
                 self._thamdinh(chat_id, args)
+            elif command in ("/bangtinh", "/sheets"):
+                from vnbot import sheets
+
+                self.send(chat_id, sheets.status_text(self.settings.data_dir))
             elif command in ("/vikhongmua", "/chandoan"):
                 self._why(chat_id, args)
             elif command in ("/danhmuc", "/lenh", "/hieuchinh", "/khop", "/von", "/chay", "/thuong"):

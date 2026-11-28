@@ -25,13 +25,23 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.24.0"
-RELEASED = "2026-11-27"
-RELEASE_BUILD = "239a3b2"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.25.0"
+RELEASED = "2026-11-28"
+RELEASE_BUILD = "93db28a"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.25.0", "2026-11-28", (
+        "Mốc ETF mua-giữ (BENCH_ETF, mặc định E1VFVN30): toàn bộ vốn ảo mua giá đóng cửa phiên đầu đợt đo, lô 100",
+        "NAV ETF theo giá điều chỉnh cổ tức, phí mua, thêm bán hôm nay sau phí bán và thuế: /bot, /danhmuc, báo cáo",
+        "Tham số đóng băng cho đợt đo: chụp quant_params.json ở lần chạy đầu (nút chụp lại trên /bot)",
+        "Ngưỡng hiệu chỉnh đêm đổi giữa đợt: báo Telegram một lần; tắt MUA breakout và bộ Phòng thủ không tính",
+        "AI thẩm định: Brier của độ tin AI so với tỉ lệ nền (skill), bảng hiệu chuẩn theo độ tin, từ 10 phiên",
+        "Bản sao Google Sheets (SHEETS_ID, SHEETS_SA_JSON): ck_nav, ck_trades, ck_shadow, ck_ai_pick, ck_summary",
+        "Chỉ ghi thêm, chạy lại không ghi trùng, không đọc bảng tính; lỗi thì thử lại; che bí mật; /bangtinh",
+        "Ký JWT bằng cryptography có sẵn, gọi REST Sheets bằng requests: không thêm thư viện Google",
+    )),
     ("v1.24.0", "2026-11-27", (
         "Không cần nhớ lệnh: lời thường nghĩa là lệnh nào bot chạy ngay lệnh đó, không AI (soi FPT, định giá FPT,",
         "FPT sao rồi?, giá FPT bao nhiêu, danh mục, vì sao chưa mua, radar...); gõ sai lệnh bot gợi ý lệnh gần nhất",

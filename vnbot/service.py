@@ -164,6 +164,10 @@ class DailyScheduler:
     # past the hour a card (and VCI's price history) is kept, at most VALUATION_MAX_TRIES runs a day.
     VALUATION_RETRY_SECONDS = 3900
     VALUATION_MAX_TRIES = 3
+    # The copy on Google Sheets (vnbot.sheets): session days from sheets.EXPORT_TIME (18:05, after the
+    # late bars and the AI pick's retries); a failed cycle is tried again, then the day is given up.
+    SHEETS_RETRY_SECONDS = 900
+    SHEETS_MAX_TRIES = 4
 
     def __init__(self, settings: Settings, jobs: JobQueue, watchlist: Watchlist, bot=None, notify=None,
                  critic_llm=None, zoom_notify=None):
@@ -201,6 +205,10 @@ class DailyScheduler:
         self._week_tries = 0
         self._week_day = ""
         self._valuation_stamp = settings.data_dir / "last_valuation_run.txt"
+        self._sheets_stamp = settings.data_dir / "last_sheets_export.txt"
+        self._sheets_next = 0.0
+        self._sheets_tries = 0
+        self._sheets_day = ""
         self._valuation_next = 0.0
         self._valuation_tries = 0
         self._valuation_day = ""
@@ -230,6 +238,54 @@ class DailyScheduler:
         threading.Thread(target=self._pick_loop, name="ai-pick", daemon=True).start()
         # The valuation cards: minutes of VCI calls on a first run, never in the way of the reports.
         threading.Thread(target=self._valuation_loop, name="dinhgia", daemon=True).start()
+        # The copy on Google Sheets: its own thread, said once at start when it is off.
+        from vnbot import sheets
+
+        if sheets.why_off():
+            logger.info("Sheets export off: %s", sheets.why_off())
+        else:
+            threading.Thread(target=self._sheets_loop, name="sheets", daemon=True).start()
+
+    def _sheets_loop(self) -> None:
+        while True:
+            try:
+                day = self._sheets_due()
+                if day:
+                    self._sheets_export(day)
+            except Exception:  # noqa: BLE001 - the loop must keep running
+                logger.exception("Sheets export loop failed")
+            time.sleep(30)
+
+    def _sheets_due(self) -> str | None:
+        from tradingagents.market import vn_rules
+        from vnbot import sheets
+
+        if time.time() < self._sheets_next or sheets.why_off():
+            return None
+        now = vn_rules.now_vn()
+        day = now.strftime("%Y-%m-%d")
+        if not vn_rules.is_session_day(day) or now.strftime("%H:%M") < sheets.EXPORT_TIME:
+            return None
+        return None if self._read(self._sheets_stamp) == day else day
+
+    def _sheets_export(self, day: str) -> None:
+        """One cycle of the copy on Google Sheets; a tab that failed is tried again later (its rows
+        wait), up to SHEETS_MAX_TRIES a day. Never raises."""
+        from vnbot import sheets, store
+
+        if self._sheets_day != day:
+            self._sheets_day, self._sheets_tries = day, 0
+        self._sheets_tries += 1
+        result = sheets.Exporter(self.settings.data_dir, trader=self.bot if self.bot is not None and hasattr(self.bot, "paper") else None,
+                                 store=store.current(), settings=self.settings).run(day)
+        if all(n >= 0 for n in result.values()) or self._sheets_tries >= self.SHEETS_MAX_TRIES:
+            write_text_atomic(self._sheets_stamp, day)
+            if any(n < 0 for n in result.values()):
+                failed = ", ".join(k for k, v in result.items() if v < 0)
+                self.notify(f"⚠️ Ghi bảng tính Google Sheets phiên {day} lỗi ở tab {failed} sau {self._sheets_tries} lần; "
+                            "các dòng đó sẽ ghi vào lượt sau. Xem /bangtinh.")
+            return
+        self._sheets_next = time.time() + self.SHEETS_RETRY_SECONDS * self._sheets_tries
 
     def _valuation_loop(self) -> None:
         while True:

@@ -402,4 +402,50 @@ t.ok("the old address leads to the new one", old.status_code == 301 and old.head
 t.ok("the button: a forced run of today's live data, the page then says so", calls == [("2026-10-23", True, True)]
      and page.status_code == 200 and "Chạy tay lúc" in page.text and "AI chọn BBB" in page.text, (calls, cpw._LAST))
 
+# ───────────── 9. does the confidence mean anything? Brier against the base rate ─────────────
+
+
+def session(day, conf, pick_pct, other_pct):
+    return {"day": day, "pick": {"symbol": "P", "confidence": conf}, "ranking": ["P", "O"],
+            "candidates": [{"symbol": "P", "r10": {"status": "closed", "pct": pick_pct}},
+                           {"symbol": "O", "r10": {"status": "closed", "pct": other_pct}}]}
+
+
+few = [session(f"2026-09-{i + 1:02d}", 80, 2.0, 0.0) for i in range(9)]
+b = cp.stats(few)["brier"]
+t.ok("under BRIER_MIN sessions with a choice: no score, 'chưa đủ dữ liệu' with the count",
+     cp.BRIER_MIN == 10 and b["n"] == 9 and b["ai"] is None and b["buckets"] == []
+     and any(line.startswith("• AI đoán chuẩn không (Brier): chưa đủ dữ liệu (9/10") for line in cp.stats_lines(cp.stats(few))))
+# 12 sessions: 6 at 90% that beat the mean 5 times, 6 at 55% that beat it once -> the confidence tracks the outcome
+days = ([session(f"2026-09-{i + 1:02d}", 90, 3.0 if i < 5 else -1.0, 0.0) for i in range(6)]
+        + [session(f"2026-09-{i + 7:02d}", 55, 3.0 if i == 0 else -1.0, 0.0) for i in range(6)])
+b = cp.stats(days)["brier"]
+hits = [1] * 5 + [0] + [1] + [0] * 5
+base = sum(hits) / 12
+ai = (sum((0.9 - h) ** 2 for h in hits[:6]) + sum((0.55 - h) ** 2 for h in hits[6:])) / 12
+base_score = sum((base - h) ** 2 for h in hits) / 12
+t.ok("Brier of the AI's confidence against the base rate (the observed hit rate), the skill, by hand",
+     b["n"] == 12 and b["ai"] == round(ai, 3) and b["base"] == round(base_score, 3) and b["hit_rate"] == 50.0
+     and b["skill"] == round(1 - ai / base_score, 2) and b["skill"] > 0, b)
+buckets = {x["label"]: x for x in b["buckets"]}
+t.ok("the calibration table by bucket: n, mean confidence, hit rate, mean excess",
+     buckets[">85"]["n"] == 6 and buckets[">85"]["hit_rate"] == 83.3 and buckets[">85"]["conf"] == 90.0
+     and buckets[">85"]["excess"] == round((3 * 5 - 1) / 12, 2) and buckets["≤60"]["n"] == 6 and buckets["≤60"]["hit_rate"] == 16.7
+     and buckets["61-75"]["n"] == 0 and buckets["76-85"]["n"] == 0, buckets)
+lines = cp.stats_lines(cp.stats(days))
+t.ok("the lines of /thamdinh: the score, the verdict, the buckets", any("Brier" in x and "skill" in x and "độ tin của AI có giá trị" in x
+                                                                       for x in lines)
+     and any(x.startswith("  Theo độ tin: ≤60: 6 phiên") and ">85: 6 phiên, thắng TB 83%" in x for x in lines), lines[-4:])
+flipped = ([session(f"2026-09-{i + 1:02d}", 90, -1.0, 0.0) for i in range(6)]
+           + [session(f"2026-09-{i + 7:02d}", 55, 3.0, 0.0) for i in range(6)])
+bf = cp.stats(flipped)["brier"]
+t.ok("confidence pointing the wrong way: negative skill, said", bf["skill"] < 0
+     and any("đoán ngược chiều kết quả" in x for x in cp.stats_lines(cp.stats(flipped))))
+nopick = [dict(s, pick={"symbol": "", "confidence": 0}) for s in days]
+t.ok("sessions without a pick do not count; the checkpoints are untouched",
+     cp.stats(nopick)["brier"]["n"] == 0 and cp.CHECKPOINTS == (20, 40) and cp.stats(days)["checkpoints"] == [])
+html_ = cpw._brier(cp.stats(days))
+t.ok("the web table", "Brier của AI <b>" in html_ and "<td>&gt;85</td>" in html_ and "83%" in html_, html_[:300])
+t.ok("...or 'chưa đủ dữ liệu'", "Chưa đủ dữ liệu: 9/10" in cpw._brier(cp.stats(few)))
+
 t.done()

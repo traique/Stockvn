@@ -248,7 +248,11 @@ def _common_start(*books) -> str | None:
 
 
 def _chart(trader) -> str:
+    from vnbot import etf_bench
+
     paper, mom, fb = trader.paper(), trader.momentum_book(), trader.factor_book()
+    etf_state = etf_bench.load(trader.settings.data_dir)
+    etf_hist = etf_bench.series(etf_state)
     dates = sorted({h["date"] for h in paper.history} | {h["date"] for h in mom.history}
                    | {h["date"] for h in fb.history})
     # Every line is 100 on the same session (the books started on different days):
@@ -267,7 +271,62 @@ def _chart(trader) -> str:
         {"name": "Động lượng", "color": "var(--c-mom)", "values": indexed(mom.history, "nav")},
         {"name": "VNINDEX", "color": "var(--c-bench)", "values": indexed(bench_hist, "benchmark"), "dashed": True},
     ]
+    if etf_hist and any(h["date"] >= base for h in etf_hist):
+        series.append({"name": f"ETF {etf_state['symbol']}", "color": "var(--c-etf, #b5651d)", "values": indexed(etf_hist, "nav"),
+                       "dashed": True})
     return ui.nav_chart(dates, series, run_time=_run_time(trader))
+
+
+def _etf_card(trader) -> str:
+    """The ETF buy-and-hold benchmark (vnbot.etf_bench): the whole paper capital in one ETF since the
+    measurement's first session, fees and the sell tax as the books pay them."""
+    from vnbot import etf_bench
+
+    state = etf_bench.load(trader.settings.data_dir)
+    st = etf_bench.stats(state)
+    code = (state or {}).get("symbol") or etf_bench.symbol()
+    if st is None:
+        why = (state or {}).get("error")
+        body = ('<p class="muted" style="margin:0">Chưa có phiên nào: bắt đầu ở phiên đầu tiên bot chạy sau khi cập nhật '
+                "(hoặc <code>BENCH_ETF_START</code>), mua ở giá đóng cửa phiên đó." + (f" ⚠️ {html.escape(why)}" if why else "") + "</p>")
+    else:
+        kpis = "".join([
+            ui.kpi("NAV", ui.money_short(st["nav"]), f"từ {html.escape(st['start'])}, giá {ui.money(st['close'])}"),
+            ui.kpi("Lợi nhuận", ui.pct(st["return_pct"]), "giữ nguyên, giá điều chỉnh cổ tức", ui.tone(st["return_pct"])),
+            ui.kpi("Nếu bán hôm nay", ui.pct(st["return_net_pct"]), "sau phí bán và thuế 0,1%", ui.tone(st["return_net_pct"])),
+            ui.kpi("Sụt giảm tối đa", ui.pct(st["max_drawdown_pct"], signed=False), f"{st['sessions']} phiên"),
+        ])
+        body = f'<div class="kpis">{kpis}</div>' + (f'<p class="muted small">⚠️ Lần cập nhật gần nhất lỗi: {html.escape(st["error"])} '
+                                                    "(giữ số liệu trước đó).</p>" if st["error"] else "")
+    return ui.card(f"Mốc so sánh: ETF {html.escape(code)} mua-giữ", body,
+                   sub="Toàn bộ vốn ảo mua một lần, lô 100, phí mua như sổ ảo; câu hỏi của đợt đo: bot có hơn mua-giữ ETF sau phí và thuế không",
+                   cls="accent-gold")
+
+
+def _snapshot_card(trader) -> str:
+    """The thresholds frozen for the measurement (vnbot.quant_snapshot) against the set in force."""
+    from vnbot import quant_snapshot
+
+    st = quant_snapshot.status(trader.settings.data_dir, auto_calibrate=trader.settings.calibrate)
+    auto = ('<span class="badge b-watch">AUTO_CALIBRATE đang bật</span>' if st["auto_calibrate"]
+            else '<span class="badge b-ok">AUTO_CALIBRATE=0 (đóng băng)</span>')
+    if not st["taken"]:
+        state = "<p>Chưa có ảnh chụp: bot chụp ở lần chạy phiên đầu tiên sau khi cập nhật, hoặc bấm nút.</p>"
+    elif st["changed"]:
+        rows = "".join(f'<tr><td><code>{html.escape(c["name"])}</code></td><td class="num muted">{c["frozen"]}</td>'
+                       f'<td class="num"><b>{c["now"]}</b></td></tr>' for c in st["changed"])
+        state = (f'<p><span class="badge b-watch">đã đổi {len(st["changed"])} tham số</span> so với ảnh chụp '
+                 f'{html.escape(st["day"] or st["taken_at"][:10])} (mã {html.escape(st["fingerprint"])} → {html.escape(st["now"])})</p>'
+                 + ui.table([("Tham số", ""), ("Lúc chụp", "num"), ("Hiện hành", "num")], rows, ""))
+    else:
+        state = (f'<p><span class="badge b-ok">không đổi</span> so với ảnh chụp {html.escape(st["day"] or st["taken_at"][:10])} '
+                 f'(mã {html.escape(st["fingerprint"])})</p>')
+    button = ('<form method="post" action="/bot/snapshot" style="margin:0">'
+              '<button class="btn btn-ghost" type="submit">Chụp lại tham số</button></form>')
+    body = (f"<p>{auto}</p>" + state
+            + '<p class="muted small">Chỉ so các ngưỡng hiệu chỉnh đêm có thể đổi (Quant Engine, Động lượng); công tắc MUA breakout và '
+              "bộ Phòng thủ cố định không tính. Đổi giữa đợt: báo một lần trên Telegram, ghi vào tab ck_summary.</p>" + button)
+    return ui.card("Tham số đóng băng cho đợt đo", body, cls="accent-sa")
 
 
 def _run_time(trader) -> str:
@@ -336,6 +395,7 @@ def _bot_page(trader, msg: str = "") -> str:
     parts.append(ui.card("Hiệu quả ba chiến lược", _chart(trader),
                          sub="NAV quy về 100 tại phiên " + html.escape(base or "đầu tiên")
                              + ", phiên đầu tiên chung của ba tài khoản, đối chiếu với VNINDEX"))
+    parts.append('<div class="mt">' + _etf_card(trader) + "</div>")
     parts.append('<div class="mt">' + _capital_card(trader) + "</div>")
     basket_html = ('<div class="chips">' + "".join(f'<span class="chip">{html.escape(s)}</span>' for s in basket) + "</div>"
                    if basket else "tiền mặt")
@@ -353,6 +413,7 @@ def _bot_page(trader, msg: str = "") -> str:
     parts.append(ui.card("Danh mục Phòng thủ hiện tại", basket_html if basket else
                          '<span class="muted">Đang nắm giữ tiền mặt (VNINDEX dưới đường trung bình) hoặc chưa đến kỳ xếp hạng.</span>'))
     parts.append('<div class="mt">' + _breakout_card(current) + "</div>")
+    parts.append('<div class="mt">' + _snapshot_card(trader) + "</div>")
     prow = []
     groups = [(qp.FACTOR_FIXED, "Phòng thủ (cố định)"), (qp.MOMENTUM_TUNABLE, "Động lượng"), (qp.TUNABLE, "Engine"),
               (qp.MANUAL, "Engine (đổi tay)")]
@@ -964,6 +1025,18 @@ sàng lọc {html.escape(scope)} cùng danh sách theo dõi; những mã nổi b
         msg = ("✅ Đã bật lại MUA breakout của Quant Engine, từ lượt quyết định kế tiếp." if value else
                "✅ Đã tắt MUA breakout: từ lượt quyết định kế tiếp Quant Engine không mở MUA mới ở mã breakout (lệnh mua đã "
                "đặt cho phiên tới vẫn giữ); kết quả bóng của các mã đó ở trang Vì sao chưa MUA.")
+        return RedirectResponse(f"/bot?msg={quote(msg)}", status_code=303)
+
+    @app.post("/bot/snapshot", dependencies=post_guard)
+    def bot_snapshot():
+        """Freeze the thresholds in force as the measurement's reference (vnbot.quant_snapshot)."""
+        if trader is None or settings.trade_mode == "off":
+            raise HTTPException(404, "Bot giao dịch đang tắt (TRADE_MODE=off).")
+        from vnbot import quant_snapshot
+
+        state = quant_snapshot.take(trader.settings.data_dir, day=trader.last_day(), note="trang Bot giao dịch: chụp lại")
+        logger.info("Web: quant params snapshot taken (%s)", state["fingerprint"])
+        msg = f"✅ Đã chụp bộ ngưỡng hiện hành làm mốc của đợt đo (mã {state['fingerprint']})."
         return RedirectResponse(f"/bot?msg={quote(msg)}", status_code=303)
 
     @app.post("/channels/{name}", dependencies=post_guard)
