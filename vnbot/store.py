@@ -365,7 +365,7 @@ class Store:
                            "ORDER BY id LIMIT ?", ("PENDING", before_day, int(after_id), int(limit)), fetch=True)
 
     OUTCOME_COLS = ("day, symbol, source, action, bias, gate, near, ret_5, ret_10, ret_20, vni_5, vni_10, vni_20, "
-                    "plan_outcome, plan_r")
+                    "plan, plan_outcome, plan_r, resolved_ts")
 
     def outcome_rows(self, since: str) -> list[dict]:
         """The statistics' rows since ``since``: new positions only (not a held stock), one

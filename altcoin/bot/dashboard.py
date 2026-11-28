@@ -83,6 +83,8 @@ function render(d){
   put('meta',`${d.shared_db?'DB dùng chung (Supabase)':'DB cục bộ (SQLite)'} · leader: <b>${esc(d.leader||'—')}</b> · ${(d.instances||[]).map(i=>esc(i.instance)+' '+(((i.info||'').match(/v[\d.]+/)||[''])[0])+' '+(Date.now()/1000-i.ts>120?'(mất liên lạc)':'●')).join(' · ')}`);
   renderAI(d.ai||{});
   renderLearn(d.learn);
+  renderBooks(d.books,d.noai);
+  renderGrid(d.grid);
   if($('svg')){drawChart(d.curve);put('crange',d.curve&&d.curve.length?`${d.curve.length} điểm · ghi mỗi 5 phút`:'');}
   if($('open')){
     put('openN',(d.open||[]).length?`${d.open.length} lệnh`:'');
@@ -93,6 +95,37 @@ function render(d){
     const ls=d.last_scan;put('scan',ls?`<b>Lần quét cuối</b> ${ago(ls.ts)} trước · ${ls.scanned} coin · <b class="${ls.passed?'up':''}">${ls.passed} đạt</b>${ls.top&&ls.top.length?' ('+ls.top.map(esc).join(', ')+')':''}${ls.n_open?` – đủ ${ls.n_open} lệnh, chỉ ghi bóng`:''}<br>Loại vì: ${Object.entries(ls.reasons||{}).map(([k,v])=>`${esc(k)} <b>${v}</b>`).join(' · ')||'—'}${ls.near&&ls.near.length?`<br>Suýt đạt: ${ls.near.map(esc).join(', ')}`:''}`:'Chưa quét lần nào.');
   }
   renderLog();
+}
+const rfmt=v=>v==null?'—':(v>=0?'+':'')+f(v,2)+'R';
+function renderBooks(c,noai){
+  const el=$('books'),sub=$('booksSub');if(!el)return;
+  if(!c||!c.books||!Object.keys(c.books).length){el.innerHTML='<div class="empty">Sổ không AI đang tắt (NOAI_ENABLED=false) hoặc bot đang khởi động.</div>';return}
+  if(sub)sub.textContent=c.since?`đợt đo ${c.days} ngày · từ ${t(c.since)}`:'';
+  const B=c.books,keys=Object.keys(B);
+  const row=(l,fn)=>`<tr><td>${l}</td>${keys.map(k=>`<td>${fn(B[k])}</td>`).join('')}</tr>`;
+  let h=`<table class="mini"><tr><th></th>${keys.map(k=>`<th>${esc(B[k].name)}${B[k].halted?' <span class="out SL">đã dừng</span>':''}</th>`).join('')}</tr>`+
+   row('Lệnh đã đóng',s=>`${s.n}${s.open?` <small class="muted">(+${s.open} mở)</small>`:''}`)+
+   row('R trung bình',s=>`<span class="${s.mean_r>0?'up':s.mean_r<0?'dn':''}">${rfmt(s.mean_r)}</span>${s.n>=2?` <small class="muted">± ${f(s.se,2)} (${s.days} ngày)</small>`:''}`)+
+   row('Tỉ lệ thắng',s=>s.winrate==null?'—':s.winrate+'%')+
+   row('Vốn',s=>s.equity==null?'—':`${f(s.equity,4)} <span class="${s.ret_pct>=0?'up':'dn'}">${s.ret_pct==null?'':sgn(s.ret_pct)+f(Math.abs(s.ret_pct),1)+'%'}</span>`)+
+   row('Sụt tối đa',s=>f(s.max_dd_pct,1)+'%')+
+   row('Tổng phí',s=>`${f(s.fees,4)}${s.fee_share!=null?` <small class="muted">= ${f(s.fee_share,0)}% lãi gộp</small>`:''}`)+'</table>';
+  const p=c.paired;
+  if(p){h+=`<div class="note small" style="padding-top:8px">`+(p.n?`<b>Theo cặp tín hiệu</b> (${p.n} lệnh noai, ${p.matched} có lệnh main cùng tín hiệu, ${p.days} ngày): noai − main = <b class="${p.diff>0?'up':p.diff<0?'dn':''}">${rfmt(p.diff)}</b> ± ${f(p.se,2)}R/lệnh, t ${f(p.t,1)}${p.pending?` · ${p.pending} cặp chờ main đóng`:''}${p.main_only?` · ${p.main_only} lệnh main không có lệnh noai`:''}`:'Theo cặp tín hiệu: chưa có lệnh noai nào đóng.')+
+   `<br><span class="muted">Hai sổ nhận cùng ứng viên, cùng giá last lúc quyết định; sổ không AI vào không hỏi AI, hệ số rủi ro 1,0×. Cần ≥ ${c.min_trades} lệnh mỗi sổ và ≥ 3 tuần; main không tốt hơn noai quá 2 sai số chuẩn → AI không thêm giá trị.</span></div>`}
+  if(noai&&noai.open&&noai.open.length)h+=`<div class="list" style="margin-top:8px">${noai.open.map(x=>`<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span class="pill" style="font-size:10px">không AI</span></div><div class="r">${f(x.notional,1)} USDT</div><div class="m">Vào ${px(x.entry)} · SL ${px(x.sl)} · mở ${ago(x.opened_at)} trước${x.ai_verdict?` · AI (sổ chính): ${esc(x.ai_verdict)}`:''}</div></div>`).join('')}</div>`;
+  el.innerHTML=h;
+}
+function renderGrid(g){
+  const el=$('grid'),sub=$('gridSub');if(!el)return;
+  if(!g||!g.enabled){el.innerHTML='<div class="empty">Sổ Grid đang tắt – đặt GRID_ENABLED=true (Stockvn: ALT_GRID_ENABLED=true) rồi khởi động lại.</div>';return}
+  if(sub)sub.textContent=`${(g.pairs||[]).join(', ')} · vòng ${g.round}`;
+  const runs=g.runs||[];
+  if(!runs.length){el.innerHTML='<div class="empty">Đang mở vòng đầu…</div>';return}
+  el.innerHTML=runs.map(m=>m.state==='chưa mở'?`<div class="row"><div class="t">${esc(m.pair)}</div><div class="m">chưa mở vòng</div></div>`:
+   `<div class="row"><div class="t">${esc(m.pair)} <span class="pill ${m.stopped?'':'gold'}" style="font-size:10px">${esc(m.state)}</span></div>
+    <div class="r ${m.ret_pct>=0?'up':'dn'}">${f(m.value,2)}<small>${sgn(m.ret_pct)}${f(Math.abs(m.ret_pct),2)}% · HODL ${sgn(m.hodl_pct)}${f(Math.abs(m.hodl_pct),2)}%</small></div>
+    <div class="m">Vùng ${px(m.low)}–${px(m.high)} · ${m.levels} mức · lãi đã khoá <b class="${m.realized>=0?'up':'dn'}">${sgn(m.realized)}${f(Math.abs(m.realized),3)}</b> · tồn kho ${sgn(m.inventory_pnl)}${f(Math.abs(m.inventory_pnl),3)} · phí ${f(m.fees,3)} · sụt tối đa ${f(m.max_dd_pct,2)}% · ${m.rounds} vòng (${m.rounds_per_day}/ngày) · trong vùng ${m.in_range_pct==null?'—':m.in_range_pct+'%'} · so HODL <b class="${m.vs_hodl_pct>=0?'up':'dn'}">${sgn(m.vs_hodl_pct)}${f(Math.abs(m.vs_hodl_pct),2)} điểm %</b>${m.stopped?`<br><span class="dn">Dừng: ${esc(m.stopped)}</span>`:''}</div></div>`).join('');
 }
 function renderAI(a){
   const sub=$('aiSub'),last=$('aiLast'),el=$('aiModels');if(!el)return;
@@ -220,6 +253,8 @@ SKEL = '<div class="skel"></div><div class="skel" style="width:70%"></div>'
 def _home_body():
     tiles = ui.card("Hiệu suất & AI", '<div class="kpis" id="tiles">' + SKEL + "</div>",
                     sub="", sub_id="meta")
+    books_card = ui.card("So sánh sổ: có AI và không AI", '<div id="books">' + SKEL + "</div>", sub_id="booksSub")
+    grid_card = ui.card("Grid spot (chạy ảo)", '<div class="list" id="grid">' + SKEL + "</div>", sub_id="gridSub", flush=True)
     equity = ui.card("Đường vốn", '<div class="chart"><svg id="svg" preserveAspectRatio="none" role="img" '
                      'aria-label="Biểu đồ vốn theo thời gian"></svg><div class="tip" id="tip"></div></div>',
                      sub_id="crange", flush=False)
@@ -244,7 +279,7 @@ def _home_body():
                 f'<div class="stat"><div class="l">{x}</div><div class="v">—</div><div class="s">&nbsp;</div></div>'
                 for x in ("Vốn hiện tại", "Lãi/lỗ đã chốt", "Tỉ lệ thắng", "Lệnh đang mở")) + "</div>"
             + f'<div class="grid g-wide">{equity}{opens}</div>'
-            + f'<div class="mt">{tiles}</div><div class="mt">{logs}</div>')
+            + f'<div class="mt">{tiles}</div><div class="grid g-wide mt">{books_card}{grid_card}</div><div class="mt">{logs}</div>')
 
 
 def _ai_body():

@@ -81,6 +81,9 @@ PENDING_MINUTES = 30       # a request started this long ago without an answer r
 H10 = 10                   # the quick score: the close this many sessions after the buy
 MAX_HOLD = 60              # sessions before a rule trade still open is scored at the close
 CHECKPOINTS = (20, 40)     # sessions with a choice before each verdict
+BRIER_MIN = 10             # sessions with a choice (and a confidence) before the Brier score is shown
+# confidence buckets of the calibration table: (label, low, high) in %
+BUCKETS = (("≤60", 0, 60), ("61-75", 61, 75), ("76-85", 76, 85), (">85", 86, 100))
 ALERT_LEVELS = ("stop", "sell", "early")
 VIEWS = ("GIỮ", "CÂN NHẮC BÁN")
 CAUSES = ("tin riêng của mã", "theo thị trường chung", "chưa rõ")
@@ -794,7 +797,8 @@ def stats(days: list[dict], notes: list[dict] | None = None) -> dict:
             spread = statistics.mean(quick[s] for s in ranking[:half]) - statistics.mean(quick[s] for s in ranking[-half:])
             site = [c for c in cands if c.get("source") != "bot"]
             row = {"day": entry["day"], "mean": mean, "spread": spread,
-                   "strongest": quick[site[0]["symbol"]] if site else None}
+                   "strongest": quick[site[0]["symbol"]] if site else None,
+                   "conf": (entry.get("pick") or {}).get("confidence")}
             if pick in quick:
                 choice.append({**row, "pick": quick[pick]})
             else:
@@ -822,6 +826,7 @@ def stats(days: list[dict], notes: list[dict] | None = None) -> dict:
                    diff=statistics.mean(r["pick"] - r["mean"] for r in choice))
     out["choice_days"] = [r["day"] for r in choice]
     out["checkpoints"] = [checkpoint(choice[:cp], cp) for cp in CHECKPOINTS if len(choice) >= cp]
+    out["brier"] = brier(choice)
     views = {v: [] for v in VIEWS}
     against = {v: [] for v in VIEWS}
     for entry in days:
@@ -837,6 +842,52 @@ def stats(days: list[dict], notes: list[dict] | None = None) -> dict:
     out["alerts"] = {v: {"n": len(xs), "r10": _mean(xs)} for v in VIEWS
                      for xs in [[n["result"]["r10"] for n in done if n.get("view") == v]]}
     return out
+
+
+def brier(rows: list[dict]) -> dict:
+    """Does the AI's confidence mean anything? Its confidence (0-100) read as the probability
+    that its pick beats the session's mean; the Brier score of that against the score of
+    always saying the observed hit rate (the base rate), the skill (1 - AI / base: positive
+    = better than the base rate, negative = the confidence points the wrong way), and the
+    hit rate and mean excess return by confidence bucket. Shown from ``BRIER_MIN`` sessions."""
+    scored = [r for r in rows if r.get("conf") is not None]
+    n = len(scored)
+    out = {"n": n, "min": BRIER_MIN, "ai": None, "base": None, "skill": None, "hit_rate": None, "buckets": []}
+    if n < BRIER_MIN:
+        return out
+    hits = [1.0 if r["pick"] > r["mean"] else 0.0 for r in scored]
+    probs = [max(0.0, min(1.0, float(r["conf"]) / 100)) for r in scored]
+    base = sum(hits) / n
+    ai_score = sum((p - y) ** 2 for p, y in zip(probs, hits, strict=True)) / n
+    base_score = sum((base - y) ** 2 for y in hits) / n
+    out.update(ai=round(ai_score, 3), base=round(base_score, 3), hit_rate=round(100 * base, 1),
+               skill=round(1 - ai_score / base_score, 2) if base_score > 1e-12 else None)
+    for label, low, high in BUCKETS:
+        sub = [r for r in scored if low <= float(r["conf"]) <= high]
+        if not sub:
+            out["buckets"].append({"label": label, "n": 0, "conf": None, "hit_rate": None, "excess": None})
+            continue
+        out["buckets"].append({"label": label, "n": len(sub), "conf": round(statistics.mean(float(r["conf"]) for r in sub), 1),
+                               "hit_rate": round(100 * sum(1 for r in sub if r["pick"] > r["mean"]) / len(sub), 1),
+                               "excess": round(statistics.mean(r["pick"] - r["mean"] for r in sub), 2)})
+    return out
+
+
+def brier_lines(b: dict | None) -> list[str]:
+    if not b:
+        return []
+    if b["n"] < b["min"]:
+        return [f"• AI đoán chuẩn không (Brier): chưa đủ dữ liệu ({b['n']}/{b['min']} phiên có độ tin)"]
+    word = ("độ tin của AI có giá trị" if b["skill"] is not None and b["skill"] > 0
+            else "độ tin của AI đoán ngược chiều kết quả" if b["skill"] is not None and b["skill"] < 0
+            else "độ tin của AI không hơn tỉ lệ nền")
+    lines = [f"• AI đoán chuẩn không ({b['n']} phiên): Brier {_num(b['ai'], 3)} so với {_num(b['base'], 3)} nếu luôn đoán theo "
+             f"tỉ lệ nền {_num(b['hit_rate'], 0)}% → skill {_num(b['skill'], 2)}: {word}"]
+    rows = [f"{x['label']}: {x['n']} phiên, thắng TB {_num(x['hit_rate'], 0)}%, chênh {_pct(x['excess'], 2)}"
+            for x in b["buckets"] if x["n"]]
+    if rows:
+        lines.append("  Theo độ tin: " + " · ".join(rows))
+    return lines
 
 
 def checkpoint(rows: list[dict], size: int) -> dict:
@@ -883,6 +934,7 @@ def stats_lines(st: dict) -> list[str]:
     for v, x in st["alerts"].items():
         if x["n"]:
             lines.append(f"• Sau cảnh báo, AI nói {v}: {x['n']} lần, giá sau 10 phiên TB {_pct(x['r10'], 2)}")
+    lines += brier_lines(st.get("brier"))
     for cp in st["checkpoints"]:
         ci = cp["ci"]
         lines.append(f"{'🏁' if cp['final'] else '📍'} Mốc {cp['size']} phiên{'' if cp['final'] else ' (sơ bộ)'}: {cp['text']} "

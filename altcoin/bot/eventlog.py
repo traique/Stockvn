@@ -26,7 +26,7 @@ def _secret_values():
         return []
     keys = ("TELEGRAM_TOKEN", "OPENROUTER_API_KEY", "NINEROUTER_API_KEY", "CUSTOM_API_KEY", "OKX_API_SECRET",
             "OKX_PASSPHRASE", "OKX_API_KEY", "ZOOM_CLIENT_SECRET", "ZOOM_SECRET_TOKEN", "ZOOM_WEBHOOK_TOKEN",
-            "ZOOM_VERIFICATION_TOKEN", "DASHBOARD_PASS")
+            "ZOOM_VERIFICATION_TOKEN", "DASHBOARD_PASS", "SHEETS_SA_JSON")
     out = []
     for k in keys:
         v = str(getattr(cfg, k, "") or "")
