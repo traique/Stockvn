@@ -138,6 +138,9 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_OPENROUTER_MODELS` | trống | Model OpenRouter riêng của Altcoin (`auto` = tự dò model free). Trống = `OPENROUTER_MODEL` của Cổ phiếu (mặc định `auto`) |
 | `ALT_CUSTOM_*` | trống | Nhà cung cấp AI tự chọn của Altcoin (không dùng chung với Cổ phiếu) |
 | `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo, đặt sau lần khởi động 3.3.0 đầu tiên** (mục 10.1) |
+| `ALT_BTC_DAILY_GATE` | `true` | 3.4.0: cổng regime BTC khung **ngày** – cấm long khi BTC ngày đang giảm, cấm short khi đang tăng (nến 1D đã đóng, EMA21/EMA50). `false` = tắt cổng, hai luật `long_btc_bear_1d` / `short_btc_bull_1d` vẫn theo dõi bóng cho bộ tự học. Lý do và backtest: `docs/chandoan_2026-11-28` |
+| `ALT_AI_OVERRIDE_MIN_SCORE` | 5.0 (3.4.0; bản cũ 6,5) | AI phản đối dưới ngưỡng phủ quyết thì tín hiệu điểm ≥ mức này vẫn vào nửa rủi ro. 5,0 = `MIN_SCORE`: AI chỉ điều tiết khối lượng, không chặn (29 ngày chạy ảo: tín hiệu AI chặn +0,36R, lệnh AI duyệt −0,02R). Muốn AI chặn cứng như cũ: `6.5` |
+| `ALT_MAX_DRAWDOWN` | 0.15 (3.4.0; bản cũ 0,30) | Cầu dao: sụt quá mức này từ đỉnh thì dừng hẳn, chờ `/alt resume` – bằng ngưỡng "tạm dừng & thiết kế lại" của quy trình đo 4 tuần |
 
 ### 4.3 AI dùng chung khi thiếu khoá riêng
 
@@ -202,7 +205,7 @@ Altcoin còn đọc `altcoin/.env` và `altcoin/bot.env` trên server (tên bi�
 | Khoá kênh, Render, đăng nhập riêng | Luôn rỗng (mục 4.4) |
 | Thông số còn lại | File thắng panel (như bot cũ) |
 
-Từ 3.3.0 `altcoin/botkeep.env` chỉ còn là mẫu an toàn (mẫu cho chế độ chạy độc lập): đã bỏ hồ sơ **test gắt** (`RISK_PER_TRADE=0.10`, `MAX_TOTAL_RISK=0.20`, `MAX_DAILY_LOSS=0.30`, `MAX_DRAWDOWN=0.50`). Nếu panel (`ALT_RISK_PER_TRADE`…) hoặc `altcoin/bot.env` trên server còn các giá trị đó thì xoá để dùng mặc định (3%/lệnh, tổng 5%, cầu dao 12%/ngày, 30% DD).
+Từ 3.3.0 `altcoin/botkeep.env` chỉ còn là mẫu an toàn (mẫu cho chế độ chạy độc lập): đã bỏ hồ sơ **test gắt** (`RISK_PER_TRADE=0.10`, `MAX_TOTAL_RISK=0.20`, `MAX_DAILY_LOSS=0.30`, `MAX_DRAWDOWN=0.50`). Nếu panel (`ALT_RISK_PER_TRADE`…) hoặc `altcoin/bot.env` trên server còn các giá trị đó thì xoá để dùng mặc định (3%/lệnh, tổng 5%, cầu dao 12%/ngày, 15% DD từ 3.4.0 – bản cũ 30%).
 
 ---
 

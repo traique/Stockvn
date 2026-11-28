@@ -135,6 +135,42 @@ def _feat(row):
         return {}
 
 
+def ai_win_prob(row):
+    """Xác suất thắng mà AI ngụ ý cho một tín hiệu đã hỏi AI, theo đúng định nghĩa confidence trong prompt (ai.SYSTEM_ANALYZE):
+    đồng ý cùng hướng → confidence là chất lượng (xác suất thắng) = conf/100; SKIP hoặc đòi hướng ngược → confidence là mức
+    nguy hiểm = 1 − conf/100. Không có quyết định / độ chắc → None (không chấm)."""
+    dec, conf = (row.get("ai_decision") or "").upper().strip(), row.get("ai_conf")
+    if dec not in ("LONG", "SHORT", "SKIP") or conf is None:
+        return None
+    try:
+        p = max(0.0, min(1.0, float(conf) / 100))
+    except (TypeError, ValueError):
+        return None
+    return p if dec == (row.get("side") or "").upper() else 1 - p
+
+
+def ai_calibration(rows):
+    """v3.4 – AI đoán có chuẩn không (Brier score) trên các tín hiệu đã hỏi AI và đã có kết quả bóng (mọi nguồn: được vào,
+    bị từ chối, vượt phủ quyết…): brier = trung bình (p − thắng)², p = ai_win_prob, thắng = 1 nếu R > 0. So với `brier_base`
+    = tỉ lệ nền × (1 − tỉ lệ nền) – Brier của một "AI" luôn đoán đúng bằng tỉ lệ thắng chung. skill = 1 − brier/brier_base:
+    > 0 là AI phân biệt được tín hiệu tốt/xấu, ≤ 0 là AI tệ hơn không có AI. Cần ≥ LEARN_MIN_SAMPLES mẫu mới nên tin.
+    29 ngày chạy ảo 30/10–27/11/2026: Brier 0,345 so với nền 0,234 (155 quyết định, skill −0,47) – AI đoán ngược chiều kết quả."""
+    pts = []
+    for r in rows:
+        p = ai_win_prob(r)
+        if p is None or r.get("outcome_r") is None:
+            continue
+        pts.append((p, 1 if (r["outcome_r"] or 0) > 0 else 0))
+    n = len(pts)
+    if not n:
+        return {"n": 0, "brier": None, "base_rate": None, "brier_base": None, "skill": None, "enough": False}
+    base = sum(y for _, y in pts) / n
+    brier = sum((p - y) ** 2 for p, y in pts) / n
+    bb = base * (1 - base)
+    return {"n": n, "brier": round(brier, 3), "base_rate": round(base, 3), "brier_base": round(bb, 3),
+            "skill": round(1 - brier / bb, 3) if bb > 0 else None, "enough": n >= cfg.LEARN_MIN_SAMPLES}
+
+
 def _describe_param(k, v):
     """Mô tả ngắn một tham số tự học đang khác mặc định (cho log / thông báo)."""
     if k == "trigger_w":
@@ -534,6 +570,7 @@ class Learner:
         st["ai_veto"] = {"rejected": _agg(rej), "taken": _agg(tak), "override": _agg(ovr),
                          "opposed": _agg(rej + ovr), "veto_conf": current_veto_conf(),
                          "veto_accuracy": round(100 * sum(1 for r in rej if (r["outcome_r"] or 0) <= 0) / len(rej), 1) if rej else None}
+        st["ai_calibration"] = ai_calibration(rows)
         self.last_stats = st
         self.store.set("learn_stats", st)
         return st, rows, tech
@@ -771,7 +808,8 @@ class Learner:
         self.store.set("ai_daily_key", key)
         payload = {
             "stats": {k: st[k] for k in ("total", "tech", "by_source", "by_side", "by_trigger", "by_rule",
-                                          "by_score", "by_session", "ai_veto", "exit_compare", "tp1_compare")},
+                                          "by_score", "by_session", "ai_veto", "ai_calibration", "exit_compare",
+                                          "tp1_compare")},
             "current_params": {"min_score": strategy.LEARNED.get("min_score") or cfg.MIN_SCORE,
                                "blocked_rules": strategy.LEARNED.get("blocks"),
                                "trigger_weights": strategy.LEARNED.get("trigger_w"),

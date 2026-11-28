@@ -68,6 +68,35 @@ assert S._gates(sh, "short", -1, None, chg1h=-1.0) == ""
 assert S._gates(sh, "short", -1, {"btc_chg_1h": cfg.BTC_GATE_CHG + 0.01}) == "BTC đang xu hướng tăng"
 print("✓ v3.2: cổng ngược nhịp 1h; cổng BTC %.1f%%" % cfg.BTC_GATE_CHG)
 
+# 4d) v3.4: regime BTC khung ngày – cổng cứng (BTC_DAILY_GATE) và hai luật ứng viên; thiếu dữ liệu ngày thì không chặn
+from bot.market import daily_regime
+assert cfg.BTC_DAILY_GATE is True, "mặc định v3.4: cổng ngày bật"
+assert S.btc_gate("long", {"btc_trend_1h": 1, "btc_trend_1d": -1}) == "BTC khung ngày đang giảm"
+assert S.btc_gate("short", {"btc_trend_1h": -1, "btc_trend_1d": 1}) == "BTC khung ngày đang tăng"
+assert S.btc_gate("long", {"btc_trend_1h": 1, "btc_trend_1d": 0}) == "" and S.btc_gate("long", {"btc_trend_1h": 1}) == ""
+assert S.btc_gate("short", {"btc_trend_1h": -1, "btc_trend_1d": -1}) == "" and S.btc_gate("long", {"btc_trend_1d": 1}) == ""
+assert S._gates(row(), "long", 1, {"btc_trend_1h": 0, "btc_trend_1d": -1}) == "BTC khung ngày đang giảm"
+assert S._gates(sh, "short", -1, {"btc_trend_1h": 0, "btc_trend_1d": 1}) == "BTC khung ngày đang tăng"
+assert S._gates(row(), "long", 1, {"btc_trend_1h": -1, "btc_trend_1d": -1}) == "BTC đang xu hướng giảm"   # cổng 1h xét trước
+cfg.BTC_DAILY_GATE = False
+try:
+    assert S.btc_gate("long", {"btc_trend_1d": -1}) == "" and S._gates(row(), "long", 1, {"btc_trend_1d": -1}) == ""
+    assert "long_btc_bear_1d" in S.matching_rules("long", {"btc_trend_1d": -1}), "tắt cổng: luật vẫn theo dõi bóng"
+finally:
+    cfg.BTC_DAILY_GATE = True
+assert "long_btc_bear_1d" in S.matching_rules("long", {"btc_trend_1d": -1})
+assert "long_btc_bear_1d" not in S.matching_rules("long", {"btc_trend_1d": 0}) and "long_btc_bear_1d" not in S.matching_rules("short", {"btc_trend_1d": -1})
+assert "short_btc_bull_1d" in S.matching_rules("short", {"btc_trend_1d": 1}) and "short_btc_bull_1d" not in S.matching_rules("short", {})
+assert "long_btc_bear_1d" not in cfg.DEFAULT_BLOCKS and "short_btc_bull_1d" not in cfg.DEFAULT_BLOCKS
+# daily_regime: cùng định nghĩa với xu hướng 1h, trên giá đóng nến ngày đã đóng; < 55 nến → chưa rõ
+assert daily_regime([100] * 10) == (0, 0.0)
+down = [100 - i * 0.5 for i in range(120)]
+up = [100 + i * 0.5 for i in range(120)]
+assert daily_regime(down)[0] == -1 and daily_regime(down)[1] < 0
+assert daily_regime(up)[0] == 1 and abs(daily_regime(up)[1] - round(100 * (up[-1] - up[-8]) / up[-8], 2)) < 1e-9
+assert daily_regime(down + [down[-1] + 30])[0] == 0        # bật mạnh 1 ngày: giá trên EMA21 nhưng EMA21 < EMA50 → chưa rõ
+print("✓ v3.4: cổng BTC khung ngày, luật long_btc_bear_1d / short_btc_bull_1d, market.daily_regime")
+
 # 5) điểm dòng tiền
 def sig(side, **ctx):
     return S.Signal("X/USDT:USDT", side, 5.3, 100, 1, 98, 104, [], ctx)
