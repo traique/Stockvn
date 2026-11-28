@@ -9,3 +9,4 @@ bot.env
 .bt_cache/
 bt_result*.json
 !altcoin/dist/
+research/out/

@@ -142,6 +142,34 @@ Bạn là nhà phân tích cho bot Altcoin và Cổ phiếu (chỉ paper).
   cho grid đã dừng.
 - Không đảo ngược AI, không tìm tham số "tốt nhất" trên dữ liệu vừa qua.
 - Kết quả: một doc "Báo cáo tuần NN"; đề xuất: thêm dòng vào tab proposals.
+- Mỗi số đều ghi nguồn: tab và cột, hoặc công thức đã tính. Kết quả mô phỏng
+  không được gọi là "đã kiểm chứng", "ổn định" hay "không rủi ro".
+- Báo tin xấu trước, tin tốt sau. Lãi lỗ ghi cả tiền và R, sau phí.
+- Mỗi tuần một thẻ cho mỗi sổ (main, noai, từng cặp grid; ba sổ cổ phiếu
+  và ETF) theo mẫu dưới; tuần sau chỉ cập nhật số, không viết lại thẻ.
+- Cuối báo cáo: một "sổ bài học" – điều gì đúng, điều gì sai so với tuần
+  trước, và luật đang chạy nào bị dữ liệu phản bác (kèm cỡ mẫu và t).
+- Tín hiệu trong cửa sổ CPI/FOMC (cột event của alt_signals, luật bóng
+  event_window): báo riêng R của nhóm này so với phần còn lại, không đề xuất chặn
+  trước khi đủ 30 mẫu trên 7 ngày và |t| ≥ 2 (luật của bộ tự học).
+
+Thẻ sổ (một thẻ mỗi sổ, mỗi tuần):
+【Tên sổ】【một câu về luật vào/ra đang chạy】
+- Lợi thế: 【vì sao nó phải có lãi, ai đang trả tiền cho mình】
+- Tuần này: 【số lệnh】, 【R trung bình ± sai số theo ngày】, 【thắng %】,
+  【lãi/lỗ sau phí】, 【sụt tối đa】, 【phí / lãi gộp】
+- Từ đầu đợt: 【cùng các số trên】, 【so với mốc: noai/HODL/USDT/ETF/VNINDEX】
+- Nhóm đáng chú ý: 【ví dụ long khi BTC ngày giảm, cửa sổ sự kiện】 kèm n và t
+- Nó sẽ thua trong thị trường nào: 【một câu】; tuần này có đang ở đó không
+- Kết luận: 【tiếp tục đo / chưa đủ dữ liệu / đạt ngưỡng dừng theo bảng tiêu chí】
+
+Báo cáo tuần (thứ tự cố định):
+1. Ba câu đầu: điều tệ nhất tuần, điều tốt nhất, một việc cần bạn quyết.
+2. Cảnh báo: cầu dao, lỗi ghi Sheets, tham số đổi giữa đợt (ck_summary),
+   grid dừng, lệch số giữa tính lại và alt_summary/ck_summary.
+3. Các thẻ sổ.
+4. Sổ bài học.
+5. Đề xuất (chỉ ghi vào tab proposals, kèm lý do và số).
 ```
 
 ## Phần D: Phần cổ phiếu
@@ -248,5 +276,6 @@ Làm theo năm PR nhỏ (thêm một PR tuỳ chọn), mỗi PR có test và ch�
 - **Grid:** vòng mới không tự mở; tăng `ALT_GRID_ROUND` trên panel rồi khởi động lại. Giá bắt đầu lấy từ ticker (API công khai). Lấy bù nến tối đa 20.000 nến 1m (~14 ngày).
 - **Sheets:** không thêm thư viện Google; JWT RS256 bằng `cryptography`, REST v4 bằng `requests`; `ALT_SHEETS_*` tự đi qua allowlist `ALT_` (không sửa `altcoin_host`). Dòng tiêu đề đi cùng lần ghi đầu của mỗi tab.
 - **Cổ phiếu:** mốc ETF mua ở giá đóng cửa phiên bắt đầu, phí mua 0,15% + phí bán 0,15% + thuế 0,1% như sổ ảo; AI thẩm định dùng mốc 20/40 phiên sẵn có của `ai_pick` (thêm Brier và bảng hiệu chuẩn); ảnh chụp `quant_params.json` chỉ so các tham số hiệu chỉnh đêm có thể đổi (nút "Tắt MUA breakout" không gây cảnh báo); Sheets ghi lúc 18:05 (sau nến muộn 18:00 và các lần thử lại của AI thẩm định).
-- **Test:** script mới của altcoin phải thêm vào tuple `SCRIPTS` của `tests/suites/suite_altcoin_scripts.py` (đã thêm `test_books`, `test_grid`, `test_sheets`).
-- **PR 6 (tuỳ chọn, bộ kiểm định point-in-time):** chưa làm.
+- **Test:** script mới của altcoin phải thêm vào tuple `SCRIPTS` của `tests/suites/suite_altcoin_scripts.py` (đã thêm `test_books`, `test_grid`, `test_sheets`, `test_calendar`).
+- **Lấy từ mẫu "một người AI trading desk" (29/11, sau khi đối chiếu):** chỉ hai ý repo chưa có – (1) cửa sổ sự kiện vĩ mô: Altcoin 3.5.1 thêm lịch CPI/FOMC (`bot/calendar.py`) và luật **bóng** `event_window` (±30 phút), chỉ đo, không chặn, bộ tự học xét như mọi luật ứng viên; (2) mẫu thẻ sổ và sổ bài học cho báo cáo tuần (C4 ở trên). Không theo: điều kiện lên tiền thật "30 lệnh mô phỏng" (mục 5 README altcoin chặt hơn), thử 20 ý chiến lược một ngày (overfitting – chẩn đoán 28/11), kiểm tra sức khoẻ mỗi giờ để khi bật live.
+- **PR 6 (bộ kiểm định point-in-time, 29/11):** `research/pit/` – thành phần HOSE từng phiên theo VNDirect (từ 2013), giá VCI, luật rổ của chính `factor.py`, chạy bằng `factor.run` và `momentum.decide/plan`. Phòng thủ 2013–11/2026: 16,0% / −23,0% / Sharpe 1,17, khớp bộ kiểm định ngoài 15/10 (15,6%); TEST 7,7% thua VNINDEX 14,0%; thiên lệch sống sót +0,3 điểm %/năm. Hai phương án treo từ 23/10 không tốt hơn ở cả TRAIN lẫn VALID → giữ `FACTOR_FIXED`. Kết quả: `research/README.md`, `research/KET_QUA.md`.

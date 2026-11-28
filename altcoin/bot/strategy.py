@@ -64,6 +64,8 @@ RULES = {
                           lambda side, c: _v(c, "btc_trend_1h", 0) == (-1 if side == "long" else 1)),
     "btc_volatile": ("BTC biến động mạnh (>1.5% trong 1h)", lambda side, c: abs(_v(c, "btc_chg_1h", 0)) > 1.5),
     "btc_dump_4h": ("BTC giảm >3% trong 4h", lambda side, c: _v(c, "btc_chg_4h", 0) < -3),
+    # v3.5.1: cửa sổ ±EVENT_WINDOW_MIN phút quanh CPI / FOMC (bot/calendar.py) – chỉ đo (không trong DEFAULT_BLOCKS)
+    "event_window": ("Trong cửa sổ quanh giờ công bố CPI / FOMC (lịch Mỹ)", lambda side, c: bool(c.get("event"))),
     # v3.4: regime BTC khung NGÀY (market.daily_regime). 29 ngày chạy ảo 30/10–27/11/2026, BTC 77.600 → 60.600: 320 tín hiệu
     # long -0,45R (t -4,2 theo ngày), âm cả 5 tuần, kể cả 176 tín hiệu long lúc BTC 1h đang tăng (-0,38R) – cổng 1h không
     # thấy xu hướng lớn. Hai luật này theo dõi bóng như mọi luật BTC; cổng cứng riêng: cfg.BTC_DAILY_GATE (xem _gates).

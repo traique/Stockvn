@@ -28,6 +28,7 @@ from . import eventlog
 from . import market as mkt
 from . import strategy as strat
 from . import books
+from . import calendar as cal
 from .grid import GridRunner
 from .sheets import SheetsExporter
 
@@ -141,6 +142,7 @@ class Bot:
                          + (" – ĐÃ DỪNG (cầu dao)" if self.store.get("noai_halted") else "") + " · /compare để so sánh")
         if getattr(self, "last_btc", None):
             lines.append("₿ " + mkt.describe(self.last_btc))
+        lines.append(cal.describe())
         if ls:
             lines.append(f"Quét cuối {dt.datetime.fromtimestamp(ls['ts']).strftime('%H:%M')}: {ls['scanned']} coin, {ls['passed']} đạt"
                          + (f" – đủ {ls['n_open']} lệnh, chỉ ghi bóng" if ls.get("n_open") else "") + " | "
@@ -482,6 +484,7 @@ class Bot:
                 self._monitor_noai()
         coins = self.okx.top_altcoins(cfg.TOP_N_COINS)
         btc = mkt.btc_context(self.okx)
+        btc["event"] = cal.active_event()        # v3.5.1: tín hiệu trong cửa sổ CPI/FOMC ghi tên sự kiện (luật bóng event_window)
         self.last_btc = btc
         log.info("Quét %d coin... %s%s", len(coins), mkt.describe(btc),
                  f" | đủ {len(opens)} lệnh mở – chỉ ghi tín hiệu bóng, không hỏi AI" if full else "")
