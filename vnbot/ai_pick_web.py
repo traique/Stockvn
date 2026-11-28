@@ -108,6 +108,23 @@ def _stats_strip(st: dict) -> str:
     ])
 
 
+def _brier(st: dict) -> str:
+    """The calibration table: Brier against the base rate, then the buckets of confidence."""
+    b = st.get("brier") or {}
+    if not b or b["n"] < b.get("min", cp.BRIER_MIN):
+        return (f'<p class="muted" style="margin:0">Chưa đủ dữ liệu: {b.get("n", 0)}/{b.get("min", cp.BRIER_MIN)} phiên có lựa chọn '
+                "kèm độ tin của AI (Brier tính khi mọi lệnh của phiên đã đủ 10 phiên).</p>")
+    head = (f"<p>Độ tin AI nêu (0-100) đọc như xác suất mã AI chọn hơn trung bình cùng ngày. Brier của AI <b>{cp._num(b['ai'], 3)}</b>, "
+            f"so với <b>{cp._num(b['base'], 3)}</b> nếu luôn đoán theo tỉ lệ nền {cp._num(b['hit_rate'], 0)}% → skill "
+            f"<b>{cp._num(b['skill'], 2)}</b> (dương: độ tin có giá trị; âm: đoán ngược chiều). {b['n']} phiên.</p>")
+    rows = [f'<tr><td>{_e(x["label"])}</td><td class="num">{x["n"]}</td><td class="num">{cp._num(x["conf"], 0) if x["n"] else "-"}</td>'
+            f'<td class="num">{cp._num(x["hit_rate"], 0) + "%" if x["n"] else "-"}</td>'
+            f'<td class="num {ui.tone(x["excess"]) if x["n"] else ""}">{ui.pct(x["excess"]) if x["n"] else "-"}</td></tr>'
+            for x in b["buckets"]]
+    return head + ui.table([("Độ tin", ""), ("Phiên", "num"), ("TB độ tin", "num"), ("Thắng TB cùng ngày", "num"),
+                            ("Chênh TB (điểm %)", "num")], rows, "")
+
+
 def _views(entry: dict) -> str:
     who = "AI"
     rows = []
@@ -339,6 +356,7 @@ def page_body(pick: cp.AiPick, msg: str = "") -> str:
         + _stats_strip(st) + run
         + '<div class="mt">'
         + ui.acc("ketluan", "", "Kết luận tới nay", f'<ul style="margin:0;padding-left:20px">{verdict_rows}</ul>', opened=True)
+        + ui.acc("hieuchuan", "", "AI đoán chuẩn không (Brier, hiệu chuẩn theo độ tin)", _brier(st))
         + ui.acc("cachcham", "", "Cách chấm điểm", method)
         + "</div>"
         + "".join(f'<div class="mt">{part}</div>' for part in (_notes(notes), _week(notes)) if part)

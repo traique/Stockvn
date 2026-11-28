@@ -10,6 +10,8 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 > ⚠️ Future đòn bẩy với vốn nhỏ rủi ro rất cao, có thể mất toàn bộ vốn. Đây là công cụ, không phải lời khuyên đầu tư. Chỉ bật `live` khi đạt đủ tiêu chí ở mục 5.
 
+> **Tình trạng 3.5.0 (29/11/2026).** Bản này chỉ **thêm cách đo**, không đổi chiến lược: sổ **"không AI"** chạy ảo song song (cùng ứng viên, không hỏi AI – đo AI có giá trị không, so theo cặp tín hiệu, `/alt compare`), sổ **Grid spot** chạy ảo trên BTC-USDT và ETH-USDT so với HODL và giữ USDT (`GRID_ENABLED`, `/alt grid`), và **bản sao lên Google Sheets** để Claude trong app điện thoại viết báo cáo tuần (`SHEETS_ID`, `SHEETS_SA_JSON`, `/alt sheets`). Mốc đỉnh cầu dao của sổ chính đặt lại về vốn lúc khởi động bản này (đợt đo mới, hai sổ cùng điều kiện). Mặc định rủi ro khi `MODE=live` hạ còn x3 và 1%/lệnh; chạy ảo giữ x10 / 3% để tham số đợt đo không đổi. Tiêu chí quyết định sau 4 tuần ở mục "Sổ không AI, Grid spot, Google Sheets (v3.5)". Kế hoạch gốc và quyết định khi thực hiện: [`docs/KE_HOACH_DOT_DO_2026-11-29.md`](../docs/KE_HOACH_DOT_DO_2026-11-29.md).
+>
 > **Tình trạng 3.4.0 (28/11/2026).** Sau 29 ngày chạy ảo bản 3.3 (59 lệnh, 1.005 tín hiệu bóng; chẩn đoán ở `docs/chandoan_2026-11-28`): vốn 10,00 → 9,82 USDT, sụt 19,3% từ đỉnh (vượt ngưỡng 15% của mục 5.4), R trung bình −0,04 ± 0,16 – chiến lược vẫn chưa có lợi thế sau phí. Hai phát hiện có ý nghĩa thống kê: **long thua suốt tháng BTC giảm 22%** (320 tín hiệu bóng −0,45R, t −4,2, kể cả khi cổng BTC 1h cho qua) và **AI đoán ngược chiều kết quả** (92 tín hiệu AI từ chối +0,36R, lệnh AI duyệt −0,02R; Brier 0,345 so với 0,234 nếu đoán theo tỉ lệ nền). 3.4.0 thêm cổng regime BTC khung ngày (`BTC_DAILY_GATE`; backtest 88 ngày: nhóm bị cổng loại −0,05R trong mẫu, −0,44R ngoài mẫu, không loại nhóm nào có lãi), hạ `AI_OVERRIDE_MIN_SCORE` 6,5 → 5,0 (AI chỉ điều tiết khối lượng), cầu dao drawdown 30% → 15%, và Brier score trên trang Tự học. Không chỉnh TP1 / SL / giờ giao dịch theo dữ liệu gần đây. Tiếp theo: chạy ảo 4 tuần nữa với `LEARN_MODE=suggest` và đo lại theo mục 5.
 >
 > **Tình trạng 3.3.0 (02/11/2026).** Chẩn đoán sau đợt lỗ 30/10–02/11: sổ sách và cỡ lệnh đúng, lỗ chủ yếu do một đoạn thị trường xấu; nhưng backtest 88 ngày (50 coin, 706 lệnh, code của bot, phí 0,20%/vòng) cho **−0,01R ± 0,07 mỗi lệnh – chiến lược gần như không có lợi thế sau phí**, và 1.335 tổ hợp tham số không tổ hợp nào dương ngoài mẫu một cách chắc chắn (xếp hạng trong mẫu / ngoài mẫu tương quan ngược −0,56). Bản 3.3 chỉ **sửa lỗi** để số liệu chạy ảo và tín hiệu bóng phản ánh đúng thực tế; **không** chỉnh tham số chiến lược theo dữ liệu gần đây. Việc tiếp theo: khởi động 3.3.0 lần đầu với `LEARN_MODE` trống, rồi chạy ảo 4 tuần với `LEARN_MODE=suggest` (trong Stockvn: `ALT_LEARN_MODE=suggest` trên panel), rồi quyết định theo tiêu chí ở mục 5.
@@ -105,7 +107,7 @@ python run.py
 
 ## 4. Lệnh Telegram
 
-`/status` vốn, PnL, lệnh mở, hạn mức AI · `/trades` 10 lệnh gần nhất · `/signals` tín hiệu & quyết định AI · `/ai` số lượt gọi từng model, quyết định gần nhất · `/lessons` tổng kết của AI · `/pause` `/resume` · `/close` đóng tất cả. Bot tự gửi báo cáo ngày lúc 0h theo `TIMEZONE` (mặc định giờ Việt Nam).
+`/status` vốn, PnL, lệnh mở, hạn mức AI · `/trades` 10 lệnh gần nhất · `/signals` tín hiệu & quyết định AI · `/ai` số lượt gọi từng model, quyết định gần nhất · `/lessons` tổng kết của AI · `/compare` sổ chính so với sổ không AI (v3.5) · `/grid` sổ Grid spot (v3.5) · `/sheets` trạng thái ghi Google Sheets (v3.5) · `/pause` `/resume` (mở lại cả cầu dao của sổ không AI) · `/close` đóng tất cả (chỉ sổ chính). Bot tự gửi báo cáo ngày lúc 0h theo `TIMEZONE` (mặc định giờ Việt Nam), từ v3.5 kèm dòng sổ không AI.
 
 ## 5. Đo 4 tuần ảo → quyết định (v3.3)
 
@@ -262,15 +264,82 @@ bot/learner.py    – tự học: kết quả bóng, điều chỉnh tham số c
 bot/market.py     – bối cảnh BTC, Open Interest, long/short, funding
 bot/notify.py     – gửi thông báo đa kênh (Telegram, Zoom webhook/chatbot), nhận lệnh Zoom
 bot/eventlog.py   – ghi log hoạt động vào DB để xem trên web
+bot/books.py      – v3.5: sổ (book) main / noai, so sánh sổ (theo cặp tín hiệu, sai số theo ngày)
+bot/grid.py       – v3.5: sổ Grid spot chạy ảo (GridBook thuần + GridRunner luồng riêng, chỉ API công khai)
+bot/sheets.py     – v3.5: bản sao lên Google Sheets (service account, JWT RS256, REST v4; không đọc ngược)
 bot/telegram.py, bot/dashboard.py, bot/main.py
 test_smoke.py     – quét thật OKX, in tín hiệu (không cần key)
-test_engine.py, test_risk.py, test_strategy.py, test_learner.py, test_web.py – kiểm tra offline (Stockvn chạy qua tests/run_all.py)
+test_engine.py, test_risk.py, test_strategy.py, test_learner.py, test_web.py, test_books.py, test_grid.py, test_sheets.py – kiểm tra offline (Stockvn chạy qua tests/run_all.py)
 tools/            – backtest_sessions.py (backtest theo phiên trên nến OKX), Kronos (thử nghiệm)
 botkeep.env       – mẫu biến cho panel Botkeep khi chạy độc lập (chỉ bí mật + thông tin riêng; v3.3 bỏ hồ sơ "test gắt" 10%/lệnh)
 check_db.py       – kiểm tra kết nối Supabase trước khi deploy
 ```
 
 > Các mục dưới đây là **lịch sử thay đổi** theo từng bản; giá trị đang dùng ở mục 1, 8, 9, 12 và `bot/config.py`.
+
+## Sổ không AI, Grid spot, Google Sheets (v3.5)
+
+Đợt đo thứ hai (plan 29/11/2026): thêm **cách đo**, không đổi chiến lược đang chạy, không chạm đường live. Mọi sổ mới chỉ chạy ảo,
+chỉ dùng API công khai của OKX (giá, nến), không bao giờ gọi API đặt lệnh kể cả khi `MODE=live` (test khẳng định).
+
+**Sổ "không AI"** (`bot/books.py`, `NOAI_ENABLED=true` mặc định, vốn `NOAI_CAPITAL` = vốn paper): một `PaperEngine` thứ hai,
+`book='noai'`, nhận **đúng danh sách ứng viên** đã qua cổng, đạt `MIN_SCORE` và xếp theo điểm mà sổ chính nhận – ngay trước khi sổ
+chính hỏi AI – và vào ứng viên điểm cao nhất chưa có vị thế cùng mã, tối đa 1 lệnh mỗi lượt quét, hệ số rủi ro theo AI 1,0×
+(không 0,85× / 1,2× / 0,5×), cùng cỡ lệnh, phí, trượt giá, `plan_exit` và `EXIT_MODE` (cùng `BaseEngine`). Giá last lúc quyết
+định của sổ noai lấy lúc quét; sổ chính vẫn lấy giá mới sau khi AI trả lời (như trước) – độ trễ của AI là một phần chi phí
+của AI; khác biệt chỉ do AI (quyết định, hệ số rủi ro, độ trễ). Sổ chính dừng vì cầu dao thì sổ noai vẫn nhận ứng viên. Cầu
+dao riêng: sụt 15% từ đỉnh (đỉnh đo từ đầu đợt)
+→ ngừng mở lệnh mới, báo một tin, sổ chính không ảnh hưởng; `/resume` mở lại. Không gửi tin mở/đóng từng lệnh. Cột `book` thêm
+vào `trades` và `equity` (dữ liệu cũ = `main`), mọi truy vấn của sổ chính lọc `book='main'`; lệnh hai sổ ghi `sid` của dòng tín
+hiệu, lệnh noai ghi thêm `ai_verdict` (phán quyết AI của sổ chính, chỉ để phân tích). **So sánh** (`/alt compare`, thẻ "So sánh
+sổ"): mỗi sổ số lệnh, R trung bình ± sai số **theo ngày**, tỉ lệ thắng, vốn, sụt tối đa, tổng phí và phí / lãi gộp; và hiệu
+**theo cặp tín hiệu** noai − main (main không vào thì R_main = 0) – cùng tín hiệu nên nhiễu thị trường triệt tiêu, 30 lệnh đủ thấy
+khác biệt lớn. Lưu ý: từ 3.4 AI gần như không còn chặn (chỉ điều tiết khối lượng), nên khác biệt hai sổ phần lớn là hệ số rủi ro;
+tín hiệu bóng + Brier (mục 8) đã trả lời phần "AI đoán đúng không", sổ noai thêm tính thực tế khớp lệnh / ký quỹ.
+
+**Sổ Grid spot** (`bot/grid.py`, `GRID_ENABLED=false` mặc định): grid không đòn bẩy trên `GRID_PAIRS` (BTC-USDT, ETH-USDT), mỗi cặp
+một sổ `GRID_CAPITAL` = 100 USDT ảo, không dùng chung vốn với sổ futures, luồng riêng (chỉ leader). Vùng giá = đáy/đỉnh
+`GRID_RANGE_DAYS` = 30 nến ngày đã đóng, `GRID_LEVELS` = 20 mức `GRID_SPACING` geometric; vốn chia đều các ô, ô dưới giá đặt mua, ô
+trên giá mua sẵn coin ở giá hiện tại (phí taker `GRID_TAKER_FEE` 0,10%) và đặt bán ở mức trên – như grid spot OKX. Mỗi phút đọc
+nến 1m đã đóng: một mức chỉ khớp khi giá **đi qua** nó (chạm sát không khớp); nến chạm nhiều mức xử lý theo đường mở → thấp → cao
+(nến tăng; nến giảm: cao → thấp) → đóng, mỗi mức một lần mỗi nến; mua mức i → đặt bán mức i+1 và ngược lại; lãi đã khoá trừ phí
+maker `GRID_MAKER_FEE` 0,08% hai chiều. Mất kết nối: chạy lại lấy bù mọi nến thiếu rồi xử lý tuần tự (kết quả như chạy liên tục).
+Giá đóng nến 1m ra ngoài vùng quá `GRID_STOP_OUT_PCT` = 5% → vòng dừng, giữ nguyên coin/USDT, huỷ lệnh ảo, ghi sự kiện, báo một
+tin "Grid dừng". **Không tự đặt lại vùng**: vòng mới chỉ mở khi `GRID_ROUND` trên panel tăng (1 → 2) rồi khởi động lại – người
+quyết định sau báo cáo tuần. Bảng `grid_runs` (mỗi vòng), `grid_fills` (mỗi lần khớp), `grid_equity` (15 phút: USDT, coin, giá,
+giá trị, HODL, lãi đã khoá). Chỉ số (`/alt grid`, thẻ Grid): lãi đã khoá, lãi/lỗ tồn kho, giá trị so với HODL 100% coin (mua ở
+giá bắt đầu, phí taker) và so với giữ 100% USDT, sụt tối đa, số vòng/ngày, % nến có giá đóng trong vùng. Phí maker 0,08% là cấp
+thường của OKX – kiểm tra lại theo cấp tài khoản.
+
+**Bản sao Google Sheets** (`bot/sheets.py`, tắt khi thiếu `SHEETS_ID` / `SHEETS_SA_JSON`): bảng tính `BotLab`, Altcoin tự ghi
+các tab của mình (Cổ phiếu ghi `ck_*` bằng `vnbot/sheets.py`, hai bên độc lập). Tab `alt_trades` (lệnh đã đóng của main và
+noai: R, phí, lý do thoát, phán quyết AI), `alt_signals` (tín hiệu đã có kết quả kèm nguồn `blocked`, `slot_taken`…),
+`alt_equity` (vốn mỗi 15 phút của main, noai, từng vòng grid và HODL), `grid_runs`, `grid_fills` – mỗi giờ (`SHEETS_INTERVAL`);
+`alt_summary` (chỉ số theo sổ, phiên bản, tham số đang chạy) lúc `SHEETS_SUMMARY_TIME` 07:05. Sheets chỉ là bản sao: DB chính
+vẫn là SQLite/Postgres; ghi gộp một lần gọi mỗi tab, mỗi dòng có khoá, con trỏ lưu trong `kv` nên khởi động lại không ghi trùng;
+ghi lỗi thì con trỏ giữ nguyên, lượt sau thử lại, ghi sự kiện – không làm dừng hay chậm bot (luồng riêng). Không lưu nến 1 phút.
+Xác thực bằng service account: JSON khoá dán nguyên văn hoặc **base64** (một dòng trên panel; khuyên base64 để không lỗi xuống
+dòng trong `private_key`), JWT RS256 ký bằng `cryptography` (ccxt kéo theo sẵn), REST v4 qua `requests` – không thêm thư viện
+Google (ổ Botkeep 1 GB). Mọi ô chữ đi qua `redact`; bot **không bao giờ đọc ngược** cấu hình hay tab `proposals`. Chia sẻ bảng
+tính cho email của service account với quyền chỉnh sửa; trong Stockvn đặt `ALT_SHEETS_ID`, `ALT_SHEETS_SA_JSON` (qua allowlist
+`ALT_`). `/alt sheets` cho biết lần ghi thành công cuối và lỗi gần nhất.
+
+**Đợt đo và mặc định rủi ro:** kv `period` ghi lúc khởi động 3.5.0 lần đầu (vốn hai sổ, phiên bản); mốc đỉnh cầu dao
+`peak_equity` của sổ chính đặt lại về vốn lúc đó (đỉnh cũ là trước đợt sụt 19,3% – hai sổ cùng điều kiện; so sánh chỉ tính lệnh
+mở từ đó). Mặc định `LEVERAGE` / `RISK_PER_TRADE` khi `MODE=live` là **x3 / 1%** (mức "live nhỏ" của mục 5); chạy ảo giữ x10 / 3%
+vì đổi mặc định paper giữa đợt là đổi tập lệnh được vào (ký quỹ mỗi lệnh gấp 3, lệnh thứ hai dễ bị "ký quỹ không đủ"). Panel
+khai thì thắng.
+
+**Tiêu chí sau 4 tuần** (sai số chuẩn luôn theo ngày; chưa đủ mẫu thì kéo dài, không kết luận sớm):
+
+| Câu hỏi | Chỉ số | Mẫu tối thiểu | Quyết định |
+|---|---|---|---|
+| AI có giúp không? | Hiệu theo cặp noai − main, và R trung bình mỗi sổ | ≥ 30 lệnh mỗi sổ, ≥ 3 tuần | noai ngang hoặc tốt hơn (main không hơn quá 2 sai số chuẩn) → bỏ AI khỏi quyết định vào lệnh; main hơn quá 2 sai số chuẩn → giữ AI |
+| Futures có lợi thế không? | R trung bình sổ tốt hơn trong hai sổ | ≥ 30 lệnh và ≥ 150 tín hiệu bóng mới | Mục 5: R < −0,1 và cận trên 95% < 0, hoặc sụt > 15% → dừng futures, thiết kế lại |
+| Grid có đáng không? | Giá trị sổ grid so với HODL và với giữ USDT | 4 tuần mỗi cặp | Chỉ cân nhắc `OKX_DEMO=true` khi grid hơn cả hai mốc và sụt tối đa nhỏ hơn HODL; ghi rõ xu hướng BTC trong đợt (cột `alt_summary`) |
+| Phí ăn bao nhiêu? | Tổng phí / lãi gộp mỗi sổ | Cả đợt | Phí > 50% lãi gộp → cân nhắc khung 1h/4h hoặc lệnh maker ở vòng thiết kế sau |
+
+Không sổ nào chuyển sang tiền thật trong đợt này.
 
 ## Regime BTC khung ngày, AI chỉ điều tiết khối lượng (v3.4)
 Rút từ 29 ngày chạy ảo bản 3.3 (30/10–27/11/2026, 59 lệnh, 991 tín hiệu bóng có kết quả) và backtest 88 ngày 01/09–28/11

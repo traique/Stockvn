@@ -152,8 +152,12 @@ def fill_check(sig, entry, ref=None):
 
 
 class BaseEngine:
-    def __init__(self, okx, store, notify):
+    def __init__(self, okx, store, notify, book="main", quiet=False):
+        """book: sổ của engine (storage.MAIN = sổ chính; 'noai' = sổ chạy ảo song song không hỏi AI – v3.5). Mọi lệnh,
+        đường vốn, chuỗi thua và ngân sách rủi ro đọc/ghi theo sổ này. quiet: không gửi tin mở/chốt/đóng lệnh lên
+        Telegram/Zoom (chỉ ghi log) – sổ noai chỉ hiện trong báo cáo và trang web."""
         self.okx, self.store, self.notify = okx, store, notify
+        self.book, self.quiet = book, quiet
         self.on_close = None   # callback(trade, exit, pnl, pnl_pct, reason) – Bot gắn vào để AI tổng kết
         self._last_pass = None  # giờ của lượt monitor trước (trong tiến trình này) – xem _watch_from
         self._missing = {}      # live: id lệnh → số lượt liên tiếp sàn không còn vị thế mà chưa thấy lệnh khớp đóng
@@ -188,11 +192,11 @@ class BaseEngine:
         → SL thật rộng hơn → lệnh nhỏ lại (rủi ro không vượt kế hoạch – lỗi 2); giá đã chạy về gần SL → KHÔNG phóng to lệnh
         (bản đầu 3.3: SL cách 0.25% → lệnh 7–9× vốn, rủi ro chỉ đúng nếu lệnh stop khớp đúng mức SL)."""
         try:
-            recent = self.store.last_closed(6)
+            recent = self.store.last_closed(6, self.book)
         except Exception:
             recent = []
         mult = risk_mult(sig, ai, recent)
-        budget = risk_budget(equity, self.store.open_trades())
+        budget = risk_budget(equity, self.store.open_trades(self.book))
         notional = position_notional(equity, entry, sig.sl, mult=mult, budget=budget)
         if sig.price:
             plan = position_notional(equity, costs.entry_fill(sig.side, sig.price), sig.sl, mult=mult, budget=budget)
@@ -244,7 +248,8 @@ class BaseEngine:
         risk_usdt = risk_of(notional, entry, sig.sl)
         base = (equity or 0) * cfg.RISK_PER_TRADE
         return dict(
-            mode=cfg.MODE, symbol=sig.symbol, side=sig.side, entry=entry, exit=None,
+            mode=cfg.MODE if self.book == "main" else "paper", book=self.book,
+            symbol=sig.symbol, side=sig.side, entry=entry, exit=None,
             sl=sig.sl, tp=tp, notional=notional, margin=margin_for(notional), contracts=contracts,
             pnl=0, pnl_pct=0, fee=0, opened_at=time.time(), closed_at=None, status="open",
             reason_open="; ".join(sig.reasons) + (f" | AI: {ai.get('reason','')}" if ai else ""),
@@ -265,6 +270,13 @@ class BaseEngine:
                                peak_ts=t.get("peak_ts"), tp1_done=bool(t.get("tp1_done")),
                                frac=(t["notional"] / t["notional0"]) if t.get("notional0") else 1.0)
 
+    def _say(self, text):
+        """Tin báo của engine: sổ im lặng (noai) chỉ ghi log."""
+        if self.quiet:
+            log.info("[%s] %s", self.book, text.replace("\n", " | ")[:300])
+        else:
+            self.notify(text)
+
     def _announce_open(self, t):
         mode = t.get("exit_mode") or "fixed"
         if mode == "hybrid":
@@ -274,7 +286,7 @@ class BaseEngine:
         else:
             plan = f"TP {t['tp']:.6g}"
         ref = f" (nến tín hiệu đóng {t['sig_price']:.6g})" if t.get("sig_price") else ""
-        self.notify(
+        self._say(
             f"🟢 MỞ LỆNH {t['side'].upper()} {t['symbol']}\n"
             f"Giá: {t['entry']:.6g}{ref} | SL: {t['sl']:.6g} | {plan}\n"
             f"Khối lượng: {t['notional']:.2f} USDT (ký quỹ {t['margin']:.2f}, x{cfg.LEVERAGE}) | "
@@ -288,17 +300,17 @@ class BaseEngine:
         be = exits.breakeven(t["side"], t["entry"])
         sl = be if (be > t["sl"] if t["side"] == "long" else be < t["sl"]) else t["sl"]
         if not part_ct:
-            self.notify(f"💰 TP1 {t['side'].upper()} {t['symbol']} tại {fill:.6g}: {t['contracts']:g} hợp đồng không chia "
+            self._say(f"💰 TP1 {t['side'].upper()} {t['symbol']} tại {fill:.6g}: {t['contracts']:g} hợp đồng không chia "
                         f"được theo lot → giữ toàn bộ bám sóng, SL dời về hoà vốn {sl:.6g}")
             return
-        self.notify(
+        self._say(
             f"💰 CHỐT {part_ct:g} hợp đồng {t['side'].upper()} {t['symbol']} – khớp {fill:.6g}: {pnl:+.4f} USDT\n"
             f"Phần còn lại ({t['contracts']:g} hợp đồng) bám sóng, SL dời về hoà vốn {sl:.6g}")
 
     def _announce_close(self, t, exit_, pnl, pnl_pct, reason):
         ico = "✅" if pnl > 0 else "❌"
         extra = f" (gồm {t['realized']:+.4f} đã chốt trước)" if t.get("realized") else ""
-        self.notify(
+        self._say(
             f"{ico} ĐÓNG {t['side'].upper()} {t['symbol']} – {reason}\n"
             f"Vào {t['entry']:.6g} → Ra {exit_:.6g}\n"
             f"PnL: {pnl:+.4f} USDT ({pnl_pct:+.1f}% ký quỹ){extra}\n"
@@ -451,17 +463,19 @@ class BaseEngine:
 class PaperEngine(BaseEngine):
     ENTRY_SECONDS = True
 
-    def __init__(self, okx, store, notify):
-        super().__init__(okx, store, notify)
-        if store.get("paper_balance") is None:
-            store.set("paper_balance", cfg.PAPER_START_BALANCE)
+    def __init__(self, okx, store, notify, book="main", quiet=False, capital=None):
+        super().__init__(okx, store, notify, book=book, quiet=quiet)
+        # số dư ảo của từng sổ: sổ chính giữ khoá "paper_balance" như cũ; sổ khác (noai) có khoá riêng
+        self.bal_key = "paper_balance" if book == "main" else f"paper_balance_{book}"
+        if store.get(self.bal_key) is None:
+            store.set(self.bal_key, cfg.PAPER_START_BALANCE if capital is None else float(capital))
 
     def balance(self):
-        return float(self.store.get("paper_balance"))
+        return float(self.store.get(self.bal_key))
 
     def equity(self, prices=None):
         eq = self.balance()
-        for t in self.store.open_trades():
+        for t in self.store.open_trades(self.book):
             p = (prices or {}).get(t["symbol"])
             if p:
                 pnl, _ = self._pnl(t["side"], t["entry"], p, t["notional"])
@@ -470,7 +484,7 @@ class PaperEngine(BaseEngine):
 
     def free_margin(self):
         """Ký quỹ còn trống: số dư trừ ký quỹ của các lệnh đang mở (như số dư khả dụng `free` của sàn với lệnh live)."""
-        return self.balance() - sum(float(t.get("margin") or 0) for t in self.store.open_trades())
+        return self.balance() - sum(float(t.get("margin") or 0) for t in self.store.open_trades(self.book))
 
     def open(self, sig, ai):
         equity = self.balance()
@@ -504,7 +518,7 @@ class PaperEngine(BaseEngine):
             if not self._is_open(t):
                 return None
             # phần đã chốt (realized) đã cộng vào số dư lúc chốt TP1
-            credit = lambda: self.store.set("paper_balance", self.balance() + pnl_rest)     # noqa: E731
+            credit = lambda: self.store.set(self.bal_key, self.balance() + pnl_rest)     # noqa: E731
             if self._finalize(t, exit_, reason, on_closed=credit) is None:
                 return None
         return True
@@ -517,7 +531,7 @@ class PaperEngine(BaseEngine):
         if 0 < part_ct < t["contracts"]:
             fill = costs.exit_fill(t["side"], price)
             pnl = self._book_part(t, part_ct, fill)
-            self.store.set("paper_balance", self.balance() + pnl)
+            self.store.set(self.bal_key, self.balance() + pnl)
         else:
             part_ct = 0
         t["tp1_done"] = 1
@@ -532,7 +546,7 @@ class PaperEngine(BaseEngine):
         dõi: chỉ SL/TP đang đặt được khớp, như lệnh trên sàn của live (xem _watch_from)."""
         now = time.time()
         watch = self._watch_from(now)
-        for t in self.store.open_trades():
+        for t in self.store.open_trades(self.book):
             try:
                 ev, upd, st = self._track(t, now, watch)
             except Exception as e:
@@ -769,7 +783,7 @@ class LiveEngine(BaseEngine):
         Không đọc được vị thế → bỏ cả lượt (bản cũ coi như sàn đã đóng mọi lệnh)."""
         now = time.time()
         watch = self._watch_from(now)
-        opens = self.store.open_trades()
+        opens = self.store.open_trades(self.book)
         if not opens:
             return
         try:

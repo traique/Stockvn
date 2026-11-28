@@ -108,7 +108,7 @@ STOCK_CARD_TITLE = "Kênh do Stock quản lý"
 TOKENS: dict[str, str] = {}    # HUB_TOKEN / HUB_CMD_TOKEN, for the web proxy and the /alt commands
 STOCK_DROPPED: list[str] = []  # HUB_DROPPED: the panel's ALT_ keys whose masked value the stock dropped
 # The /alt commands (vnbot/altcoin_bridge.py READ + WRITE); the writes run one at a time
-COMMANDS = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version",
+COMMANDS = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version", "compare", "grid", "sheets",
             "pause", "resume", "close", "apply")
 WRITES = ("pause", "resume", "close", "apply")
 WRITE_LOCK = threading.Lock()

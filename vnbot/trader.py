@@ -715,11 +715,12 @@ class TradingBot:
         if fb_decision is None:
             fb_decision = self._factor_decision_from_meta(fb_book, params)
 
+        etf_state = self._etf_refresh(target)
         text = self._factor_text(target, fb_book, fb_decision, params)
         text += "\n\n" + self._paper_report(target, paper, [f for f in paper.fills if f.date == target],
                                             [o for o in paper.orders if o.created == target], signals, errors)
         text += "\n\n" + self._momentum_text(target, mom_book, mom_decision, params)
-        text += "\n\n" + self._comparison(paper, mom_book, fb_book)
+        text += "\n\n" + self._comparison(paper, mom_book, fb_book, etf_state)
         if self.settings.trade_mode == "signal":
             if real is None:
                 text += f"\n\n⚠️ Không đọc được tài khoản thật: {real_error}"
@@ -763,11 +764,37 @@ class TradingBot:
             text = "\n".join(head) + "\n\n" + text
         self._record_history(target, {"engine": paper, "factor": fb_book, "momentum": mom_book},
                              fb_decision, mom_decision)
+        self._frozen_params_check(target)
         self._write_json("last_report.json", {"day": target, "text": text,
                                               "at": _now_vn().isoformat(timespec="minutes"),
                                               "sessions": done, "signal_strategy": self.settings.signal_strategy})
         # A rebuilt report (books done, report lost) was never sent either: it is new too.
         return RunResult(target, text, bool(done) or last.get("day") != target, done, waiting=waiting)
+
+    def _etf_refresh(self, day: str) -> dict | None:
+        """The ETF buy-and-hold benchmark (vnbot.etf_bench) up to ``day``: the whole paper capital in
+        BENCH_ETF since the measurement's first session. A failure keeps the last state, never raises."""
+        from vnbot import etf_bench
+
+        try:
+            return etf_bench.refresh(self.settings.data_dir, self.paper_capital(), day)
+        except Exception:  # noqa: BLE001 - a benchmark, never in the way of the books
+            logger.exception("ETF benchmark %s failed", day)
+            return etf_bench.load(self.settings.data_dir)
+
+    def _frozen_params_check(self, day: str) -> None:
+        """The thresholds frozen for the measurement (vnbot.quant_snapshot): taken on the first run,
+        then compared on every run; a calibratable field that moved is said once."""
+        from vnbot import quant_snapshot
+
+        try:
+            quant_snapshot.ensure(self.settings.data_dir, day)
+            text = quant_snapshot.warning(self.settings.data_dir, auto_calibrate=self.settings.calibrate)
+            if text:
+                logger.warning("Quant params moved during the measurement: %s", text)
+                self.notify(text)
+        except Exception:  # noqa: BLE001
+            logger.exception("Quant params snapshot check %s failed", day)
 
     @staticmethod
     def _record_history(day, books: dict, fb_decision, mom_decision) -> None:
@@ -2307,9 +2334,9 @@ class TradingBot:
         return "".join(lines) if lines else " (không có lệnh khớp)"
 
     @staticmethod
-    def _comparison(engine_book, mom_book, fb_book=None) -> str:
+    def _comparison(engine_book, mom_book, fb_book=None, etf_state=None) -> str:
         """Each book's return since its own start (dated: the books may have started on
-        different days, and then the figures cover different periods)."""
+        different days, and then the figures cover different periods), and the ETF benchmark."""
         books = ([("Phòng thủ", fb_book)] if fb_book is not None else []) + [
             ("Quant Engine", engine_book), ("Động lượng", mom_book)]
         parts, starts = [], set()
@@ -2321,6 +2348,10 @@ class TradingBot:
         text = "📊 So sánh: " + " | ".join(parts)
         if len(starts) > 1:
             text += "\n(các tài khoản bắt đầu ở các ngày khác nhau: lợi nhuận không cùng giai đoạn)"
+        if etf_state is not None:
+            from vnbot import etf_bench
+
+            text += "\n" + etf_bench.line(etf_state, fmt=_fmt)
         return text
 
     def _real_momentum_report(self, day, real, bars, decision, market, params) -> str:
@@ -2640,8 +2671,9 @@ class TradingBot:
                      f"rổ {', '.join(mom.meta.get('mom_basket') or []) or 'tiền mặt'}")
         lines += [f"- {p.symbol} {_fmt(p.qty)} @ {_fmt(p.avg_price)} → {_fmt(p.last_price)}"
                   for p in mom.positions.values()] or ["- (không giữ mã nào)"]
-        from vnbot import external
+        from vnbot import etf_bench, external
 
+        lines.append(etf_bench.line(etf_bench.load(self.settings.data_dir), fmt=_fmt))
         if external.enabled():
             lines.append("📡 Sổ ảo so sánh Siêu tín hiệu: /stvdanhmuc")
         lines.append("💼 Danh mục tiền thật của anh: /ts (trang web /taisan)")

@@ -48,7 +48,7 @@ from vnbot.zoom import split
 logger = logging.getLogger(__name__)
 
 PREFIX = "🪙 Altcoin › "
-READ = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version")
+READ = ("status", "trades", "signals", "ai", "learn", "lessons", "btc", "phienban", "version", "compare", "grid", "sheets")
 WRITE = ("pause", "resume", "close", "apply")
 CONFIRM = ("resume", "close", "apply")
 # Words of "/alt <word>" never read as a coin code ("btc" is both: its price, then the child's context).
@@ -60,7 +60,7 @@ CONFIRM_SECONDS = 120
 # The altcoin's commands typed without /alt: never sent to it (a bare /close must not close
 # anything), answered with the hint. None of them is a stock command.
 BARE = ("/status", "/pause", "/resume", "/trades", "/close", "/signals", "/ai", "/learn", "/apply", "/lessons",
-        "/btc", "/zoomtest")
+        "/btc", "/zoomtest", "/compare", "/grid", "/sheets")
 # Rate of the notifications; module values, so the tests can shorten them.
 QUEUE_SIZE, EARLY_KEPT = 200, 50
 DEDUPE_SECONDS, START_EVERY = 120, 1800
@@ -74,6 +74,7 @@ HELP = ("🪙 Altcoin (bot OKX) – gõ /alt <lệnh> (Zoom: alt <lệnh>):\n"
         "/alt signals – tín hiệu và quyết định AI\n"
         "/alt ai – lượt gọi từng model\n"
         "/alt learn – trạng thái tự học · /alt lessons – bài học AI\n"
+        "/alt compare – sổ chính (có AI) so với sổ không AI · /alt grid – sổ Grid spot (chỉ đọc) · /alt sheets – ghi Google Sheets\n"
         "/alt btc · /alt eth sol – giá realtime trên OKX (tối đa 5 coin; BTC kèm bối cảnh BTC của bot)\n"
         "/alt phienban – phiên bản Altcoin\n"
         "/alt pause – tạm dừng mở lệnh mới\n"

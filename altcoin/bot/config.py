@@ -74,10 +74,13 @@ class Config:
     OKX_DEMO = _b("OKX_DEMO", "false")                 # dùng tài khoản demo của OKX (x-simulated-trading)
 
     # ---- Rủi ro ----
-    LEVERAGE = _i("LEVERAGE", 10)
+    # v3.5: mặc định khi chạy THẬT thấp hơn chạy ảo – x3 và 1%/lệnh (mức "live nhỏ" của README mục 5) – để lỡ bật live mà quên
+    # khai biến thì không vào x10 / 3%. Chạy ảo giữ nguyên x10 / 3% (tham số của đợt đo 4 tuần không đổi; đổi mặc định paper
+    # giữa đợt là đổi tập lệnh được vào – ký quỹ mỗi lệnh gấp 3, lệnh thứ hai dễ bị "ký quỹ không đủ"). Panel khai thì thắng.
+    LEVERAGE = _i("LEVERAGE", 10 if MODE != "live" else 3)
     # Rủi ro cơ bản 3%/lệnh (v3.1: 10% khiến 5 lệnh thua liên tiếp mất ~41% vốn – chuỗi thua như vậy là bình thường
     # với tỉ lệ thắng 35–45%). Rủi ro thực tế còn được nhân với hệ số chất lượng (điểm KT, AI) và chuỗi thua – xem risk.py.
-    RISK_PER_TRADE = _f("RISK_PER_TRADE", 0.03)        # % vốn mất khi chạm SL (lệnh chất lượng chuẩn)
+    RISK_PER_TRADE = _f("RISK_PER_TRADE", 0.03 if MODE != "live" else 0.01)   # % vốn mất khi chạm SL (lệnh chuẩn)
     RISK_MAX_MULT = _f("RISK_MAX_MULT", 1.5)           # lệnh rất đẹp (AI ≥ 80, điểm ≥ 7) được tối đa 1.5× rủi ro cơ bản
     RISK_MIN_MULT = _f("RISK_MIN_MULT", 0.35)          # không bao giờ xuống dưới 35% rủi ro cơ bản
     LOSS_STREAK_CUT = _f("LOSS_STREAK_CUT", 0.7)       # mỗi lệnh thua liên tiếp (từ lệnh thứ LOSS_STREAK_FROM) nhân rủi ro với 0.7
@@ -91,6 +94,28 @@ class Config:
     # v3.4: 0.30 → 0.15 – bằng ngưỡng "tạm dừng & thiết kế lại" của quy trình đo 4 tuần (README mục 5); chạy ảo 30/10–27/11/2026
     # sụt 19,3% từ đỉnh (01/11 → 09/11) mà cầu dao 30% không kêu.
     MAX_DRAWDOWN = _f("MAX_DRAWDOWN", 0.15)            # dừng hẳn bot nếu DD từ đỉnh > 15%, chờ /resume
+    # ---- v3.5: sổ "không AI" chạy ảo song song (books.py) ----
+    # Cùng danh sách ứng viên đã qua cổng và đạt MIN_SCORE như sổ chính, vào lệnh KHÔNG hỏi AI, hệ số rủi ro theo AI = 1,0×;
+    # luôn là PaperEngine kể cả khi MODE=live (không bao giờ đặt lệnh trên sàn). Khác biệt giữa hai sổ chỉ do AI.
+    NOAI_ENABLED = _b("NOAI_ENABLED", "true")
+    NOAI_CAPITAL = _f("NOAI_CAPITAL", PAPER_START_BALANCE)   # vốn ảo ban đầu của sổ noai (USDT)
+    # ---- v3.5: sổ Grid spot chạy ảo (grid.py) – không đòn bẩy, mỗi cặp một sổ, chỉ API công khai (nến), không bao giờ đặt lệnh ----
+    GRID_ENABLED = _b("GRID_ENABLED", "false")
+    GRID_PAIRS = [p.strip().upper().replace("/", "-") for p in os.getenv("GRID_PAIRS", "BTC-USDT,ETH-USDT").split(",") if p.strip()]
+    GRID_CAPITAL = _f("GRID_CAPITAL", 100)                  # vốn ảo mỗi sổ (USDT)
+    GRID_LEVELS = _i("GRID_LEVELS", 20)                     # số mức giá
+    GRID_RANGE_DAYS = _i("GRID_RANGE_DAYS", 30)             # vùng giá = đáy / đỉnh nến ngày đã đóng trong N ngày
+    GRID_SPACING = (os.getenv("GRID_SPACING") or "geometric").strip().lower()   # geometric | arithmetic
+    GRID_MAKER_FEE = _f("GRID_MAKER_FEE", 0.0008)           # phí maker spot OKX cấp thường 0,08% (lệnh lưới là lệnh giới hạn)
+    GRID_TAKER_FEE = _f("GRID_TAKER_FEE", 0.001)            # phí taker spot 0,10%: mua sẵn coin lúc mở vòng, và mốc HODL
+    GRID_STOP_OUT_PCT = _f("GRID_STOP_OUT_PCT", 0.05)       # giá đóng nến 1m ra ngoài vùng quá 5% → dừng vòng, giữ nguyên coin/USDT
+    # Vòng mới KHÔNG tự mở sau khi dừng (người quyết định – Phần C): tăng GRID_ROUND trên panel (1 → 2) rồi khởi động lại
+    GRID_ROUND = _i("GRID_ROUND", 1)
+    # ---- v3.5: bản sao lên Google Sheets (sheets.py) – thiếu SHEETS_ID / SHEETS_SA_JSON thì tắt ----
+    SHEETS_ID = os.getenv("SHEETS_ID", "").strip()
+    SHEETS_SA_JSON = os.getenv("SHEETS_SA_JSON", "").strip()        # JSON khoá service account (nguyên văn hoặc base64)
+    SHEETS_INTERVAL = _i("SHEETS_INTERVAL", 3600)                     # giây giữa hai lượt ghi các tab dữ liệu
+    SHEETS_SUMMARY_TIME = (os.getenv("SHEETS_SUMMARY_TIME") or "07:05").strip()   # giờ ghi alt_summary (theo TIMEZONE)
     # v3.3: MIN_RR là mức sàn của TP cố định (TP ≥ 1.2 × MIN_RR × R, cách thoát fixed), KHÔNG phải cổng lọc: theo cách dựng
     # R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR nên cổng "RR ≥ MIN_RR" bản cũ không bao giờ chặn (đã bỏ – strategy.min_rr_for).
     # Setup range có cổng thật: RANGE_MIN_RR.
