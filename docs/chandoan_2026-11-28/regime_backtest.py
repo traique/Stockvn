@@ -4,8 +4,12 @@ giảm / short khi BTC ngày đang tăng" có đáng bật không. Chỉ xét t�
 luật chặn sẵn (DEFAULT_BLOCKS); R theo cách thoát hybrid (mặc định của bot), đã trừ phí. Sai số chuẩn gom cụm theo ngày.
 Chia 60% đầu (trong mẫu) / 40% cuối (ngoài mẫu) theo thời gian như các đợt chẩn đoán trước.
 
-    cd altcoin && python tools/backtest_sessions.py --parts bot --days 88 --symbols <50 mã crypto> --cache .bt_cache --out bt88.json
+    cd altcoin && BTC_DAILY_GATE=false python tools/backtest_sessions.py --parts bot --days 88 --symbols <50 mã crypto> \
+        --cache .bt_cache --out bt88.json
     python docs/chandoan_2026-11-28/regime_backtest.py altcoin/bt88.json
+
+BẮT BUỘC chạy backtest với BTC_DAILY_GATE=false: cổng ngày (mặc định bật từ 3.4.0) loại tín hiệu ngay trong strategy._gates
+nên bật cổng thì không còn dòng nào để đo "cổng chặn được gì" (lần chạy đầu 28/11 mắc đúng lỗi này: 0 long trên ngày BTC giảm).
 
 Chỉ thư viện chuẩn."""
 import datetime as dt
