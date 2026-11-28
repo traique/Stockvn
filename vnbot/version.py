@@ -25,13 +25,19 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "v1.25.0"
-RELEASED = "2026-11-28"
-RELEASE_BUILD = "c80867c"          # written by `python -m vnbot.version --stamp`
+VERSION = "v1.25.1"
+RELEASED = "2026-11-29"
+RELEASE_BUILD = "aa8a100"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.
 NOTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v1.25.1", "2026-11-29", (
+        "Bộ kiểm định point-in-time (research/pit, ngoài gói): Phòng thủ 2013-11/2026 16,0%/năm, sụt -23%",
+        "Khớp kiểm định ngoài 15/10; thành phần HOSE từng phiên (VNDirect), giá VCI, cùng ledger của sổ ảo",
+        "Thiên lệch sống sót chỉ +0,3 điểm %/năm; hai phương án Phòng thủ treo từ 23/10 không hơn → giữ bộ cũ",
+        "Altcoin 3.5.1: lịch CPI/FOMC và luật bóng event_window (chỉ đo); mẫu thẻ sổ cho báo cáo tuần",
+    )),
     ("v1.25.0", "2026-11-28", (
         "Mốc ETF mua-giữ (BENCH_ETF, mặc định E1VFVN30): toàn bộ vốn ảo mua giá đóng cửa phiên đầu đợt đo, lô 100",
         "NAV ETF theo giá điều chỉnh cổ tức, phí mua, thêm bán hôm nay sau phí bán và thuế: /bot, /danhmuc, báo cáo",

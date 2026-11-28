@@ -47,8 +47,17 @@ cash earns 0). CAGR / max drawdown / Sharpe, after costs:
     TEST  2024-01..2026-10     8.1% / -20.8% / 0.55   (VNINDEX 15.9% / -18.1%)
     2013-01..2026-10 (one run) 15.6% / -25.9% / 1.11  (VNINDEX 10.7% / -45.3%)
 
-These are the research harness's numbers; the harness and its point-in-time
-universe are NOT part of this bundle, so they cannot be reproduced from here.
+Reproduced from this repository on 2026-11-29 (``research/pit``: VNDirect's
+HOSE membership of every session since 2013, VCI price-history, 533 HOSE/ex-HOSE
+stocks, the same ledger; ``python -m research.pit.evaluate``):
+
+    TRAIN 2013-2020           18.9% / -23.0% / 1.44   (VNINDEX 13.1% / -45.3%)
+    VALID 2021-2023           14.8% /  -9.7% / 1.13   (VNINDEX  0.8% / -40.3%)
+    TEST  2024-01..2026-11     7.7% / -20.0% / 0.54   (VNINDEX 14.0% / -18.1%)
+    2013-01..2026-11 (one run) 16.0% / -23.0% / 1.17  (VNINDEX 10.5% / -45.3%)
+
+The same rule on today's HOSE list (survivorship) gives 15.7% / -24.1% over
+2013-2026: the bias is small for a large-cap rule. See research/README.md.
 The strategy's prices are dividend-adjusted while VNINDEX is a price index, so
 the comparison favours the strategy by roughly 1.5-2.5 points a year (an
 estimate of VNINDEX's dividend yield). This module breaks equal scores by

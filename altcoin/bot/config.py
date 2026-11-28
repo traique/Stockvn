@@ -99,6 +99,9 @@ class Config:
     # luôn là PaperEngine kể cả khi MODE=live (không bao giờ đặt lệnh trên sàn). Khác biệt giữa hai sổ chỉ do AI.
     NOAI_ENABLED = _b("NOAI_ENABLED", "true")
     NOAI_CAPITAL = _f("NOAI_CAPITAL", PAPER_START_BALANCE)   # vốn ảo ban đầu của sổ noai (USDT)
+    # ---- v3.5.1: lịch sự kiện (calendar.py) – chỉ đo bằng luật bóng event_window, không chặn ----
+    EVENT_WINDOW_MIN = _i("EVENT_WINDOW_MIN", 30)           # phút trước / sau giờ công bố CPI, FOMC
+    EVENT_DATES = os.getenv("EVENT_DATES", "").strip()       # thêm sự kiện: "CPI@2027-01-13T08:30ET, X@2027-02-01T00:00Z"
     # ---- v3.5: sổ Grid spot chạy ảo (grid.py) – không đòn bẩy, mỗi cặp một sổ, chỉ API công khai (nến), không bao giờ đặt lệnh ----
     GRID_ENABLED = _b("GRID_ENABLED", "false")
     GRID_PAIRS = [p.strip().upper().replace("/", "-") for p in os.getenv("GRID_PAIRS", "BTC-USDT,ETH-USDT").split(",") if p.strip()]

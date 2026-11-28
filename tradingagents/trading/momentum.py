@@ -26,7 +26,10 @@ with the default parameters on point-in-time universes. CAGR / max drawdown:
 
 The +73-91% reported earlier for 2022-2026 was measured on today's VN30, which
 holds stocks that were on UPCoM when the rule bought them (MCH, BSR): the
-survivorship flattered it. Past results do not promise future ones.
+survivorship flattered it. Reproduced from this repository on 2026-11-29
+(``research/pit``, point-in-time HOSE membership, data to 2026-11-27): VN30
+proxy 5.1% / -46.3% and 50 largest caps 10.3% / -45.6% over 2013-11/2026.
+Past results do not promise future ones.
 """
 
 from __future__ import annotations
