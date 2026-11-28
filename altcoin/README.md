@@ -10,6 +10,8 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 > ⚠️ Future đòn bẩy với vốn nhỏ rủi ro rất cao, có thể mất toàn bộ vốn. Đây là công cụ, không phải lời khuyên đầu tư. Chỉ bật `live` khi đạt đủ tiêu chí ở mục 5.
 
+> **Tình trạng 3.4.0 (28/11/2026).** Sau 29 ngày chạy ảo bản 3.3 (59 lệnh, 1.005 tín hiệu bóng; chẩn đoán ở `docs/chandoan_2026-11-28`): vốn 10,00 → 9,82 USDT, sụt 19,3% từ đỉnh (vượt ngưỡng 15% của mục 5.4), R trung bình −0,04 ± 0,16 – chiến lược vẫn chưa có lợi thế sau phí. Hai phát hiện có ý nghĩa thống kê: **long thua suốt tháng BTC giảm 22%** (320 tín hiệu bóng −0,45R, t −4,2, kể cả khi cổng BTC 1h cho qua) và **AI đoán ngược chiều kết quả** (92 tín hiệu AI từ chối +0,36R, lệnh AI duyệt −0,02R; Brier 0,345 so với 0,234 nếu đoán theo tỉ lệ nền). 3.4.0 thêm cổng regime BTC khung ngày (`BTC_DAILY_GATE`; backtest 88 ngày: nhóm bị cổng loại −0,05R trong mẫu, −0,44R ngoài mẫu, không loại nhóm nào có lãi), hạ `AI_OVERRIDE_MIN_SCORE` 6,5 → 5,0 (AI chỉ điều tiết khối lượng), cầu dao drawdown 30% → 15%, và Brier score trên trang Tự học. Không chỉnh TP1 / SL / giờ giao dịch theo dữ liệu gần đây. Tiếp theo: chạy ảo 4 tuần nữa với `LEARN_MODE=suggest` và đo lại theo mục 5.
+>
 > **Tình trạng 3.3.0 (02/11/2026).** Chẩn đoán sau đợt lỗ 30/10–02/11: sổ sách và cỡ lệnh đúng, lỗ chủ yếu do một đoạn thị trường xấu; nhưng backtest 88 ngày (50 coin, 706 lệnh, code của bot, phí 0,20%/vòng) cho **−0,01R ± 0,07 mỗi lệnh – chiến lược gần như không có lợi thế sau phí**, và 1.335 tổ hợp tham số không tổ hợp nào dương ngoài mẫu một cách chắc chắn (xếp hạng trong mẫu / ngoài mẫu tương quan ngược −0,56). Bản 3.3 chỉ **sửa lỗi** để số liệu chạy ảo và tín hiệu bóng phản ánh đúng thực tế; **không** chỉnh tham số chiến lược theo dữ liệu gần đây. Việc tiếp theo: khởi động 3.3.0 lần đầu với `LEARN_MODE` trống, rồi chạy ảo 4 tuần với `LEARN_MODE=suggest` (trong Stockvn: `ALT_LEARN_MODE=suggest` trên panel), rồi quyết định theo tiêu chí ở mục 5.
 
 ## 1. Cách bot ra quyết định
@@ -269,6 +271,24 @@ check_db.py       – kiểm tra kết nối Supabase trước khi deploy
 ```
 
 > Các mục dưới đây là **lịch sử thay đổi** theo từng bản; giá trị đang dùng ở mục 1, 8, 9, 12 và `bot/config.py`.
+
+## Regime BTC khung ngày, AI chỉ điều tiết khối lượng (v3.4)
+Rút từ 29 ngày chạy ảo bản 3.3 (30/10–27/11/2026, 59 lệnh, 991 tín hiệu bóng có kết quả) và backtest 88 ngày 01/09–28/11
+(50 coin, 793 lệnh vào được) – chi tiết và script chạy lại ở `docs/chandoan_2026-11-28`:
+- **Cổng regime BTC khung ngày** (`BTC_DAILY_GATE`, `market.daily_regime`): BTC rơi 77.600 → 60.600 trong 29 ngày, long thua cả 5
+  tuần (−0,45R, t −4,2) dù cổng 1h cho qua 176 tín hiệu long lúc BTC 1h đang tăng. Backtest: nhóm bị cổng ngày loại −0,05R
+  trong mẫu (166 short lúc BTC ngày tăng) và −0,44R ngoài mẫu (50 long trên 11 ngày BTC giảm), không loại nhóm nào có lãi;
+  sau cổng cả kỳ vẫn chỉ +0,05R ± 0,08 – cổng cắt một nhóm lỗ, không tạo lợi thế. Định nghĩa "% đổi 7 ngày" bị loại vì
+  chặn nhầm nhóm long tốt nhất trong mẫu (+0,44R).
+- **AI chỉ điều tiết khối lượng** (`AI_OVERRIDE_MIN_SCORE` 6,5 → 5,0): AI từ chối 92 tín hiệu +0,36R (t +2,3), duyệt 52 lệnh
+  −0,02R; nhóm điểm 5,5–6,5 bị sàn 6,5 chặn là nhóm tốt nhất (+0,51R). Bộ tự học đã nâng ngưỡng phủ quyết 65 → 90 nhưng kẹt
+  ở sàn. **Brier** (mục 8) 0,345 so với 0,234 nếu đoán theo tỉ lệ nền: AI đoán ngược chiều kết quả. Trả lại quyền chặn
+  chỉ khi skill > 0 trên ≥ 150 quyết định.
+- **Cầu dao drawdown 30% → 15%**: chạy ảo sụt 19,3% (01/11 → 09/11) mà cầu dao không kêu, trong khi mục 5.4 coi 15% là ngưỡng
+  tạm dừng.
+- Không đổi TP1 (2R hơn 1R +0,13R, t 1,8 – chưa đủ), SL 2,5 ATR (+0,08R, t 1,5), giờ giao dịch (06–09h +0,38R trên 54 tín hiệu
+  tới AI – lát cắt trên cùng dữ liệu). Bộ tự học quyết với t ≥ 2.
+- Không dùng thêm dịch vụ AI nào (prompt lan truyền "AgenKit + Jev" đề xuất dựng lại bot: bot đã có tương đương, xem chẩn đoán).
 
 ## Tối ưu lợi nhuận kỳ vọng (v2.9)
 Mục tiêu là **lợi nhuận kỳ vọng** = tỉ lệ thắng × lãi trung bình − tỉ lệ thua × lỗ trung bình, không chỉ tỉ lệ thắng.

@@ -63,4 +63,56 @@ tháng BTC sập, tách tham số theo phía sẽ chia đôi mẫu. Tiếp tục
 
 ## 4. Backtest 88 ngày: cổng regime BTC khung ngày
 
-(xem mục 4 bên dưới – được điền sau khi chạy `regime_backtest.py`)
+`altcoin/tools/backtest_sessions.py --parts bot` (code của bot, chạy lại `strategy.diagnose` trên nến 15m đã đóng, thoát hybrid,
+phí 0,20%/vòng, không AI, không OI/funding), 01/09 → 28/11/2026, 50 hợp đồng USDT-SWAP crypto volume cao nhất hôm nay (lọc
+`instCategory`, có thiên lệch sống sót), nến OKX tải ngày chạy (không nằm trong repo). Regime ngày = `market.daily_regime` trên
+nến 1D OKX đã đóng (mở 00:00 giờ Hồng Kông): EMA21 > EMA50 và đóng > EMA21 = tăng, ngược lại = giảm, còn lại = chưa rõ.
+Chỉ xét tín hiệu bot thật sự vào được (đạt điểm, không dính luật chặn sẵn). **Backtest phải chạy với `BTC_DAILY_GATE=false`**
+(lần đầu chạy lúc cổng đã bật nên không còn tín hiệu để đo – `regime_backtest.py` ghi rõ). Chạy lại:
+`python docs/chandoan_2026-11-28/regime_backtest.py <bt88.json>`. 60% đầu trong mẫu (tới 22/10), 40% cuối ngoài mẫu.
+
+Số ngày theo regime: 41 ngày BTC tăng (toàn bộ trong mẫu, Sep–Oct, BTC 75.000–86.000), 28 chưa rõ, 23 giảm (toàn bộ ngoài
+mẫu, từ 04/11, BTC 80.000 → 58.000). Tức là backtest chỉ có **một** đợt giảm để kiểm, và nó trùng với 29 ngày chạy ảo ở mục 1.
+
+| Nhóm (R hybrid, sai số theo ngày) | Trong mẫu | Ngoài mẫu | Cả kỳ |
+|---|---|---|---|
+| Mọi lệnh vào được | 475, −0,03 ± 0,08 | 318, +0,03 ± 0,14 | 793, −0,01 ± 0,07 |
+| Long khi BTC ngày **giảm** (cổng chặn) | 0 | **50 tín hiệu, 11 ngày, −0,42 ± 0,34, thắng 30%** | 50, −0,42 |
+| Short khi BTC ngày **tăng** (cổng chặn) | 166, −0,05 ± 0,18 | 8 (1 ngày), −0,56 | 174, −0,07 ± 0,17 |
+| Long khi BTC ngày tăng | 187, +0,00 | 0 | 187, +0,00 |
+| Short khi BTC ngày giảm | 0 | 140, +0,32 ± 0,18, thắng 71% | 140, +0,32 |
+| Long / short khi chưa rõ | 46, +0,21 / 76, −0,23 | 40, −0,16 / 80, −0,02 | 86, +0,03 / 156, −0,13 |
+| **Bị cổng ngày loại** | 166, **−0,05 ± 0,18** (t −0,3) | 58, **−0,44 ± 0,29** (t −1,5), thắng 29% | 224, −0,15 ± 0,17 |
+| **Còn lại sau cổng** | 309, −0,03 ± 0,09 | 260, **+0,14 ± 0,14** | 569, +0,05 ± 0,08 |
+
+Đọc thế nào:
+
+1. Cổng ngày **không bao giờ loại một nhóm có lãi**: trong mẫu nó chỉ bỏ 166 short lúc BTC ngày tăng (−0,05R, gần 0), ngoài mẫu
+   bỏ 58 tín hiệu −0,44R (50 long trên 11 ngày BTC giảm). Nhóm bị loại âm ở cả hai nửa, nhưng chỉ ngoài mẫu mới âm rõ
+   (t −1,5, chưa tới 2) và lợi ích gần như nằm trọn trong một đợt giảm – chính là đợt làm bot chạy ảo lỗ ở mục 1.
+2. Cổng 1h không làm được việc này: ngoài mẫu, long lúc BTC 1h đang tăng vẫn được vào trên những ngày BTC ngày giảm.
+3. Tổng thể sau cổng vẫn chỉ +0,05R ± 0,08 cả kỳ: **cổng ngày không tạo lợi thế, nó cắt một nhóm lỗ** – đúng như backtest 88
+   ngày của đợt 02/11 (chiến lược gần hoà sau phí). Việc chuyển live vẫn theo đúng tiêu chí README mục 5.
+4. Các định nghĩa regime khác (giá dưới EMA21 ngày, giá dưới EMA50 ngày, % đổi 7 / 14 ngày) đã thử trên cùng dữ liệu: "% đổi 7
+   ngày < 0" loại nhầm nhóm long tốt nhất trong mẫu (long sau khi BTC giảm nhẹ 7 ngày trong xu hướng tăng: +0,44R, t +3,9),
+   nên không dùng; EMA21/EMA50 + giá đóng (cùng định nghĩa với khung 1h) là cách đơn giản nhất không loại nhầm nhóm lãi nào.
+   Không chọn định nghĩa theo số đẹp nhất.
+5. Tham khảo, **không hành động**: short khi BTC ngày "chưa rõ" trong mẫu −0,23R (t −3,5, 10 ngày) và short khi BTC vừa tăng
+   > 5%/7 ngày −0,70R (17 tín hiệu, 3 ngày) – mẫu dồn vài ngày, để bộ tự học theo dõi qua luật ứng viên nếu lặp lại.
+
+**Quyết định 3.4.0:** `BTC_DAILY_GATE=true` (cổng cứng), kèm hai luật ứng viên `long_btc_bear_1d` / `short_btc_bull_1d` để
+trang Tự học vẫn thống kê bóng của nhóm bị cổng chặn (tín hiệu bị cổng loại không thành dòng bóng; luật chỉ có tác dụng khi
+tắt cổng – `BTC_DAILY_GATE=false` – lúc đó bộ tự học sẽ chặn/bỏ chặn theo kết quả như mọi luật BTC khác).
+
+## 5. Thay đổi trong 3.4.0 và tiêu chí xem lại
+
+| Thay đổi | Ở đâu | Xem lại khi |
+|---|---|---|
+| Cổng regime BTC khung ngày | `market.daily_regime`, `strategy.btc_gate`, `BTC_DAILY_GATE` | sau 4 tuần chạy ảo: nếu bóng của hai luật ngày (khi tắt cổng để đo) hoặc backtest lần sau cho nhóm bị chặn ≥ 0 |
+| AI chỉ điều tiết khối lượng | `AI_OVERRIDE_MIN_SCORE` 6,5 → 5,0 | trả lại quyền chặn (6,5) chỉ khi Brier của AI < tỉ lệ nền (skill > 0) trên ≥ 150 quyết định |
+| Cầu dao 15% | `MAX_DRAWDOWN` 0,30 → 0,15 | không |
+| Brier trên trang Tự học | `learner.ai_calibration` | – |
+| TP1, SL 2,5 ATR, giờ giao dịch | không đổi | bộ tự học quyết, t ≥ 2 |
+
+Giới hạn chung của cả đợt chẩn đoán: 29 ngày chạy ảo và 23 ngày BTC giảm trong backtest là cùng một đợt thị trường; mọi lát cắt
+ở mục 1–3 đều lấy từ cùng dữ liệu nên lạc quan hơn thực tế; vốn 10 USDT nên phí và lot tối thiểu chi phối kết quả tiền thật.
