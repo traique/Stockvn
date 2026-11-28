@@ -222,6 +222,17 @@ Với Botkeep đã có HTTPS (vd `https://okx.bot-keep.xyz`), chatbot Zoom chạ
 
 Lệnh dùng chung: `status, trades, signals, ai, learn, apply, lessons, btc, pause, resume, close` (Telegram thêm `/`, Zoom gõ trực tiếp hoặc `/okxbot <lệnh>`).
 
+## 11b. Lịch sự kiện CPI / FOMC (v3.5.1 – chỉ đo)
+
+`bot/calendar.py` giữ giờ công bố CPI Mỹ (08:30 giờ New York, lịch BLS 2026) và tuyên bố FOMC (14:00 giờ New York ngày
+thứ hai của kỳ họp, lịch Fed 2026–2027, đọc 28/11/2026), đổi sang UTC theo mùa. Tín hiệu rơi vào ±`EVENT_WINDOW_MIN` (30)
+phút quanh một sự kiện được ghi `event` vào context, và luật bóng **`event_window`** (trong `strategy.RULES`, **không** trong
+`DEFAULT_BLOCKS`) khớp – bot **không chặn** gì theo lịch; bộ tự học đếm nhóm này như mọi luật ứng viên (chặn chỉ khi ≥ 30 mẫu,
+≥ 7 ngày, t ≥ 2, và ở `LEARN_MODE=suggest` chỉ đề xuất). `/status` có dòng sự kiện sắp tới hoặc "đang trong cửa sổ". Lịch
+BLS 2027 chưa công bố lúc viết: thêm bằng `EVENT_DATES="CPI@2027-01-13T08:30ET, FOMC@..., UNLOCK-ARB@2027-02-16T00:00Z"`
+(ET = giờ New York, Z = UTC); lịch hết thì log cảnh báo mỗi ngày một lần. Ý lấy từ mẫu "một người AI trading desk"; chỉ
+cửa sổ sự kiện được thêm vì repo chưa có, và chỉ ở dạng đo.
+
 ## 11. Bối cảnh BTC, Open Interest, tỉ lệ long/short
 
 Mỗi lượt quét bot lấy BTC 15m/1h (xu hướng, % thay đổi 1h/4h) và, từ v3.4, nến 1D đã đóng: regime khung ngày `btc_trend_1d` (1 tăng / −1 giảm / 0 chưa rõ, cùng định nghĩa EMA21/EMA50 với khung 1h – `market.daily_regime`) và `btc_chg_7d` (% đổi 7 ngày); nến ngày OKX mở 00:00 giờ Hồng Kông, bot chỉ dùng nến đã đóng nên regime đổi tối đa một lần mỗi ngày. Với mỗi tín hiệu đã qua bộ lọc kỹ thuật, bot lấy thêm Open Interest thay đổi 1h, tỉ lệ tài khoản long/short và funding của coin đó. Các dữ liệu này:
@@ -267,9 +278,10 @@ bot/eventlog.py   – ghi log hoạt động vào DB để xem trên web
 bot/books.py      – v3.5: sổ (book) main / noai, so sánh sổ (theo cặp tín hiệu, sai số theo ngày)
 bot/grid.py       – v3.5: sổ Grid spot chạy ảo (GridBook thuần + GridRunner luồng riêng, chỉ API công khai)
 bot/sheets.py     – v3.5: bản sao lên Google Sheets (service account, JWT RS256, REST v4; không đọc ngược)
+bot/calendar.py   – v3.5.1: lịch CPI / FOMC cho luật bóng event_window (chỉ đo, không chặn)
 bot/telegram.py, bot/dashboard.py, bot/main.py
 test_smoke.py     – quét thật OKX, in tín hiệu (không cần key)
-test_engine.py, test_risk.py, test_strategy.py, test_learner.py, test_web.py, test_books.py, test_grid.py, test_sheets.py – kiểm tra offline (Stockvn chạy qua tests/run_all.py)
+test_engine.py, test_risk.py, test_strategy.py, test_learner.py, test_web.py, test_books.py, test_grid.py, test_sheets.py, test_calendar.py – kiểm tra offline (Stockvn chạy qua tests/run_all.py)
 tools/            – backtest_sessions.py (backtest theo phiên trên nến OKX), Kronos (thử nghiệm)
 botkeep.env       – mẫu biến cho panel Botkeep khi chạy độc lập (chỉ bí mật + thông tin riêng; v3.3 bỏ hồ sơ "test gắt" 10%/lệnh)
 check_db.py       – kiểm tra kết nối Supabase trước khi deploy

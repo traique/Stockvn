@@ -16,13 +16,16 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.5.0"
+VERSION = "3.5.1"
 RELEASED = "2026-11-29"
-RELEASE_BUILD = "aa841a8"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "3a591dd"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.5.1", "2026-11-29", (
+        "Lịch CPI / FOMC (bot/calendar.py, EVENT_DATES để thêm) và luật bóng event_window ±30 phút: chỉ đo, không chặn – bộ tự học xét như mọi luật ứng viên; /status có dòng sự kiện sắp tới",
+    )),
     ("3.5.0", "2026-11-29", (
         "Sổ 'không AI' chạy ảo song song (NOAI_ENABLED): cùng ứng viên, cùng giá vào, không hỏi AI, rủi ro 1,0×, cầu dao 15% riêng, không tin từng lệnh – /alt compare và thẻ So sánh sổ (theo cặp tín hiệu, sai số theo ngày)",
         "Cột book (main / noai) cho lệnh và đường vốn; mọi số liệu sổ chính lọc book=main; lệnh ghi sid của tín hiệu, lệnh noai ghi phán quyết AI",

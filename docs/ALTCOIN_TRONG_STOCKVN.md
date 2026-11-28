@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.25.0** và **Altcoin 3.5.0** (bản dựng `aa841a8`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.25.0** và **Altcoin 3.5.1** (bản dựng `3a591dd`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -144,6 +144,7 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_BTC_DAILY_GATE` | `true` | 3.4.0: cổng regime BTC khung **ngày** – cấm long khi BTC ngày đang giảm, cấm short khi đang tăng (nến 1D đã đóng, EMA21/EMA50). `false` = tắt cổng, hai luật `long_btc_bear_1d` / `short_btc_bull_1d` vẫn theo dõi bóng cho bộ tự học. Lý do và backtest: `docs/chandoan_2026-11-28` |
 | `ALT_AI_OVERRIDE_MIN_SCORE` | 5.0 (3.4.0; bản cũ 6,5) | AI phản đối dưới ngưỡng phủ quyết thì tín hiệu điểm ≥ mức này vẫn vào nửa rủi ro. 5,0 = `MIN_SCORE`: AI chỉ điều tiết khối lượng, không chặn (29 ngày chạy ảo: tín hiệu AI chặn +0,36R, lệnh AI duyệt −0,02R). Muốn AI chặn cứng như cũ: `6.5` |
 | `ALT_MAX_DRAWDOWN` | 0.15 (3.4.0; bản cũ 0,30) | Cầu dao: sụt quá mức này từ đỉnh thì dừng hẳn, chờ `/alt resume` – bằng ngưỡng "tạm dừng & thiết kế lại" của quy trình đo 4 tuần. 3.5.0: mốc đỉnh đặt lại về vốn lúc khởi động 3.5.0 lần đầu (đợt đo mới); sổ không AI có cầu dao riêng cùng ngưỡng |
+| `ALT_EVENT_WINDOW_MIN`, `ALT_EVENT_DATES` | 30, trống | 3.5.1: cửa sổ ±phút quanh CPI / FOMC cho luật **bóng** `event_window` (chỉ đo, không chặn; README altcoin mục 11b). `ALT_EVENT_DATES="CPI@2027-01-13T08:30ET, X@2027-02-01T00:00Z"` thêm sự kiện (lịch BLS 2027 chưa có sẵn) |
 | `ALT_NOAI_ENABLED` | `true` | 3.5.0: sổ "không AI" chạy ảo song song (cùng ứng viên, không hỏi AI, rủi ro 1,0×, không tin từng lệnh, luôn paper kể cả live). `ALT_NOAI_CAPITAL` = vốn ảo ban đầu (mặc định = `PAPER_START_BALANCE` 10). Xem `/alt compare` |
 | `ALT_GRID_ENABLED` | `false` | 3.5.0: sổ Grid spot chạy ảo (chỉ API công khai, không đặt lệnh). `ALT_GRID_PAIRS` (BTC-USDT,ETH-USDT), `ALT_GRID_CAPITAL` (100 USDT ảo mỗi sổ), `ALT_GRID_LEVELS` (20), `ALT_GRID_RANGE_DAYS` (30), `ALT_GRID_SPACING` (geometric / arithmetic), `ALT_GRID_MAKER_FEE` (0.0008), `ALT_GRID_TAKER_FEE` (0.001), `ALT_GRID_STOP_OUT_PCT` (0.05). Vòng dừng vì phá vùng **không tự mở lại**: tăng `ALT_GRID_ROUND` (1 → 2) rồi khởi động lại |
 | `ALT_SHEETS_ID`, `ALT_SHEETS_SA_JSON` | trống | 3.5.0: ghi bản sao lên Google Sheets (bảng tính BotLab): id bảng tính và JSON khoá service account (nguyên văn hoặc **base64** một dòng – khuyên base64). Chia sẻ bảng tính cho email của service account (quyền chỉnh sửa). Thiếu thì tắt. `ALT_SHEETS_INTERVAL` (3600 giây), `ALT_SHEETS_SUMMARY_TIME` (07:05). Không dán khoá vào chat |
@@ -264,10 +265,10 @@ Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch
 ```bash
 python tests/run_all.py                              # phải kết thúc bằng "tất cả đều đạt"
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
-python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.25.0-alt3.5.0.zip
+python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.25.0-alt3.5.1.zip
 ```
 
-Builder in hai dòng `Stock v1.25.0: bản dựng … = bản phát hành` và `Altcoin 3.5.0: bản dựng aa841a8 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.25.0: bản dựng … = bản phát hành` và `Altcoin 3.5.1: bản dựng 3a591dd = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
