@@ -15,7 +15,7 @@ import _common  # noqa: F401 - clean env, no .env, offline, temp folder, repo on
 t = _common.Checks()
 ALT = _common.REPO / "altcoin"
 SUITES = Path(__file__).resolve().parent
-SCRIPTS = ("test_engine", "test_learner", "test_risk", "test_strategy", "test_web", "test_books", "test_grid")
+SCRIPTS = ("test_engine", "test_learner", "test_risk", "test_strategy", "test_web", "test_books", "test_grid", "test_sheets")
 TIMEOUT = 300
 # The child: _common first (clean env, offline, temp cwd), then no env file at all for bot/config.py.
 RUN = ("import sys, runpy; sys.path[:0] = [sys.argv[1], sys.argv[2]]; import _common; import dotenv; "

@@ -111,6 +111,11 @@ class Config:
     GRID_STOP_OUT_PCT = _f("GRID_STOP_OUT_PCT", 0.05)       # giá đóng nến 1m ra ngoài vùng quá 5% → dừng vòng, giữ nguyên coin/USDT
     # Vòng mới KHÔNG tự mở sau khi dừng (người quyết định – Phần C): tăng GRID_ROUND trên panel (1 → 2) rồi khởi động lại
     GRID_ROUND = _i("GRID_ROUND", 1)
+    # ---- v3.5: bản sao lên Google Sheets (sheets.py) – thiếu SHEETS_ID / SHEETS_SA_JSON thì tắt ----
+    SHEETS_ID = os.getenv("SHEETS_ID", "").strip()
+    SHEETS_SA_JSON = os.getenv("SHEETS_SA_JSON", "").strip()        # JSON khoá service account (nguyên văn hoặc base64)
+    SHEETS_INTERVAL = _i("SHEETS_INTERVAL", 3600)                     # giây giữa hai lượt ghi các tab dữ liệu
+    SHEETS_SUMMARY_TIME = (os.getenv("SHEETS_SUMMARY_TIME") or "07:05").strip()   # giờ ghi alt_summary (theo TIMEZONE)
     # v3.3: MIN_RR là mức sàn của TP cố định (TP ≥ 1.2 × MIN_RR × R, cách thoát fixed), KHÔNG phải cổng lọc: theo cách dựng
     # R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR nên cổng "RR ≥ MIN_RR" bản cũ không bao giờ chặn (đã bỏ – strategy.min_rr_for).
     # Setup range có cổng thật: RANGE_MIN_RR.
