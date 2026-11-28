@@ -113,6 +113,15 @@ class Store:
                 reasons TEXT, near TEXT, top TEXT)""",
             f"""CREATE TABLE IF NOT EXISTS learn_log(ts {real}, kind TEXT, k TEXT, old TEXT, new TEXT,
                 reason TEXT, n INTEGER, exp_r {real}, status TEXT)""",
+            # v3.5: sổ Grid spot chạy ảo (grid.py) – mỗi vòng một dòng grid_runs (state: JSON trạng thái lưới), mỗi lần khớp
+            # một dòng grid_fills, mỗi 15 phút một dòng grid_equity
+            f"""CREATE TABLE IF NOT EXISTS grid_runs(id {pk}, pair TEXT, round INTEGER, low {real}, high {real},
+                levels INTEGER, spacing TEXT, capital {real}, start_price {real}, started_at {real}, ended_at {real},
+                reason TEXT, state TEXT)""",
+            f"""CREATE TABLE IF NOT EXISTS grid_fills(ts {real}, run_id INTEGER, pair TEXT, level INTEGER, price {real},
+                side TEXT, amount {real}, fee {real}, profit {real})""",
+            f"""CREATE TABLE IF NOT EXISTS grid_equity(ts {real}, run_id INTEGER, pair TEXT, usdt {real}, coin {real},
+                price {real}, value {real}, hodl {real}, realized {real})""",
         ])
         # cột bổ sung (migration nhẹ, an toàn khi chạy lại)
         self._add_cols("signals", [("sid", "TEXT"), ("source", "TEXT"), ("entry", real), ("sl", real), ("tp", real),
@@ -438,6 +447,49 @@ class Store:
     def set_learn_status(self, ts, status):
         self.db.run("UPDATE learn_log SET status=? WHERE ts=?", (status, ts))
 
+    # ---- grid (v3.5)
+    def grid_runs(self, pair=None, limit=20):
+        if pair:
+            return self.db.run("SELECT * FROM grid_runs WHERE pair=? ORDER BY id DESC LIMIT ?", (pair, limit), fetch=True)
+        return self.db.run("SELECT * FROM grid_runs ORDER BY id DESC LIMIT ?", (limit,), fetch=True)
+
+    def grid_open_run(self, pair):
+        r = self.db.run("SELECT * FROM grid_runs WHERE pair=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1", (pair,), fetch=True)
+        return r[0] if r else None
+
+    def grid_add_run(self, pair, rnd, low, high, levels, spacing, capital, start_price, started_at, state):
+        row = (pair, int(rnd), low, high, int(levels), spacing, capital, start_price, started_at, json.dumps(state))
+        q = """INSERT INTO grid_runs(pair, round, low, high, levels, spacing, capital, start_price, started_at, state)
+               VALUES(?,?,?,?,?,?,?,?,?,?)"""
+        if self.pg:
+            return self.db.run(q + " RETURNING id", row, fetch=True)[0]["id"]
+        return self.db.run(q, row).lastrowid
+
+    def grid_save_run(self, run_id, state, ended_at=None, reason=None):
+        if ended_at is not None:
+            self.db.run("UPDATE grid_runs SET state=?, ended_at=?, reason=? WHERE id=?",
+                        (json.dumps(state), ended_at, reason, run_id))
+        else:
+            self.db.run("UPDATE grid_runs SET state=? WHERE id=?", (json.dumps(state), run_id))
+
+    def grid_add_fills(self, rows):
+        for r in rows:
+            self.db.run("INSERT INTO grid_fills(ts, run_id, pair, level, price, side, amount, fee, profit) VALUES(?,?,?,?,?,?,?,?,?)", r)
+
+    def grid_fills(self, run_id=None, limit=200, since=0.0):
+        if run_id is not None:
+            return self.db.run("SELECT * FROM grid_fills WHERE run_id=? AND ts>=? ORDER BY ts DESC LIMIT ?",
+                               (run_id, since, limit), fetch=True)
+        return self.db.run("SELECT * FROM grid_fills WHERE ts>=? ORDER BY ts DESC LIMIT ?", (since, limit), fetch=True)
+
+    def grid_add_equity(self, ts, run_id, pair, usdt, coin, price, value, hodl, realized):
+        self.db.run("INSERT INTO grid_equity(ts, run_id, pair, usdt, coin, price, value, hodl, realized) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (ts, run_id, pair, usdt, coin, price, value, hodl, realized))
+
+    def grid_equity(self, run_id, limit=3000):
+        rows = self.db.run("SELECT * FROM grid_equity WHERE run_id=? ORDER BY ts DESC LIMIT ?", (run_id, limit), fetch=True)
+        return list(reversed(rows))
+
     # ---- dọn dữ liệu cũ
     def prune(self):
         now = time.time()
@@ -454,6 +506,9 @@ class Store:
         "equity": "SELECT * FROM equity ORDER BY ts",
         "reviews": "SELECT * FROM reviews ORDER BY ts",
         "learn_log": "SELECT * FROM learn_log ORDER BY ts",
+        "grid_runs": "SELECT * FROM grid_runs ORDER BY id",
+        "grid_fills": "SELECT * FROM grid_fills ORDER BY ts",
+        "grid_equity": "SELECT * FROM grid_equity ORDER BY ts",
     }
 
     def export(self, name):

@@ -99,6 +99,18 @@ class Config:
     # luôn là PaperEngine kể cả khi MODE=live (không bao giờ đặt lệnh trên sàn). Khác biệt giữa hai sổ chỉ do AI.
     NOAI_ENABLED = _b("NOAI_ENABLED", "true")
     NOAI_CAPITAL = _f("NOAI_CAPITAL", PAPER_START_BALANCE)   # vốn ảo ban đầu của sổ noai (USDT)
+    # ---- v3.5: sổ Grid spot chạy ảo (grid.py) – không đòn bẩy, mỗi cặp một sổ, chỉ API công khai (nến), không bao giờ đặt lệnh ----
+    GRID_ENABLED = _b("GRID_ENABLED", "false")
+    GRID_PAIRS = [p.strip().upper().replace("/", "-") for p in os.getenv("GRID_PAIRS", "BTC-USDT,ETH-USDT").split(",") if p.strip()]
+    GRID_CAPITAL = _f("GRID_CAPITAL", 100)                  # vốn ảo mỗi sổ (USDT)
+    GRID_LEVELS = _i("GRID_LEVELS", 20)                     # số mức giá
+    GRID_RANGE_DAYS = _i("GRID_RANGE_DAYS", 30)             # vùng giá = đáy / đỉnh nến ngày đã đóng trong N ngày
+    GRID_SPACING = (os.getenv("GRID_SPACING") or "geometric").strip().lower()   # geometric | arithmetic
+    GRID_MAKER_FEE = _f("GRID_MAKER_FEE", 0.0008)           # phí maker spot OKX cấp thường 0,08% (lệnh lưới là lệnh giới hạn)
+    GRID_TAKER_FEE = _f("GRID_TAKER_FEE", 0.001)            # phí taker spot 0,10%: mua sẵn coin lúc mở vòng, và mốc HODL
+    GRID_STOP_OUT_PCT = _f("GRID_STOP_OUT_PCT", 0.05)       # giá đóng nến 1m ra ngoài vùng quá 5% → dừng vòng, giữ nguyên coin/USDT
+    # Vòng mới KHÔNG tự mở sau khi dừng (người quyết định – Phần C): tăng GRID_ROUND trên panel (1 → 2) rồi khởi động lại
+    GRID_ROUND = _i("GRID_ROUND", 1)
     # v3.3: MIN_RR là mức sàn của TP cố định (TP ≥ 1.2 × MIN_RR × R, cách thoát fixed), KHÔNG phải cổng lọc: theo cách dựng
     # R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR nên cổng "RR ≥ MIN_RR" bản cũ không bao giờ chặn (đã bỏ – strategy.min_rr_for).
     # Setup range có cổng thật: RANGE_MIN_RR.

@@ -84,6 +84,7 @@ function render(d){
   renderAI(d.ai||{});
   renderLearn(d.learn);
   renderBooks(d.books,d.noai);
+  renderGrid(d.grid);
   if($('svg')){drawChart(d.curve);put('crange',d.curve&&d.curve.length?`${d.curve.length} điểm · ghi mỗi 5 phút`:'');}
   if($('open')){
     put('openN',(d.open||[]).length?`${d.open.length} lệnh`:'');
@@ -114,6 +115,17 @@ function renderBooks(c,noai){
    `<br><span class="muted">Hai sổ nhận cùng ứng viên, cùng giá last lúc quyết định; sổ không AI vào không hỏi AI, hệ số rủi ro 1,0×. Cần ≥ ${c.min_trades} lệnh mỗi sổ và ≥ 3 tuần; main không tốt hơn noai quá 2 sai số chuẩn → AI không thêm giá trị.</span></div>`}
   if(noai&&noai.open&&noai.open.length)h+=`<div class="list" style="margin-top:8px">${noai.open.map(x=>`<div class="row"><div class="t">${sideTag(x.side)} ${x.symbol.split('/')[0]} <span class="pill" style="font-size:10px">không AI</span></div><div class="r">${f(x.notional,1)} USDT</div><div class="m">Vào ${px(x.entry)} · SL ${px(x.sl)} · mở ${ago(x.opened_at)} trước${x.ai_verdict?` · AI (sổ chính): ${esc(x.ai_verdict)}`:''}</div></div>`).join('')}</div>`;
   el.innerHTML=h;
+}
+function renderGrid(g){
+  const el=$('grid'),sub=$('gridSub');if(!el)return;
+  if(!g||!g.enabled){el.innerHTML='<div class="empty">Sổ Grid đang tắt – đặt GRID_ENABLED=true (Stockvn: ALT_GRID_ENABLED=true) rồi khởi động lại.</div>';return}
+  if(sub)sub.textContent=`${(g.pairs||[]).join(', ')} · vòng ${g.round}`;
+  const runs=g.runs||[];
+  if(!runs.length){el.innerHTML='<div class="empty">Đang mở vòng đầu…</div>';return}
+  el.innerHTML=runs.map(m=>m.state==='chưa mở'?`<div class="row"><div class="t">${esc(m.pair)}</div><div class="m">chưa mở vòng</div></div>`:
+   `<div class="row"><div class="t">${esc(m.pair)} <span class="pill ${m.stopped?'':'gold'}" style="font-size:10px">${esc(m.state)}</span></div>
+    <div class="r ${m.ret_pct>=0?'up':'dn'}">${f(m.value,2)}<small>${sgn(m.ret_pct)}${f(Math.abs(m.ret_pct),2)}% · HODL ${sgn(m.hodl_pct)}${f(Math.abs(m.hodl_pct),2)}%</small></div>
+    <div class="m">Vùng ${px(m.low)}–${px(m.high)} · ${m.levels} mức · lãi đã khoá <b class="${m.realized>=0?'up':'dn'}">${sgn(m.realized)}${f(Math.abs(m.realized),3)}</b> · tồn kho ${sgn(m.inventory_pnl)}${f(Math.abs(m.inventory_pnl),3)} · phí ${f(m.fees,3)} · sụt tối đa ${f(m.max_dd_pct,2)}% · ${m.rounds} vòng (${m.rounds_per_day}/ngày) · trong vùng ${m.in_range_pct==null?'—':m.in_range_pct+'%'} · so HODL <b class="${m.vs_hodl_pct>=0?'up':'dn'}">${sgn(m.vs_hodl_pct)}${f(Math.abs(m.vs_hodl_pct),2)} điểm %</b>${m.stopped?`<br><span class="dn">Dừng: ${esc(m.stopped)}</span>`:''}</div></div>`).join('');
 }
 function renderAI(a){
   const sub=$('aiSub'),last=$('aiLast'),el=$('aiModels');if(!el)return;
@@ -242,6 +254,7 @@ def _home_body():
     tiles = ui.card("Hiệu suất & AI", '<div class="kpis" id="tiles">' + SKEL + "</div>",
                     sub="", sub_id="meta")
     books_card = ui.card("So sánh sổ: có AI và không AI", '<div id="books">' + SKEL + "</div>", sub_id="booksSub")
+    grid_card = ui.card("Grid spot (chạy ảo)", '<div class="list" id="grid">' + SKEL + "</div>", sub_id="gridSub", flush=True)
     equity = ui.card("Đường vốn", '<div class="chart"><svg id="svg" preserveAspectRatio="none" role="img" '
                      'aria-label="Biểu đồ vốn theo thời gian"></svg><div class="tip" id="tip"></div></div>',
                      sub_id="crange", flush=False)
@@ -266,7 +279,7 @@ def _home_body():
                 f'<div class="stat"><div class="l">{x}</div><div class="v">—</div><div class="s">&nbsp;</div></div>'
                 for x in ("Vốn hiện tại", "Lãi/lỗ đã chốt", "Tỉ lệ thắng", "Lệnh đang mở")) + "</div>"
             + f'<div class="grid g-wide">{equity}{opens}</div>'
-            + f'<div class="mt">{tiles}</div><div class="mt">{books_card}</div><div class="mt">{logs}</div>')
+            + f'<div class="mt">{tiles}</div><div class="grid g-wide mt">{books_card}{grid_card}</div><div class="mt">{logs}</div>')
 
 
 def _ai_body():

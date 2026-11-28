@@ -28,6 +28,7 @@ from . import eventlog
 from . import market as mkt
 from . import strategy as strat
 from . import books
+from .grid import GridRunner
 
 logging.basicConfig(
     level=getattr(logging, cfg.LOG_LEVEL, logging.INFO),
@@ -47,6 +48,7 @@ def learned_changes(L):
 class Bot:
     noai = None          # sổ không AI (v3.5, books.py) – None khi NOAI_ENABLED=false (test dựng Bot bằng __new__ cũng không có)
     period = None        # đợt đo (kv "period")
+    grid = None          # sổ Grid spot (v3.5, grid.py) – luồng riêng, chỉ API công khai
     _noai_map = {}
 
     def __init__(self):
@@ -90,6 +92,7 @@ class Bot:
             self.noai = PaperEngine(self.okx, self.store, self.notify.send, book=books.NOAI, quiet=True,
                                     capital=cfg.NOAI_CAPITAL)
         self._noai_map = {}      # id(sig) -> id lệnh noai vừa mở trong lượt quét này (để gắn sid & phán quyết AI)
+        self.grid = GridRunner(self.okx, self.store, self.notify.send, active=lambda: self.is_leader)
         # v3.5: đợt đo – ghi lúc bắt đầu (lần khởi động đầu tiên của bản có sổ noai); mốc đỉnh cầu dao của sổ chính đặt lại
         # về vốn lúc này để hai sổ cùng điều kiện (peak_equity cũ là đỉnh trước đợt sụt 19,3% – README 3.4.0)
         self.period = self.store.get("period")
@@ -188,7 +191,7 @@ class Bot:
     HELP = ("Lệnh (Telegram gõ /lenh, Zoom gõ /okxbot lenh):\n"
             "status – vốn, lệnh mở, quét gần nhất\ntrades – 10 lệnh gần nhất\nsignals – tín hiệu & quyết định AI\n"
             "ai – lượt gọi từng model\nlearn – trạng thái tự học\napply – duyệt đề xuất tự học\n"
-            "compare – so sánh sổ chính (có AI) với sổ không AI\n"
+            "compare – so sánh sổ chính (có AI) với sổ không AI\ngrid – sổ Grid spot chạy ảo (chỉ đọc)\n"
             "lessons – bài học AI\nbtc – bối cảnh BTC\npause / resume – tạm dừng / tiếp tục\nclose – đóng tất cả lệnh\n"
             "phienban – phiên bản & lịch sử cập nhật\nzoomtest – gửi thử thông báo Zoom\n"
             "zoompair <jid> / zoomxoa / zoomstatus – ghép đôi Zoom (chỉ trên Telegram)")
@@ -210,6 +213,10 @@ class Bot:
             return f"▶️ Bot tiếp tục giao dịch. – qua {source}"
         if cmd == "compare":
             return books.compare_text(self.compare())
+        if cmd == "grid":
+            if not cfg.GRID_ENABLED:
+                return "Sổ Grid đang tắt (GRID_ENABLED=false; trong Stockvn: ALT_GRID_ENABLED=true rồi khởi động lại)."
+            return self.grid.text() if self.grid else "Grid chưa khởi động."
         if cmd == "trades":
             return self.trades_text()
         if cmd == "close":
@@ -302,6 +309,8 @@ class Bot:
             "version": VERSION, "build": BUILD, "started": self.started_at, "ver": ver.info(),
             "switches": self.switches.all(),
             "books": self._safe(self.compare), "period": self.period,
+            "grid": {"enabled": cfg.GRID_ENABLED, "pairs": cfg.GRID_PAIRS, "round": cfg.GRID_ROUND,
+                     "runs": self._safe(self.grid.snapshot, []) if (self.grid and cfg.GRID_ENABLED) else []},
             "noai": {"enabled": bool(self.noai), "open": self.store.open_trades(books.NOAI) if self.noai else [],
                      "trades": self.store.trades(50, books.NOAI) if self.noai else [],
                      "curve": self.store.equity_curve(book=books.NOAI) if self.noai else []},
@@ -688,6 +697,8 @@ class Bot:
     def run(self):
         self.tg.start()
         threading.Thread(target=self._keepalive, daemon=True, name="keepalive").start()
+        if self.grid:
+            self.grid.start()
         fi = ENV_FILE_INFO
         if fi.get("path"):
             log.info("Đã nạp %d biến từ file %s (bỏ qua %d dòng trống/chưa điền) – ưu tiên hơn biến trên panel",
