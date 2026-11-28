@@ -53,6 +53,32 @@ python tests/run_all.py research_pit         # test offline của bộ kiểm đ
 - Phiên tạm ngừng không có nến (khối lượng 0): không xếp hạng, lệnh chờ phiên sau.
 - Kết quả quá khứ không hứa hẹn tương lai. TEST đã được xem; mọi thay đổi tham số chỉ nên quyết theo TRAIN + VALID.
 
-## Kết quả
+## Kết quả (dữ liệu tới 27/11/2026)
 
-Xem [`KET_QUA.md`](KET_QUA.md) (sinh bởi `python -m research.pit.evaluate --variants --write research/KET_QUA.md`).
+Bảng đầy đủ: [`KET_QUA.md`](KET_QUA.md) (sinh bởi `python -m research.pit.evaluate --variants --write research/KET_QUA.md`).
+CAGR / sụt tối đa / Sharpe, sau phí, thuế, trượt giá:
+
+| | TRAIN 2013–2020 | VALID 2021–2023 | TEST 2024–11/2026 | ALL 2013–11/2026 |
+|---|---|---|---|---|
+| **Phòng thủ, rổ point-in-time** | 18,9% / −23,0% / 1,44 | 14,8% / −9,7% / 1,13 | 7,7% / −20,0% / 0,54 | **16,0% / −23,0% / 1,17** |
+| Kiểm định ngoài 15/10/2026 (để đối chiếu) | 18,1% / −25,9% / 1,37 | 13,9% / −12,0% / 0,99 | 8,1% / −20,8% / 0,55 | 15,6% / −25,9% / 1,11 |
+| Phòng thủ, danh sách HOSE hôm nay (thiên lệch) | 18,5% / −24,1% | 13,1% / −12,5% | 8,7% / −20,1% | 15,7% / −24,1% |
+| VNINDEX (chỉ số giá) | 13,1% / −45,3% | 0,8% / −40,3% | 14,0% / −18,1% | 10,5% / −45,3% |
+| Động lượng, VN30 giả lập point-in-time | 5,4% / −40,1% | −1,3% / −46,3% | 8,0% / −33,5% | 5,1% / −46,3% |
+| Động lượng, 50 vốn hoá lớn point-in-time | 8,8% / −44,3% | 14,9% / −45,5% | 9,3% / −34,8% | 10,3% / −45,6% |
+
+Đọc kết quả:
+
+- **Con số của Phòng thủ nay chạy lại được từ repo** và khớp bộ kiểm định ngoài trong 1 điểm %/năm ở mọi giai đoạn
+  (khác nguồn: 533 mã HOSE từ 2013 theo VNDirect so với 568 mã của bộ cũ; 19 mã VCI không có dữ liệu). Kết luận cũ
+  giữ nguyên: lợi thế là **rủi ro** (sụt tối đa −23% so với −45% của VNINDEX, Sharpe 1,17 so với 0,65), không phải
+  lợi nhuận trong pha tăng – TEST 2024–2026 thua VNINDEX (7,7% so với 14,0%).
+- **Thiên lệch sống sót nhỏ với luật này** (+0,3 điểm %/năm trên ALL, ngược dấu ở VALID): rổ 50 vốn hoá lớn nhất gần
+  như toàn mã còn sống; 147 mã từng vào rổ, chỉ 9 nay rời HOSE (CAV, FLC, HBC, HNG, HVG, ITA, PXS, ROS, SII).
+- **Động lượng** trên rổ point-in-time đúng như đã ghi trong `momentum.py`: 5,1%/năm với sụt −46% – thua VNINDEX; rổ
+  50 mã khá hơn (10,3%) nhưng sụt tối đa vẫn −46%. Không có lý do đổi sổ mặc định.
+- **Hai phương án còn treo từ 23/10** (`--variants`): lọc MA200 hằng ngày đệm 2% – TRAIN kém hơn (17,3%), VALID/TEST
+  tương đương, sụt TEST nhẹ hơn (−17,5%); thêm động lượng 6 tháng ×0,5 – TRAIN hơn (21,0%) nhưng VALID kém rõ (11,2%,
+  sụt −22,3% so với −9,7%). Không phương án nào tốt hơn ở cả TRAIN lẫn VALID → **giữ bộ `FACTOR_FIXED`** như đã quyết.
+- TEST đã được nhìn (nhiều lần, từ 15/10). Mọi quyết định tham số sau này chỉ dựa vào TRAIN và VALID; TEST chỉ để báo
+  cáo. Kết quả quá khứ không hứa hẹn tương lai.
