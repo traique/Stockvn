@@ -13,6 +13,7 @@ from .config import cfg
 
 log = logging.getLogger("storage")
 _lock = threading.RLock()
+MAIN = "main"            # sổ chính; "noai" = sổ chạy ảo song song không hỏi AI (v3.5, books.py)
 
 
 class _DB:
@@ -132,7 +133,12 @@ class Store:
                                   # SL bot muốn (cột sl) khác SL đang nằm trên sàn (sl_exch) khi sàn chưa nhận lệnh dời;
                                   # bar_sl = SL lúc xét tới nến bar_ts (khác cột sl → bản khác đã dời SL); own_orders = mã
                                   # lệnh bot tự đóng một phần; close_req = bot đã muốn đóng mà lệnh đóng lỗi → thử lại
-                                  ("sl_exch", real), ("bar_sl", real), ("own_orders", "TEXT"), ("close_req", "TEXT")])
+                                  ("sl_exch", real), ("bar_sl", real), ("own_orders", "TEXT"), ("close_req", "TEXT"),
+                                  # v3.5: sổ (book) – 'main' = sổ chính (paper hoặc live), 'noai' = sổ chạy ảo song song không
+                                  # hỏi AI (cùng tín hiệu). Dữ liệu cũ mặc định 'main'. sid = dòng tín hiệu (signals.sid) của
+                                  # lệnh; ai_verdict = phán quyết AI của sổ chính về cùng tín hiệu (sổ noai ghi để phân tích)
+                                  ("book", "TEXT DEFAULT 'main'"), ("sid", "TEXT"), ("ai_verdict", "TEXT")])
+        self._add_cols("equity", [("book", "TEXT DEFAULT 'main'")])
         for idx in ("CREATE INDEX IF NOT EXISTS ix_events_ts ON events(ts)",
                     "CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts)",
                     "CREATE INDEX IF NOT EXISTS ix_scans_ts ON scans(ts)"):
@@ -203,6 +209,7 @@ class Store:
 
     # ---- trades
     def open_trade(self, t):
+        t.setdefault("book", MAIN)
         cols = ",".join(t.keys())
         q = ",".join("?" * len(t))
         if self.pg:
@@ -229,26 +236,57 @@ class Store:
         sets = ",".join(f"{k}=?" for k in fields)
         self.db.run(f"UPDATE trades SET {sets} WHERE id=?", list(fields.values()) + [tid])
 
-    def open_trades(self):
-        return self.db.run("SELECT * FROM trades WHERE status='open' ORDER BY id", fetch=True)
+    # v3.5: mọi truy vấn lệnh / đường vốn lọc theo sổ (mặc định sổ chính) – dashboard, /status, cầu dao, chuỗi thua,
+    # tổng kết AI của sổ chính không lẫn số liệu sổ noai. Dòng cũ không có cột book đọc là 'main' (DEFAULT của cột).
+    @staticmethod
+    def _book_sql(book):
+        return "COALESCE(book,'main')=?", (book,)
 
-    def trades(self, limit=200):
-        return self.db.run("SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?", (limit,), fetch=True)
+    def open_trades(self, book=MAIN):
+        w, p = self._book_sql(book)
+        return self.db.run(f"SELECT * FROM trades WHERE status='open' AND {w} ORDER BY id", p, fetch=True)
 
-    def last_closed(self, n=10):
+    def trades(self, limit=200, book=MAIN):
+        w, p = self._book_sql(book)
+        return self.db.run(f"SELECT * FROM trades WHERE {w} ORDER BY opened_at DESC LIMIT ?", p + (limit,), fetch=True)
+
+    def last_closed(self, n=10, book=MAIN):
         """n lệnh đóng gần nhất, mới nhất trước (tính chuỗi thua để co rủi ro)."""
-        return self.db.run("SELECT * FROM trades WHERE status='closed' ORDER BY closed_at DESC LIMIT ?", (n,), fetch=True)
+        w, p = self._book_sql(book)
+        return self.db.run(f"SELECT * FROM trades WHERE status='closed' AND {w} ORDER BY closed_at DESC LIMIT ?",
+                           p + (n,), fetch=True)
 
-    def closed_trades_since(self, ts):
-        return self.db.run("SELECT * FROM trades WHERE status='closed' AND closed_at>=?", (ts,), fetch=True)
+    def closed_trades_since(self, ts, book=MAIN):
+        w, p = self._book_sql(book)
+        return self.db.run(f"SELECT * FROM trades WHERE status='closed' AND closed_at>=? AND {w}", (ts,) + p, fetch=True)
+
+    def closed_trades(self, book=MAIN, since=0.0):
+        """Lệnh đã đóng của một sổ, mở từ `since` trở đi, cũ → mới (so sánh sổ – books.py)."""
+        w, p = self._book_sql(book)
+        return self.db.run(f"SELECT * FROM trades WHERE status='closed' AND opened_at>=? AND {w} ORDER BY opened_at",
+                           (since,) + p, fetch=True)
+
+    def trade_by_sid(self, sid, book=MAIN):
+        if not sid:
+            return None
+        w, p = self._book_sql(book)
+        r = self.db.run(f"SELECT * FROM trades WHERE sid=? AND {w} ORDER BY id DESC LIMIT 1", (sid,) + p, fetch=True)
+        return r[0] if r else None
 
     # ---- equity
-    def log_equity(self, equity):
-        self.db.run("INSERT INTO equity VALUES(?,?,?)", (time.time(), equity, cfg.MODE))
+    def log_equity(self, equity, book=MAIN):
+        self.db.run("INSERT INTO equity(ts, equity, mode, book) VALUES(?,?,?,?)", (time.time(), equity, cfg.MODE, book))
 
-    def equity_curve(self, limit=2000):
-        rows = self.db.run("SELECT ts, equity FROM equity ORDER BY ts DESC LIMIT ?", (limit,), fetch=True)
+    def equity_curve(self, limit=2000, book=MAIN):
+        w, p = self._book_sql(book)
+        rows = self.db.run(f"SELECT ts, equity FROM equity WHERE {w} ORDER BY ts DESC LIMIT ?", p + (limit,), fetch=True)
         return [(r["ts"], r["equity"]) for r in reversed(rows)]
+
+    def equity_since(self, since, book=MAIN):
+        """Đường vốn của một sổ từ `since`, cũ → mới – sụt tối đa trong đợt đo."""
+        w, p = self._book_sql(book)
+        rows = self.db.run(f"SELECT ts, equity FROM equity WHERE ts>=? AND {w} ORDER BY ts", (since,) + p, fetch=True)
+        return [(r["ts"], r["equity"]) for r in rows]
 
     # ---- signals
     # nguồn ghi bóng THAY cho lượt hỏi AI (ứng viên đạt nhưng chưa được hỏi) và nguồn của lượt hỏi AI
@@ -470,8 +508,9 @@ class Store:
     def reviews(self, limit=30):
         return self._reviews_r(limit)
 
-    def stats(self):
-        rows = self.db.run("SELECT pnl, pnl_pct FROM trades WHERE status='closed'", fetch=True)
+    def stats(self, book=MAIN):
+        w, p = self._book_sql(book)
+        rows = self.db.run(f"SELECT pnl, pnl_pct FROM trades WHERE status='closed' AND {w}", p, fetch=True)
         n = len(rows)
         wins = [r for r in rows if r["pnl"] > 0]
         losses = [r for r in rows if r["pnl"] <= 0]

@@ -27,6 +27,7 @@ from .learner import Learner
 from . import eventlog
 from . import market as mkt
 from . import strategy as strat
+from . import books
 
 logging.basicConfig(
     level=getattr(logging, cfg.LOG_LEVEL, logging.INFO),
@@ -44,6 +45,10 @@ def learned_changes(L):
 
 
 class Bot:
+    noai = None          # sổ không AI (v3.5, books.py) – None khi NOAI_ENABLED=false (test dựng Bot bằng __new__ cũng không có)
+    period = None        # đợt đo (kv "period")
+    _noai_map = {}
+
     def __init__(self):
         self.started_at = time.time()
         self.store = Store()
@@ -79,6 +84,25 @@ class Bot:
             self.start_equity = self.engine.equity()
             self.store.set("start_equity", self.start_equity)
             self.store.set("peak_equity", self.start_equity)
+        # v3.5: sổ "không AI" chạy ảo song song (books.py) – luôn PaperEngine, không gửi tin từng lệnh
+        self.noai = None
+        if cfg.NOAI_ENABLED:
+            self.noai = PaperEngine(self.okx, self.store, self.notify.send, book=books.NOAI, quiet=True,
+                                    capital=cfg.NOAI_CAPITAL)
+        self._noai_map = {}      # id(sig) -> id lệnh noai vừa mở trong lượt quét này (để gắn sid & phán quyết AI)
+        # v3.5: đợt đo – ghi lúc bắt đầu (lần khởi động đầu tiên của bản có sổ noai); mốc đỉnh cầu dao của sổ chính đặt lại
+        # về vốn lúc này để hai sổ cùng điều kiện (peak_equity cũ là đỉnh trước đợt sụt 19,3% – README 3.4.0)
+        self.period = self.store.get("period")
+        if self.period is None:
+            eq = self.engine.equity()
+            self.period = {"ts": time.time(), "equity": eq, "version": VERSION,
+                           "noai_equity": self.noai.equity() if self.noai else None}
+            self.store.set("period", self.period)
+            self.store.set("peak_equity", eq)
+            if self.noai:
+                self.store.set("noai_peak_equity", self.period["noai_equity"])
+            log.info("Bắt đầu đợt đo (v%s): vốn sổ chính %.4f USDT, mốc đỉnh cầu dao đặt lại; sổ noai %s", VERSION, eq,
+                     f"{self.period['noai_equity']:.4f} USDT" if self.noai else "tắt")
 
     # ------------------------------------------------------------ AI tổng kết sau khi đóng lệnh (lần gọi thứ 2)
     def _on_trade_closed(self, t, exit_, pnl, pnl_pct, reason):
@@ -104,6 +128,11 @@ class Bot:
                  f"Lệnh: {s['trades']} | Win {s['winrate']}% | PF {s['profit_factor']}",
                  f"AI: {self.ai.last_model or '-'} | hôm nay {self.ai.calls_today()}/{cfg.AI_MAX_CALLS_PER_DAY} lần | lỗi {self.ai.stats['fails']}"]
         ls = self.last_scan_summary
+        if self.noai:
+            neq = self.noai.equity(self.last_prices)
+            n_open = len(self.store.open_trades(books.NOAI))
+            lines.append(f"Sổ không AI: {neq:.4f} USDT, {n_open} lệnh mở"
+                         + (" – ĐÃ DỪNG (cầu dao)" if self.store.get("noai_halted") else "") + " · /compare để so sánh")
         if getattr(self, "last_btc", None):
             lines.append("₿ " + mkt.describe(self.last_btc))
         if ls:
@@ -159,6 +188,7 @@ class Bot:
     HELP = ("Lệnh (Telegram gõ /lenh, Zoom gõ /okxbot lenh):\n"
             "status – vốn, lệnh mở, quét gần nhất\ntrades – 10 lệnh gần nhất\nsignals – tín hiệu & quyết định AI\n"
             "ai – lượt gọi từng model\nlearn – trạng thái tự học\napply – duyệt đề xuất tự học\n"
+            "compare – so sánh sổ chính (có AI) với sổ không AI\n"
             "lessons – bài học AI\nbtc – bối cảnh BTC\npause / resume – tạm dừng / tiếp tục\nclose – đóng tất cả lệnh\n"
             "phienban – phiên bản & lịch sử cập nhật\nzoomtest – gửi thử thông báo Zoom\n"
             "zoompair <jid> / zoomxoa / zoomstatus – ghép đôi Zoom (chỉ trên Telegram)")
@@ -176,7 +206,10 @@ class Bot:
             self.paused = False
             self.store.set("paused", False)
             self.store.set("halted", False)
+            self.store.set("noai_halted", False)
             return f"▶️ Bot tiếp tục giao dịch. – qua {source}"
+        if cmd == "compare":
+            return books.compare_text(self.compare())
         if cmd == "trades":
             return self.trades_text()
         if cmd == "close":
@@ -218,6 +251,17 @@ class Bot:
             return "₿ " + (mkt.describe(self.last_btc) or "Chưa có dữ liệu BTC (chờ lượt quét đầu).")
         return self.HELP
 
+    def compare(self):
+        """So sánh sổ chính và sổ noai trong đợt đo (books.compare) – trang web, /compare, báo cáo."""
+        eqs = {books.MAIN: self.engine.equity(self.last_prices)}
+        starts = {books.MAIN: (self.period or {}).get("equity") or self.start_equity}
+        halted = {books.MAIN: bool(self.store.get("halted"))}
+        if self.noai:
+            eqs[books.NOAI] = self.noai.equity(self.last_prices)
+            starts[books.NOAI] = (self.period or {}).get("noai_equity") or cfg.NOAI_CAPITAL
+            halted[books.NOAI] = bool(self.store.get("noai_halted"))
+        return books.compare(self.store, self.period, eqs, starts, halted)
+
     def close_all(self, reason):
         n = 0
         with critical():        # cả lượt là một vùng: tắt bot thì chờ đóng hết, không chỉ lệnh đang đóng
@@ -257,7 +301,19 @@ class Bot:
             "btc": getattr(self, "last_btc", {}),
             "version": VERSION, "build": BUILD, "started": self.started_at, "ver": ver.info(),
             "switches": self.switches.all(),
+            "books": self._safe(self.compare), "period": self.period,
+            "noai": {"enabled": bool(self.noai), "open": self.store.open_trades(books.NOAI) if self.noai else [],
+                     "trades": self.store.trades(50, books.NOAI) if self.noai else [],
+                     "curve": self.store.equity_curve(book=books.NOAI) if self.noai else []},
         }
+
+    @staticmethod
+    def _safe(fn, default=None):
+        try:
+            return fn()
+        except Exception as e:
+            log.debug("%s: %s", getattr(fn, "__name__", fn), e)
+            return default
 
     # ------------------------------------------------------------ logic
     def _day_key(self):
@@ -278,6 +334,81 @@ class Bot:
             self.notify.send(f"🛑 DỪNG GIAO DỊCH: {why}. Gõ /resume để chạy lại.")
         return ok and not self.store.get("halted")
 
+    def _noai_risk_ok(self):
+        """Cầu dao riêng của sổ noai: sụt MAX_DRAWDOWN từ đỉnh (đỉnh đo từ đầu đợt) → ngừng mở lệnh mới, ghi sự kiện,
+        báo MỘT lần; lệnh đang mở vẫn được quản lý; sổ chính không ảnh hưởng. /resume mở lại."""
+        eq = self.noai.equity(self.last_prices)
+        peak = max(float(self.store.get("noai_peak_equity") or eq), eq)
+        self.store.set("noai_peak_equity", peak)
+        if self.store.get("noai_halted"):
+            return False
+        if peak > 0 and (peak - eq) / peak >= cfg.MAX_DRAWDOWN:
+            self.store.set("noai_halted", True)
+            log.warning("[noai] cầu dao: vốn %.4f sụt %.1f%% từ đỉnh %.4f – sổ noai ngừng mở lệnh mới", eq,
+                        100 * (peak - eq) / peak, peak)
+            self.notify.send(f"🛑 Sổ không AI dừng mở lệnh mới: sụt {100 * (peak - eq) / peak:.1f}% từ đỉnh "
+                             f"({eq:.4f} / {peak:.4f} USDT). Sổ chính không ảnh hưởng. /resume mở lại.")
+            return False
+        return True
+
+    def _noai_pass(self, candidates):
+        """Sổ noai: vào ứng viên điểm cao nhất chưa có vị thế cùng mã, không hỏi AI, tối đa 1 lệnh mỗi lượt quét (như sổ
+        chính), thử tối đa AI_CANDIDATES_PER_SCAN ứng viên (như sổ chính hỏi AI lần lượt) khi ứng viên trước không vào
+        được (giá đã vượt SL, ký quỹ, lot). Chạy TRƯỚC khi sổ chính hỏi AI; giá last lúc quyết định ghi một lần trên tín
+        hiệu (engine.stamp) nên hai sổ vào cùng giá. Trả {id(sig): id lệnh} để gắn sid & phán quyết AI sau."""
+        out = {}
+        if not self.noai or not candidates or self.paused:
+            return out
+        try:
+            if not self._noai_risk_ok():
+                return out
+            opens = self.store.open_trades(books.NOAI)
+            if len(opens) >= cfg.MAX_OPEN_POSITIONS:
+                return out
+            held = {t["symbol"] for t in opens}
+        except Exception as e:
+            log.warning("[noai] không đọc được trạng thái sổ: %s", str(e)[:160])
+            return out
+        tried = 0
+        for sig in candidates:
+            if sig.symbol in held:
+                continue
+            if tried >= max(1, cfg.AI_CANDIDATES_PER_SCAN):
+                break
+            tried += 1
+            skip0 = sig.skip
+            try:
+                t = self.noai.open(sig, books.noai_ai(sig))
+            except Exception as e:
+                log.warning("[noai] mở %s lỗi: %s", sig.symbol, str(e)[:160])
+                t = None
+            sig.skip = skip0            # lý do bỏ của sổ noai không lẫn vào dòng tín hiệu của sổ chính
+            if t:
+                log.info("[noai] vào %s %s điểm %s: %.2f USDT @ %.6g SL %.6g", sig.symbol, sig.side, sig.score,
+                         t["notional"], t["entry"], t["sl"])
+                out[id(sig)] = t["id"]
+                break
+        return out
+
+    def _link_books(self, sig, sid, ai, taken):
+        """Gắn sid của dòng tín hiệu vào lệnh của hai sổ; lệnh noai ghi thêm phán quyết AI của sổ chính (chỉ để phân tích)."""
+        if not sid:
+            return
+        try:
+            if taken is not None:
+                self.store.update_trade(taken["id"], sid=sid)
+            tid = self._noai_map.get(id(sig))
+            if tid:
+                if ai is None:
+                    verdict = "AI không trả lời"
+                elif ai.get("fallback"):
+                    verdict = f"AI lỗi – vào theo điểm ({ai.get('confidence')}%)"
+                else:
+                    verdict = f"{ai.get('decision')} {ai.get('confidence')}%"
+                self.store.update_trade(tid, sid=sid, ai_verdict=verdict)
+        except Exception as e:
+            log.debug("link books: %s", e)
+
     def _daily_report(self):
         since = time.time() - 86400
         rows = self.store.closed_trades_since(since)
@@ -285,8 +416,13 @@ class Bot:
             return
         pnl = sum(r["pnl"] for r in rows)
         wins = sum(1 for r in rows if r["pnl"] > 0)
+        extra = ""
+        if self.noai:
+            nrows = self.store.closed_trades_since(since, books.NOAI)
+            extra = (f"\nSổ không AI: {len(nrows)} lệnh, PnL {sum(r['pnl'] for r in nrows):+.4f} USDT, "
+                     f"vốn {self.noai.equity(self.last_prices):.4f} USDT")
         self.notify.send(f"📅 BÁO CÁO NGÀY\nLệnh: {len(rows)} | Thắng: {wins} | PnL: {pnl:+.4f} USDT\n"
-                     f"Vốn: {self.engine.equity(self.last_prices):.4f} USDT")
+                     f"Vốn: {self.engine.equity(self.last_prices):.4f} USDT" + extra)
 
     def scan(self):
         """Quét coin, chấm tín hiệu, hỏi AI tối đa AI_CANDIDATES_PER_SCAN ứng viên (vào được 1 lệnh thì dừng).
@@ -300,14 +436,17 @@ class Bot:
         full = len(opens) >= cfg.MAX_OPEN_POSITIONS
         open_syms = {t["symbol"] for t in opens}
         last_mon = [time.time()]
+        self._noai_map = {}
+        noai_open = self._noai_open
 
         def keep_monitoring():
-            if opens and time.time() - last_mon[0] >= cfg.MONITOR_INTERVAL:
+            if (opens or noai_open) and time.time() - last_mon[0] >= cfg.MONITOR_INTERVAL:
                 last_mon[0] = time.time()
                 try:
                     self.engine.monitor()
                 except Exception as e:
                     log.warning("quản lý lệnh mở giữa lượt quét lỗi: %s", str(e)[:160])
+                self._monitor_noai()
         coins = self.okx.top_altcoins(cfg.TOP_N_COINS)
         btc = mkt.btc_context(self.okx)
         self.last_btc = btc
@@ -376,13 +515,15 @@ class Bot:
             self.store.add_scan(self.last_scan_summary)
         except Exception as e:
             log.debug("add_scan: %s", e)
+        # v3.5: sổ noai nhận đúng danh sách ứng viên này TRƯỚC khi sổ chính hỏi AI (books.py)
+        self._noai_map = self._noai_pass(candidates)
         if full:                            # đủ lệnh mở: không hỏi AI, không vào lệnh – chỉ theo dõi kết quả bóng
             for sig in candidates:
-                self._shadow(sig, "max_positions")
+                self._link_books(sig, self._shadow(sig, "max_positions"), None, None)
             return
         k = max(1, cfg.AI_CANDIDATES_PER_SCAN)
         for sig in candidates[k:]:          # đạt nhưng xếp sau → không hỏi AI, vẫn theo dõi kết quả
-            self._shadow(sig, "not_sent")
+            self._link_books(sig, self._shadow(sig, "not_sent"), None, None)
 
         for i, sig in enumerate(candidates[:k]):   # hỏi AI lần lượt tối đa k ứng viên tốt nhất (điểm cao trước); vào được 1 lệnh thì dừng
             keep_monitoring()
@@ -449,12 +590,13 @@ class Bot:
             else:
                 src = "taken" if taken else ("ai_error" if ai is None or ai.get("fallback") else "ai_rejected")
             stamp(self.okx, sig)        # giá last lúc quyết định – lệnh vừa vào đã có (cùng giá với lệnh)
-            self.store.log_signal(sig, ai, taken, source=src)
+            sid = self.store.log_signal(sig, ai, taken, source=src)
+            self._link_books(sig, sid, ai, t if taken else None)
             self.shadow_seen[(sig.symbol, sig.side)] = time.time()
             self.cooldown[sig.symbol] = time.time() + (3600 if not taken else 7200)
             if taken:
                 for rest in candidates[i + 1:k]:     # đã vào 1 lệnh: các ứng viên còn lại không hỏi AI, vẫn theo dõi bóng
-                    self._shadow(rest, "slot_taken")
+                    self._link_books(rest, self._shadow(rest, "slot_taken"), None, None)
                 break
 
     def _shadow(self, sig, source):
@@ -469,9 +611,26 @@ class Bot:
                 pass
         stamp(self.okx, sig)            # v3.3: kết quả bóng tính từ giá last lúc này, như lệnh paper, không từ giá đóng nến cũ
         try:
-            self.store.log_signal(sig, None, False, source=source)
+            return self.store.log_signal(sig, None, False, source=source)
         except Exception as e:
             log.debug("shadow log: %s", e)
+            return None
+
+    @property
+    def _noai_open(self):
+        try:
+            return bool(self.noai) and bool(self.store.open_trades(books.NOAI))
+        except Exception:
+            return False
+
+    def _monitor_noai(self):
+        """Quản lý lệnh mở của sổ noai (SL/TP1/trailing như sổ chính); lỗi không làm dừng vòng lặp chính."""
+        if not self.noai:
+            return
+        try:
+            self.noai.monitor()
+        except Exception as e:
+            log.warning("[noai] quản lý lệnh mở lỗi: %s", str(e)[:160])
 
     def learn_text(self):
         st = self.learner.public_state()
@@ -574,13 +733,21 @@ class Bot:
                 self.paused = bool(self.store.get("paused", False))
                 # 1. quản lý lệnh đang mở
                 self.engine.monitor()
+                self._monitor_noai()
                 opens = self.store.open_trades()
-                if opens:
-                    self.last_prices.update(self.okx.prices([t["symbol"] for t in opens]))
+                syms = {t["symbol"] for t in opens}
+                if self.noai:
+                    syms |= {t["symbol"] for t in self.store.open_trades(books.NOAI)}
+                if syms:
+                    self.last_prices.update(self.okx.prices(sorted(syms)))
                 equity = self.engine.equity(self.last_prices)
                 self.store.set("last_equity", equity)
                 if time.time() - last_eq_log > 300:
                     self.store.log_equity(equity)
+                    if self.noai:
+                        neq = self.noai.equity(self.last_prices)
+                        self.store.set("noai_last_equity", neq)
+                        self.store.log_equity(neq, books.NOAI)
                     last_eq_log = time.time()
                 # 2. kiểm tra rủi ro + quét tín hiệu
                 if self._risk_ok(equity) and not self.paused and time.time() - self.last_scan > cfg.SCAN_INTERVAL:
