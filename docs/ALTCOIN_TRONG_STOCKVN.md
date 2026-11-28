@@ -2,7 +2,7 @@
 
 Bot Altcoin (OKX, thư mục `altcoin/`) chạy kèm bot Cổ phiếu trên **một** server Botkeep: một gói zip, một lệnh khởi động `python main_botkeep.py`. Tài liệu này dành cho người vận hành: cấu hình, lệnh, chuyển từ server altcoin cũ sang, quay lui và xử lý sự cố.
 
-Bản phát hành: **Stockvn v1.24.0** và **Altcoin 3.3.1** (bản dựng `7fe2138`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
+Bản phát hành: **Stockvn v1.24.0** và **Altcoin 3.4.0** (bản dựng `2955c5e`). Thiết kế chi tiết và lý do từng lựa chọn nằm trong [`KE_HOACH_GOP_ALTCOIN.md`](KE_HOACH_GOP_ALTCOIN.md).
 
 > ⚠️ Future đòn bẩy rủi ro rất cao. Mặc định Altcoin **tắt** (`ALTCOIN_ENABLED=0`), và khi bật thì chạy **ảo (paper)**. Live chỉ chạy khi đủ mọi điều kiện ở mục 10.
 
@@ -138,6 +138,9 @@ Quy tắc chung: `ALT_<TÊN>` trên panel thành `<TÊN>` cho Altcoin. Ví dụ 
 | `ALT_OPENROUTER_MODELS` | trống | Model OpenRouter riêng của Altcoin (`auto` = tự dò model free). Trống = `OPENROUTER_MODEL` của Cổ phiếu (mặc định `auto`) |
 | `ALT_CUSTOM_*` | trống | Nhà cung cấp AI tự chọn của Altcoin (không dùng chung với Cổ phiếu) |
 | `ALT_LEARN_MODE` | trống (paper: `auto`, live: `suggest`) | Bộ tự học: `auto` tự đổi tham số, `suggest` chỉ đề xuất chờ duyệt (`/alt apply`), `off` tắt. **Khuyến nghị `suggest` trong 4 tuần đo, đặt sau lần khởi động 3.3.0 đầu tiên** (mục 10.1) |
+| `ALT_BTC_DAILY_GATE` | `true` | 3.4.0: cổng regime BTC khung **ngày** – cấm long khi BTC ngày đang giảm, cấm short khi đang tăng (nến 1D đã đóng, EMA21/EMA50). `false` = tắt cổng, hai luật `long_btc_bear_1d` / `short_btc_bull_1d` vẫn theo dõi bóng cho bộ tự học. Lý do và backtest: `docs/chandoan_2026-11-28` |
+| `ALT_AI_OVERRIDE_MIN_SCORE` | 5.0 (3.4.0; bản cũ 6,5) | AI phản đối dưới ngưỡng phủ quyết thì tín hiệu điểm ≥ mức này vẫn vào nửa rủi ro. 5,0 = `MIN_SCORE`: AI chỉ điều tiết khối lượng, không chặn (29 ngày chạy ảo: tín hiệu AI chặn +0,36R, lệnh AI duyệt −0,02R). Muốn AI chặn cứng như cũ: `6.5` |
+| `ALT_MAX_DRAWDOWN` | 0.15 (3.4.0; bản cũ 0,30) | Cầu dao: sụt quá mức này từ đỉnh thì dừng hẳn, chờ `/alt resume` – bằng ngưỡng "tạm dừng & thiết kế lại" của quy trình đo 4 tuần |
 
 ### 4.3 AI dùng chung khi thiếu khoá riêng
 
@@ -202,7 +205,7 @@ Altcoin còn đọc `altcoin/.env` và `altcoin/bot.env` trên server (tên bi�
 | Khoá kênh, Render, đăng nhập riêng | Luôn rỗng (mục 4.4) |
 | Thông số còn lại | File thắng panel (như bot cũ) |
 
-Từ 3.3.0 `altcoin/botkeep.env` chỉ còn là mẫu an toàn (mẫu cho chế độ chạy độc lập): đã bỏ hồ sơ **test gắt** (`RISK_PER_TRADE=0.10`, `MAX_TOTAL_RISK=0.20`, `MAX_DAILY_LOSS=0.30`, `MAX_DRAWDOWN=0.50`). Nếu panel (`ALT_RISK_PER_TRADE`…) hoặc `altcoin/bot.env` trên server còn các giá trị đó thì xoá để dùng mặc định (3%/lệnh, tổng 5%, cầu dao 12%/ngày, 30% DD).
+Từ 3.3.0 `altcoin/botkeep.env` chỉ còn là mẫu an toàn (mẫu cho chế độ chạy độc lập): đã bỏ hồ sơ **test gắt** (`RISK_PER_TRADE=0.10`, `MAX_TOTAL_RISK=0.20`, `MAX_DAILY_LOSS=0.30`, `MAX_DRAWDOWN=0.50`). Nếu panel (`ALT_RISK_PER_TRADE`…) hoặc `altcoin/bot.env` trên server còn các giá trị đó thì xoá để dùng mặc định (3%/lệnh, tổng 5%, cầu dao 12%/ngày, 15% DD từ 3.4.0 – bản cũ 30%).
 
 ---
 
@@ -255,10 +258,10 @@ Trên máy có Python 3.12 hoặc 3.13, trong thư mục repo đã commit sạch
 ```bash
 python tests/run_all.py                              # phải kết thúc bằng "tất cả đều đạt"
 python scripts/build_botkeep_bundle.py --check       # chỉ kiểm tra
-python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.24.0-alt3.3.1.zip
+python scripts/build_botkeep_bundle.py               # tạo dist/stockvn-botkeep-v1.24.0-alt3.4.0.zip
 ```
 
-Builder in hai dòng `Stock v1.24.0: bản dựng … = bản phát hành` và `Altcoin 3.3.1: bản dựng 7fe2138 = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
+Builder in hai dòng `Stock v1.24.0: bản dựng … = bản phát hành` và `Altcoin 3.4.0: bản dựng 2955c5e = bản phát hành`. Nó dừng khi một trong hai khác bản phát hành, tức đã sửa code mà quên đóng dấu: `python -m vnbot.version --stamp` (Cổ phiếu) hoặc `cd altcoin && python -m bot.version --stamp` (Altcoin).
 
 Upload lên server Cổ phiếu:
 
@@ -321,10 +324,10 @@ Mục đích: thử trên đúng server Botkeep những điểm không thử đ�
 
    Không đặt `ALT_MODE` (paper) và **không** đặt `ALT_DATABASE_URL` (SQLite tạm). Thông báo của canary tới chat của anh/chị với tiêu đề `🪙 Altcoin ›`; muốn im thì tắt **Altcoin · thông báo** trên `/ai#kenh`.
 3. Kiểm tra trong 15–30 phút:
-   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.3.1 (7fe2138)`. Không có lỗi múi giờ hay "thiếu thư viện".
-   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `7fe2138`, `dropped_secrets` rỗng.
+   - [ ] Log Botkeep có `Altcoin: bật – chế độ paper, instance canary`, `[altcoin] oom_score_adj=800`, `Altcoin: đang chạy`, `Altcoin: giữ quyền giao dịch – paper, bản 3.4.0 (2955c5e)`. Không có lỗi múi giờ hay "thiếu thư viện".
+   - [ ] `/altcoin/hub.json`: `state` `running`, `seam_ok` `true`, `leader` `true`, `mode` `paper`, `build` `2955c5e`, `dropped_secrets` rỗng.
    - [ ] `/health` chỉ có `"altcoin": {"state": "running"}`.
-   - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.3.1 "đúng bản phát hành".
+   - [ ] `/altcoin/` mở bằng cùng mật khẩu; chuyển qua lại hai mục được; `/altcoin/phienban` báo 3.4.0 "đúng bản phát hành".
    - [ ] Telegram `/alt status`; Zoom `alt status` (1:1) và `/vnbot alt status` (trong kênh) đều được trả lời.
    - [ ] `/alt close` hỏi xác nhận; `/alt close xacnhan` trả "Đã đóng N lệnh."; `/close` trần chỉ nhận lời nhắc.
    - [ ] `/alt zoomtest` báo "Zoom: nhận" và "Telegram …: OK".
@@ -349,11 +352,11 @@ Chọn lúc Altcoin cũ không có lệnh live đang mở nếu được (paper 
 5. Đặt **`ALTCOIN_ENABLED=1`** rồi khởi động lại server Cổ phiếu.
    - Nếu `hub.json` báo `waiting` với "instance khác đang chạy: crypto@<host cũ>": heartbeat của server cũ còn mới (dưới 90 giây). Altcoin tự chạy sau khoảng 100 giây. Nếu vẫn chờ mãi: server cũ (hoặc Render) chưa thật sự dừng.
 6. **Kiểm tra chấp nhận:**
-   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.3.1`, `build` `7fe2138`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
+   - [ ] `/altcoin/hub.json`: `state` `running`, `mode` đúng ý (`paper`), `seam_ok` `true`, `leader` `true`, `version` `3.4.0`, `build` `2955c5e`, `dropped_secrets` rỗng, `ignored_keys` chỉ gồm khoá anh/chị biết là thừa.
    - [ ] `/health` chỉ có `altcoin.state`.
-   - [ ] `/altcoin/phienban`: 3.3.1, `7fe2138`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
+   - [ ] `/altcoin/phienban`: 3.4.0, `2955c5e`, "đúng bản phát hành". Vốn, số lệnh, tỉ lệ thắng giống số đã ghi ở mục 7. Tham số tự học về mặc định một lần: chạy ảo + `LEARN_MODE=auto` (mặc định của chạy ảo) có tin "🧬 TỰ HỌC – v3.3: đưa tham số tự học về mặc định (…)" và dòng `migrate v3.3` trong lịch sử tự học (`/learn`, trang Tự học), giá trị cũ nằm trong dòng đó; chạy thật hoặc `suggest` / `off` thì tham số giữ nguyên, có một đề xuất "Khôi phục" chờ duyệt (`/apply`).
    - [ ] `/alt status` được trả lời trên Telegram và trên Zoom (`alt status`, `/vnbot alt status`); `/trangthai` của Cổ phiếu vẫn chạy.
-   - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.3.0 → v3.3.1" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
+   - [ ] Thông báo Altcoin đầu tiên ("🆕 Bot đã cập nhật: v3.3.1 → v3.4.0" hoặc "🚀 … khởi động") tới **đúng một lần** mỗi chat báo cáo và một lần trên Zoom, có tiêu đề `🪙 Altcoin ›`. `/alt zoomtest` báo Zoom nhận.
    - [ ] `/alt status` dòng "Instances": chỉ `crypto` còn sống. Dòng cũ (`render`, hoặc `crypto` của server cũ) hiện "(mất liên lạc)": chỉ là hiển thị.
    - [ ] Trong 1 giờ log Botkeep không có `409` hay `terminated by other getUpdates`.
    - [ ] Từ máy ngoài, có hay không có `-u x:<mật khẩu>`: `curl -i -X POST https://HOST/altcoin/_hub/command` → 404; `curl -i https://HOST/altcoin/%5Fhub/command` → 400; `curl -i https://HOST/_hub/command` → 404.

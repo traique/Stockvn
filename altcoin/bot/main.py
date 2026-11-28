@@ -538,11 +538,12 @@ class Bot:
         L = strat.LEARNED
         from . import exits as _ex
         # giá trị THỰC đang dùng (tự học ghi đè mặc định) – bản cũ in mặc định gây hiểu nhầm
-        log.info("Thông số đang dùng: MIN_SCORE=%s MIN_ADX=%s HTF_MIN_ADX=%s MAX_EXT_ATR=%s BTC_GATE=%s%% CHASE_1H=%s%% "
+        log.info("Thông số đang dùng: MIN_SCORE=%s MIN_ADX=%s HTF_MIN_ADX=%s MAX_EXT_ATR=%s BTC_GATE=%s%% BTC_NGÀY=%s CHASE_1H=%s%% "
                  "CLIMAX_VOL=%s BREAKOUT=%s LATE_ADX=%s SL=%s–%sATR TP1_R=%s "
                  "RISK=%.1f%% (×%.2f–%.2f theo AI, trần tổng %.0f%%, tối đa %d lệnh) TOP_N=%s AI_MIN_CONF=%s/%s "
                  "AI_VETO=%s%% HỌC≥%s mẫu,t≥%s CHẶN=%s", L.get("min_score") or cfg.MIN_SCORE, cfg.MIN_ADX, cfg.HTF_MIN_ADX,
-                 cfg.MAX_EXT_ATR, cfg.BTC_GATE_CHG, cfg.CHASE_1H_PCT, cfg.CLIMAX_VOL,
+                 cfg.MAX_EXT_ATR, cfg.BTC_GATE_CHG, "bật" if cfg.BTC_DAILY_GATE else "tắt (BTC_DAILY_GATE=false)",
+                 cfg.CHASE_1H_PCT, cfg.CLIMAX_VOL,
                  "bật" if cfg.BREAKOUT_ENABLED else "tắt (BREAKOUT_ENABLED=false)", cfg.LATE_TREND_ADX,
                  cfg.ATR_SL_MULT, cfg.MAX_SL_ATR, _ex.current_tp1_r(), cfg.RISK_PER_TRADE * 100,
                  cfg.RISK_MIN_MULT, cfg.RISK_MAX_MULT, cfg.MAX_TOTAL_RISK * 100, cfg.MAX_OPEN_POSITIONS, cfg.TOP_N_COINS,

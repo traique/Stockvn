@@ -16,13 +16,21 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-VERSION = "3.3.1"
-RELEASED = "2026-11-05"
-RELEASE_BUILD = "7fe2138"          # ghi bởi `python -m bot.version --stamp`
+VERSION = "3.4.0"
+RELEASED = "2026-11-28"
+RELEASE_BUILD = "2955c5e"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
 NOTES = (
+    ("3.4.0", "2026-11-28", (
+        "Cổng regime BTC khung NGÀY (BTC_DAILY_GATE): cấm long khi BTC ngày đang giảm, cấm short khi đang tăng – 29 ngày chạy ảo 320 long bóng -0,45R (t -4,2) dù cổng 1h cho qua",
+        "Bối cảnh BTC thêm xu hướng ngày và % đổi 7 ngày (nến 1D đã đóng), gửi AI và lưu cùng tín hiệu; hai luật ứng viên long_btc_bear_1d / short_btc_bull_1d theo dõi bóng",
+        "AI chỉ còn điều tiết khối lượng: AI_OVERRIDE_MIN_SCORE 6,5 → 5,0 – tín hiệu AI từ chối +0,36R (92 mẫu) trong khi lệnh được vào -0,02R; bộ tự học vẫn chỉnh ngưỡng phủ quyết",
+        "Trang Tự học: AI đoán chuẩn không (Brier so với tỉ lệ nền, skill) – 29 ngày: 0,345 so với 0,234, AI đoán ngược chiều kết quả",
+        "Cầu dao drawdown 30% → 15% (bằng ngưỡng tạm dừng & thiết kế lại của quy trình đo 4 tuần; chạy ảo đã sụt 19,3%)",
+        "Backtest (tools/backtest_sessions.py) ghi regime ngày cho mỗi tín hiệu; chẩn đoán và backtest 88 ngày ở docs/chandoan_2026-11-28",
+    )),
     ("3.3.1", "2026-11-05", (
         "Chạy trong Stockvn: provider dùng chung khoá với Cổ phiếu thì đếm lượt chung theo hạn mức ngày của Cổ phiếu (OpenRouter 45)",
         "Cổ phiếu cho 9Router/OpenRouter nghỉ (429, sai khoá, cổng sập) thì Altcoin cũng nghỉ và ngược lại – không gọi vào provider vừa từ chối",

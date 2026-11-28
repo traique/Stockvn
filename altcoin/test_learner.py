@@ -611,5 +611,24 @@ def _():
         LM.time = real
 
 
+# v3.4: AI đoán có chuẩn không – Brier so với tỉ lệ nền (learner.ai_calibration / ai_win_prob)
+from bot.learner import ai_calibration, ai_win_prob
+assert ai_win_prob({"side": "long", "ai_decision": "LONG", "ai_conf": 70}) == 0.7
+assert abs(ai_win_prob({"side": "long", "ai_decision": "SKIP", "ai_conf": 75}) - 0.25) < 1e-9
+assert abs(ai_win_prob({"side": "long", "ai_decision": "SHORT", "ai_conf": 80}) - 0.2) < 1e-9     # đòi hướng ngược = phản đối
+assert ai_win_prob({"side": "long", "ai_decision": None, "ai_conf": 70}) is None
+assert ai_win_prob({"side": "long", "ai_decision": "LONG", "ai_conf": None}) is None
+assert ai_calibration([])["n"] == 0 and ai_calibration([])["brier"] is None
+good = [{"side": "long", "ai_decision": "LONG", "ai_conf": 90, "outcome_r": 1.0}] * 5 + \
+       [{"side": "long", "ai_decision": "SKIP", "ai_conf": 90, "outcome_r": -1.0}] * 5
+bad = [{"side": "long", "ai_decision": "LONG", "ai_conf": 90, "outcome_r": -1.0}] * 5 + \
+      [{"side": "long", "ai_decision": "SKIP", "ai_conf": 90, "outcome_r": 1.0}] * 5
+g, b = ai_calibration(good), ai_calibration(bad)
+assert g["n"] == 10 and abs(g["brier"] - 0.01) < 1e-9 and g["base_rate"] == 0.5 and g["brier_base"] == 0.25 and g["skill"] > 0.9, g
+assert abs(b["brier"] - 0.81) < 1e-9 and b["skill"] < 0, b
+assert ai_calibration(good + [{"side": "long", "ai_decision": "LONG", "ai_conf": 70, "outcome_r": None}])["n"] == 10   # chưa có kết quả: bỏ
+assert not g["enough"] and ai_calibration(good * 3)["enough"]        # LEARN_MIN_SAMPLES=12 trong test này
+print("✓ v3.4: Brier của AI – đoán đúng → skill > 0, đoán ngược → skill < 0")
+
 assert not FAILED, f"{len(FAILED)} phần lỗi: {FAILED}"
 print("TẤT CẢ OK")

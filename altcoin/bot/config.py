@@ -88,7 +88,9 @@ class Config:
     MAX_TOTAL_RISK = _f("MAX_TOTAL_RISK", 0.05)        # tổng % vốn có thể mất nếu mọi lệnh đang mở chạm SL
     MIN_LOT_RISK_MULT = _f("MIN_LOT_RISK_MULT", 2.0)   # lot tối thiểu của sàn làm rủi ro vượt 2× dự tính → bỏ tín hiệu
     MAX_DAILY_LOSS = _f("MAX_DAILY_LOSS", 0.12)        # dừng ngày nếu lỗ 12% vốn đầu ngày (~4 lệnh thua)
-    MAX_DRAWDOWN = _f("MAX_DRAWDOWN", 0.30)            # dừng hẳn bot nếu DD từ đỉnh > 30%, chờ /resume
+    # v3.4: 0.30 → 0.15 – bằng ngưỡng "tạm dừng & thiết kế lại" của quy trình đo 4 tuần (README mục 5); chạy ảo 30/10–27/11/2026
+    # sụt 19,3% từ đỉnh (01/11 → 09/11) mà cầu dao 30% không kêu.
+    MAX_DRAWDOWN = _f("MAX_DRAWDOWN", 0.15)            # dừng hẳn bot nếu DD từ đỉnh > 15%, chờ /resume
     # v3.3: MIN_RR là mức sàn của TP cố định (TP ≥ 1.2 × MIN_RR × R, cách thoát fixed), KHÔNG phải cổng lọc: theo cách dựng
     # R:R của setup xu hướng luôn ≥ 1.2 × MIN_RR nên cổng "RR ≥ MIN_RR" bản cũ không bao giờ chặn (đã bỏ – strategy.min_rr_for).
     # Setup range có cổng thật: RANGE_MIN_RR.
@@ -155,6 +157,12 @@ class Config:
     MAX_SL_ATR = _f("MAX_SL_ATR", 3.0)                 # SL theo cấu trúc xa hơn mức này → bỏ tín hiệu
     # v3.2: 0.6 → 0.3. 211 tín hiệu bóng: short khi BTC đang +0.3%/1h trở lên cho -0.60R (n=27, thắng 22%).
     BTC_GATE_CHG = _f("BTC_GATE_CHG", 0.3)             # BTC giảm/tăng quá % này trong 1h → cấm long/short altcoin
+    # v3.4: cổng regime BTC khung NGÀY (market.daily_regime: EMA21/EMA50 trên nến 1D đã đóng) – cấm long khi BTC ngày đang giảm,
+    # cấm short khi BTC ngày đang tăng. 29 ngày chạy ảo 30/10–27/11/2026 (BTC 77.600 → 60.600): 320 tín hiệu long -0,45R
+    # (t -4,2 theo ngày), âm cả 5 tuần, kể cả 176 long lúc BTC 1h đang tăng (-0,38R) – cổng 1h không thấy xu hướng lớn.
+    # Backtest 88 ngày 02/09–28/11/2026: docs/chandoan_2026-11-28. Tắt: hai luật long_btc_bear_1d / short_btc_bull_1d vẫn
+    # theo dõi bóng, bộ tự học chặn khi đủ mẫu (≥ 30, ≥ 7 ngày, t ≥ 2).
+    BTC_DAILY_GATE = _b("BTC_DAILY_GATE", "true")
     # v3.2: không đánh ngược nhịp 1h của chính coin – short khi coin vừa tăng ≥0.5% trong 1h (hoặc long khi vừa giảm)
     # là "bắt đỉnh của nhịp hồi": 56 tín hiệu bóng cho -0.72R, thắng 18%; nhóm còn lại -0.13R.
     CHASE_1H_PCT = _f("CHASE_1H_PCT", 0.5)
@@ -218,7 +226,11 @@ class Config:
     # Phản đối "yếu" (< ngưỡng) với tín hiệu điểm KT >= AI_OVERRIDE_MIN_SCORE thì vẫn vào lệnh.
     # Để trống: chạy ảo = 65, chạy thật = 0 (AI luôn có quyền chặn). Bộ tự học sẽ chỉnh dần.
     AI_VETO_CONF = os.getenv("AI_VETO_CONF", "").strip()
-    AI_OVERRIDE_MIN_SCORE = _f("AI_OVERRIDE_MIN_SCORE", 6.5)
+    # v3.4: 6.5 → 5.0 (= MIN_SCORE): AI chỉ còn điều tiết KHỐI LƯỢNG (phản đối yếu → nửa rủi ro), không chặn tín hiệu đã qua
+    # bộ lọc. 29 ngày chạy ảo: 92 tín hiệu AI từ chối +0,36R (t +2,3) trong khi 52 lệnh được vào -0,02R; nhóm điểm 5,5–6,5 bị
+    # chặn vì sàn 6,5 là nhóm tốt nhất (+0,51R, n=47). Brier của AI 0,345 so với 0,234 nếu đoán theo tỉ lệ nền (xem Tự học).
+    # Bộ tự học vẫn chỉnh AI_VETO_CONF ±5%/48h: AI chặn đúng trở lại thì ngưỡng hạ dần và AI lại được chặn.
+    AI_OVERRIDE_MIN_SCORE = _f("AI_OVERRIDE_MIN_SCORE", 5.0)
     AI_MAX_CALLS_PER_DAY = _i("AI_MAX_CALLS_PER_DAY", 80)   # tổng cả phân tích + tổng kết (thực tế ~20–40/ngày)
     AI_REVIEW_ENABLED = _b("AI_REVIEW_ENABLED", "true")     # gọi AI tổng kết sau mỗi lệnh đóng
     AI_LESSONS_IN_PROMPT = _i("AI_LESSONS_IN_PROMPT", 5)    # số bài học gần nhất đưa vào prompt phân tích

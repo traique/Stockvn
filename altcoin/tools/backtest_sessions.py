@@ -96,6 +96,50 @@ def candles_5m(inst, start_ms, end_ms, cache):
     return [c for c in data if start_ms <= c[0] < end_ms]
 
 
+def candles_1d(inst, start_ms, end_ms, cache):
+    """Nến 1D đã đóng [ts, o, h, l, c] trong [start, end) – cho regime BTC khung ngày (v3.4, market.daily_regime)."""
+    fn = os.path.join(cache, f"{inst}_1d.json")
+    have = []
+    if os.path.exists(fn):
+        with open(fn) as f:
+            have = json.load(f)
+    if have and have[0][0] <= start_ms and have[-1][0] >= end_ms - 2 * 86_400_000:
+        return [c for c in have if start_ms <= c[0] < end_ms]
+    out, after = {}, end_ms
+    while after > start_ms:
+        rows = _get(f"/market/history-candles?instId={inst}&bar=1D&limit=100&after={after}")
+        if not rows:
+            break
+        for r in rows:
+            if r[8] == "1":
+                out[int(r[0])] = [int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4])]
+        after = min(int(r[0]) for r in rows)
+        time.sleep(0.11)
+    data = sorted(out.values())
+    os.makedirs(cache, exist_ok=True)
+    with open(fn, "w") as f:
+        json.dump(data, f)
+    return [c for c in data if start_ms <= c[0] < end_ms]
+
+
+def daily_regimes(btc1d):
+    """[(ts mở nến ngày, (trend, chg_7d))] tăng dần – regime tính trên các nến ngày đã đóng TỚI nến đó (market.daily_regime).
+    Nến ngày OKX mở 00:00 giờ Hồng Kông (16:00 UTC), nên tra bằng "nến ngày gần nhất đã đóng trước t" (regime_at),
+    không theo ngày UTC; không nhìn thấy nến ngày đang chạy."""
+    from bot.market import daily_regime
+    closes = [c[4] for c in btc1d]
+    return [(c[0], daily_regime(closes[:i + 1])) for i, c in enumerate(btc1d)]
+
+
+def regime_at(regimes, t_ms):
+    """Regime của nến ngày gần nhất đã đóng (mở + 1 ngày ≤ t), hoặc None."""
+    import bisect
+    if not regimes:
+        return None
+    i = bisect.bisect_right([r[0] for r in regimes], t_ms - 86_400_000) - 1
+    return regimes[i][1] if i >= 0 else None
+
+
 def resample(c5, minutes):
     step = minutes * 60_000
     out, cur = [], None
@@ -330,7 +374,7 @@ class _Clock:
         return self.now
 
 
-def btc_market(btc5_by_ts, btc1h, t_ms):
+def btc_market(btc5_by_ts, btc1h, t_ms, regimes=None):
     last = btc5_by_ts.get(t_ms - M5)
     p1 = btc5_by_ts.get(t_ms - M5 - 3600_000)
     p4 = btc5_by_ts.get(t_ms - M5 - 4 * 3600_000)
@@ -343,10 +387,15 @@ def btc_market(btc5_by_ts, btc1h, t_ms):
         e21, e50, cl = f.ema21[k], f.ema50[k], f.close[k]
         trend = 1 if (e21 > e50 and cl > e21) else -1 if (e21 < e50 and cl < e21) else 0
     pct = lambda a, b: round(100 * (a - b) / b, 2) if b else 0.0  # noqa: E731
-    return {"btc_chg_1h": pct(last, p1 or last), "btc_chg_4h": pct(last, p4 or last), "btc_trend_1h": trend}
+    m = {"btc_chg_1h": pct(last, p1 or last), "btc_chg_4h": pct(last, p4 or last), "btc_trend_1h": trend}
+    # v3.4: regime ngày = nến ngày gần nhất ĐÃ ĐÓNG trước thời điểm xét, như bot lấy okx.ohlcv(BTC, "1d")[:-1]
+    rg = regime_at(regimes, t_ms)
+    if rg:
+        m["btc_trend_1d"], m["btc_chg_7d"] = rg
+    return m
 
 
-def run_bot(inst, c5, btc5):
+def run_bot(inst, c5, btc5, btc1d=None):
     clock = _Clock()
     strategy.time = clock
     strategy.LEARNED.update({"min_score": None, "trigger_w": {}, "blocks": [], "unblocked": []})
@@ -356,6 +405,7 @@ def run_bot(inst, c5, btc5):
     btc5_by_ts = {c[0]: c[4] for c in btc5}
     b1 = resample(btc5, 60)
     btc1h = {"f": enrich(to_frame(b1)), "idx": {c[0]: i for i, c in enumerate(b1)}}
+    regimes = daily_regimes(btc1d) if btc1d else []
     close5 = {c[0]: c[4] for c in c5}
     out, last_sig = [], {}
     for i in range(220, len(c15)):
@@ -368,7 +418,8 @@ def run_bot(inst, c5, btc5):
         p24 = close5.get(t - M5 - 86_400_000)
         chg24 = 100 * (c15[i - 1][4] / p24 - 1) if p24 else 0.0
         clock.now = t / 1000
-        sig, why, _ = strategy.diagnose(inst, ltf, htf, 0.0, chg24, btc_market(btc5_by_ts, btc1h, t))
+        market = btc_market(btc5_by_ts, btc1h, t, regimes)
+        sig, why, _ = strategy.diagnose(inst, ltf, htf, 0.0, chg24, market)
         if sig is None or (why and not why.startswith("điểm thấp")):
             continue
         key = (sig.side,)
@@ -381,6 +432,8 @@ def run_bot(inst, c5, btc5):
         row = {"inst": inst, "ts": t / 1000, "day": day_of(t / 1000), "side": sig.side, "score": sig.score,
                "passed": not why, "setup": sig.context.get("setup"), "triggers": sig.triggers,
                "vn": vn_bucket(t / 1000), "session": session(t / 1000),
+               "btc_trend_1d": market.get("btc_trend_1d"), "btc_chg_7d": market.get("btc_chg_7d"),
+               "btc_trend_1h": market.get("btc_trend_1h"),
                "blocked": sorted(strategy.matching_rules(sig.side, strategy.rule_ctx(sig)))}
         if is_range:
             row["r_fixed"] = sim_mode(sig.side, sig.price, sig.sl, sig.atr, "fixed", t, c5, tp_fixed=sig.tp)
@@ -397,9 +450,9 @@ def run_bot(inst, c5, btc5):
 
 
 def work(args):
-    part, inst, c5, btc5 = args
+    part, inst, c5, btc5, btc1d = args
     try:
-        return run_orb(inst, c5, btc5) if part == "orb" else run_bot(inst, c5, btc5)
+        return run_orb(inst, c5, btc5) if part == "orb" else run_bot(inst, c5, btc5, btc1d)
     except Exception as e:
         print(f"  ! {part} {inst}: {e}", file=sys.stderr)
         return []
@@ -496,6 +549,7 @@ def main():
     warm = start - 4 * 86_400_000                       # đủ 220 nến 15m + 120 nến 1h + 24h VP
     print(f"Tải nến 5m {len(syms)} coin + BTC, {a.days} ngày…", file=sys.stderr)
     btc5 = candles_5m("BTC-USDT-SWAP", warm, end, a.cache)
+    btc1d = candles_1d("BTC-USDT-SWAP", start - 200 * 86_400_000, end, a.cache)   # EMA50 ngày cần nến từ trước
     data = {}
     for s in syms:
         data[s] = candles_5m(s, warm, end, a.cache)
@@ -506,7 +560,7 @@ def main():
         for part in parts:
             t0 = time.time()
             rows = []
-            for r in ex.map(work, [(part, s, data[s], btc5) for s in syms]):
+            for r in ex.map(work, [(part, s, data[s], btc5, btc1d) for s in syms]):
                 rows.extend(x for x in r if x["ts"] * 1000 >= start)
             res[part] = rows
             print(f"{part}: {len(rows)} tín hiệu ({time.time() - t0:.0f}s)", file=sys.stderr)

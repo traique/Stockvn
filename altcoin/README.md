@@ -10,6 +10,8 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 > ⚠️ Future đòn bẩy với vốn nhỏ rủi ro rất cao, có thể mất toàn bộ vốn. Đây là công cụ, không phải lời khuyên đầu tư. Chỉ bật `live` khi đạt đủ tiêu chí ở mục 5.
 
+> **Tình trạng 3.4.0 (28/11/2026).** Sau 29 ngày chạy ảo bản 3.3 (59 lệnh, 1.005 tín hiệu bóng; chẩn đoán ở `docs/chandoan_2026-11-28`): vốn 10,00 → 9,82 USDT, sụt 19,3% từ đỉnh (vượt ngưỡng 15% của mục 5.4), R trung bình −0,04 ± 0,16 – chiến lược vẫn chưa có lợi thế sau phí. Hai phát hiện có ý nghĩa thống kê: **long thua suốt tháng BTC giảm 22%** (320 tín hiệu bóng −0,45R, t −4,2, kể cả khi cổng BTC 1h cho qua) và **AI đoán ngược chiều kết quả** (92 tín hiệu AI từ chối +0,36R, lệnh AI duyệt −0,02R; Brier 0,345 so với 0,234 nếu đoán theo tỉ lệ nền). 3.4.0 thêm cổng regime BTC khung ngày (`BTC_DAILY_GATE`; backtest 88 ngày: nhóm bị cổng loại −0,05R trong mẫu, −0,44R ngoài mẫu, không loại nhóm nào có lãi), hạ `AI_OVERRIDE_MIN_SCORE` 6,5 → 5,0 (AI chỉ điều tiết khối lượng), cầu dao drawdown 30% → 15%, và Brier score trên trang Tự học. Không chỉnh TP1 / SL / giờ giao dịch theo dữ liệu gần đây. Tiếp theo: chạy ảo 4 tuần nữa với `LEARN_MODE=suggest` và đo lại theo mục 5.
+>
 > **Tình trạng 3.3.0 (02/11/2026).** Chẩn đoán sau đợt lỗ 30/10–02/11: sổ sách và cỡ lệnh đúng, lỗ chủ yếu do một đoạn thị trường xấu; nhưng backtest 88 ngày (50 coin, 706 lệnh, code của bot, phí 0,20%/vòng) cho **−0,01R ± 0,07 mỗi lệnh – chiến lược gần như không có lợi thế sau phí**, và 1.335 tổ hợp tham số không tổ hợp nào dương ngoài mẫu một cách chắc chắn (xếp hạng trong mẫu / ngoài mẫu tương quan ngược −0,56). Bản 3.3 chỉ **sửa lỗi** để số liệu chạy ảo và tín hiệu bóng phản ánh đúng thực tế; **không** chỉnh tham số chiến lược theo dữ liệu gần đây. Việc tiếp theo: khởi động 3.3.0 lần đầu với `LEARN_MODE` trống, rồi chạy ảo 4 tuần với `LEARN_MODE=suggest` (trong Stockvn: `ALT_LEARN_MODE=suggest` trên panel), rồi quyết định theo tiêu chí ở mục 5.
 
 ## 1. Cách bot ra quyết định
@@ -27,6 +29,7 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 | Không đuổi giá | Giá cách EMA21 không quá 1 ATR (`MAX_EXT_ATR`) |
 | Không ngược nhịp 1h (v3.2) | Short khi coin vừa tăng ≥ 0.5% trong 1h (long: vừa giảm) → loại. 56 tín hiệu bóng kiểu này: −0.72R, thắng 18% |
 | Cổng BTC (v3.2) | BTC đang tăng/giảm ≥ 0.3%/1h hoặc xu hướng 1h ngược → cấm short/long altcoin |
+| Cổng BTC khung ngày (v3.4) | BTC khung **ngày** đang giảm (EMA21 < EMA50 và giá đóng hôm qua dưới EMA21, nến 1D đã đóng) → cấm long; đang tăng → cấm short (`BTC_DAILY_GATE`). 29 ngày chạy ảo 30/10–27/11: 320 long bóng −0,45R (t −4,2 theo ngày), âm cả 5 tuần dù cổng 1h cho qua; backtest 88 ngày ở `docs/chandoan_2026-11-28`. Thiếu dữ liệu ngày thì không chặn; tắt cổng thì hai luật `long_btc_bear_1d` / `short_btc_bull_1d` vẫn theo dõi bóng cho bộ tự học |
 | RSI hợp lý | Long: 45–70, Short: 30–55 |
 | Nến tín hiệu đúng màu, không râu dài | Long: nến tăng, đóng ≥ 60% biên độ (`WICK_CLOSE_POS`); Short: nến giảm, đóng ≤ 40% |
 
@@ -34,7 +37,7 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 **Bước 4 – Chấm điểm hợp lưu**: trigger (1,5 × trọng số mỗi nhóm, tối đa 2 nhóm), EMA 9/21/50 xếp đúng thứ tự (+1), đúng phía EMA200 (+0,5) và VWAP (+0,5), ADX 15m ≥ 25 / ≥ 30 (+0,5 / +1), DI khung 1h đồng thuận (+0,5), MACD+RSI khung 1h đồng thuận (+1), nến đóng dứt khoát (+0,5); trừ điểm: volume nến tín hiệu cao trào ≥ 1,5× (`CLIMAX_VOL`, −1; trừ nến breakout khi trigger breakout bật), ADX 1h ≥ 35 (`LATE_TREND_ADX`, −1), coin đã chạy > 20% trong 24h (−1,5); rồi cộng/trừ điểm dòng tiền (OI, funding – mục 11). Cần ≥ 5 điểm (`MIN_SCORE`). v3.3: setup xu hướng không còn cổng "tỉ lệ lời/lỗ ≥ `MIN_RR`" – TP cố định được dựng ≥ 1,2 × `MIN_RR` × R nên cổng đó không bao giờ chặn; `MIN_RR` chỉ là mức sàn của TP cố định. Setup range vẫn cần R:R tới dải giữa ≥ `RANGE_MIN_RR`.
 
-**Bước 5 – AI lần 1 (phân tích)**: tối đa 3 **tín hiệu tốt nhất** của lượt quét được gửi lần lượt cho AI (điểm cao trước), kèm 5 bài học gần nhất; vào được 1 lệnh thì dừng – v3.3: các ứng viên còn lại được ghi bóng (nguồn `slot_taken`; bản cũ bỏ mất). Lượt quét sau hỏi AI về đúng tín hiệu đã ghi bóng (cùng mã, hướng và nến 15m – `slot_taken`, `max_positions`, `not_sent`) thì dòng bóng cũ thành `DUP` ("Trùng"), bộ tự học chỉ đếm dòng hỏi AI – mỗi tín hiệu một lần. Đang có lệnh mở thì trong lượt quét (~30 giây) bot vẫn quản lý lệnh mở mỗi `MONITOR_INTERVAL`. AI đồng ý ≥ 60% (`AI_MIN_CONFIDENCE`) → vào lệnh (hệ số rủi ro: AI 60–64% 0,85×, 65–79% 1,0×, ≥ 80% 1,2×); đồng ý nhưng chỉ 50–59% → vẫn vào với **nửa rủi ro** (`AI_WEAK_CONFIDENCE`); phản đối với độ chắc dưới ngưỡng phủ quyết (`AI_VETO_CONF`: để trống thì chạy ảo 65%, chạy thật 0% = AI luôn được chặn; bộ tự học chỉnh ±5%) mà tín hiệu điểm ≥ 6,5 (`AI_OVERRIDE_MIN_SCORE`) → vào nửa rủi ro; còn lại bỏ. v3.3: AI nhận đúng **kế hoạch thoát** bot sẽ dùng (`exit_plan`; hybrid: TP1 = 1R, chốt 50%, SL về hoà vốn, phần còn lại bám sóng) và `take_profit` là mục tiêu chốt đầu tiên – bản cũ gửi TP của cách thoát fixed (≥ 1,8R) dù bot chạy hybrid. Bài học đưa vào prompt chỉ lấy tổng kết khớp kết quả (Bước 7). (v3.1: trên dữ liệu đã có, AI từ chối 90% tín hiệu nhưng nhóm bị từ chối không thua nhóm được duyệt – AI điều tiết **khối lượng** thay vì chặn cứng.)
+**Bước 5 – AI lần 1 (phân tích)**: tối đa 3 **tín hiệu tốt nhất** của lượt quét được gửi lần lượt cho AI (điểm cao trước), kèm 5 bài học gần nhất; vào được 1 lệnh thì dừng – v3.3: các ứng viên còn lại được ghi bóng (nguồn `slot_taken`; bản cũ bỏ mất). Lượt quét sau hỏi AI về đúng tín hiệu đã ghi bóng (cùng mã, hướng và nến 15m – `slot_taken`, `max_positions`, `not_sent`) thì dòng bóng cũ thành `DUP` ("Trùng"), bộ tự học chỉ đếm dòng hỏi AI – mỗi tín hiệu một lần. Đang có lệnh mở thì trong lượt quét (~30 giây) bot vẫn quản lý lệnh mở mỗi `MONITOR_INTERVAL`. AI đồng ý ≥ 60% (`AI_MIN_CONFIDENCE`) → vào lệnh (hệ số rủi ro: AI 60–64% 0,85×, 65–79% 1,0×, ≥ 80% 1,2×); đồng ý nhưng chỉ 50–59% → vẫn vào với **nửa rủi ro** (`AI_WEAK_CONFIDENCE`); phản đối với độ chắc dưới ngưỡng phủ quyết (`AI_VETO_CONF`: để trống thì chạy ảo 65%, chạy thật 0% = AI luôn được chặn; bộ tự học chỉnh ±5%) mà tín hiệu điểm ≥ `AI_OVERRIDE_MIN_SCORE` → vào nửa rủi ro; còn lại bỏ. v3.4: `AI_OVERRIDE_MIN_SCORE` 6,5 → **5,0** (= `MIN_SCORE`): AI chỉ còn điều tiết **khối lượng**, không chặn tín hiệu đã qua bộ lọc – 29 ngày chạy ảo, 92 tín hiệu AI từ chối +0,36R (t +2,3) trong khi 52 lệnh được vào −0,02R; nhóm điểm 5,5–6,5 bị sàn 6,5 chặn là nhóm tốt nhất (+0,51R, n=47); bộ tự học đã đẩy ngưỡng phủ quyết 65 → 90 nhưng bị kẹt ở sàn này. AI chặn đúng trở lại thì bộ tự học hạ `AI_VETO_CONF` dần (−5%/48h) và AI lại chặn được. v3.3: AI nhận đúng **kế hoạch thoát** bot sẽ dùng (`exit_plan`; hybrid: TP1 = 1R, chốt 50%, SL về hoà vốn, phần còn lại bám sóng) và `take_profit` là mục tiêu chốt đầu tiên – bản cũ gửi TP của cách thoát fixed (≥ 1,8R) dù bot chạy hybrid. Bài học đưa vào prompt chỉ lấy tổng kết khớp kết quả (Bước 7). (v3.1: trên dữ liệu đã có, AI từ chối 90% tín hiệu nhưng nhóm bị từ chối không thua nhóm được duyệt – AI điều tiết **khối lượng** thay vì chặn cứng.)
 
 **Bước 6 – Vào & quản lý lệnh**: SL theo cấu trúc (đáy/đỉnh 6 nến ∓ 0,15 ATR), tối thiểu 2 ATR (`ATR_SL_MULT`); cấu trúc xa hơn 3 ATR (`MAX_SL_ATR`) thì bỏ tín hiệu. Khối lượng tính để chạm SL mất `RISK_PER_TRADE` = **3% vốn × hệ số rủi ro** (đã gồm phí + trượt giá): theo AI (≥ 80% 1,2×; 60–64% 0,85×; AI chưa chắc / phản đối yếu 0,5×; AI lỗi, vào theo điểm 0,6×), từ lệnh thua liên tiếp thứ 3 mỗi lệnh nhân 0,7, kẹp 0,35–1,5× (v3.2: rủi ro không tăng theo điểm hợp lưu). x10 isolated, tối đa **2 lệnh** nhưng tổng rủi ro đang mở ≤ `MAX_TOTAL_RISK` = 5% vốn; lot tối thiểu của sàn làm rủi ro vượt 2× dự tính thì bỏ tín hiệu. Thoát lệnh: mặc định hybrid – chốt 50% ở TP1 = **1R** (`TP1_R`; bộ tự học có thể chọn 1,3 / 1,6 / 2 / 2,5R), SL về hoà vốn, phần còn lại bám sóng (mục 9).
 
@@ -44,7 +47,7 @@ Bot giao dịch hợp đồng tương lai (USDT-SWAP) altcoin trên OKX, đánh 
 
 **Bước 7 – AI lần 2 (tổng kết)**: khi lệnh đóng, AI đánh giá GOOD_TRADE / BAD_TRADE / LUCKY / UNLUCKY và rút 1–2 câu bài học. Bài học được lưu và đưa lại vào prompt của các lần phân tích sau. Xem bằng `/lessons` hoặc trên dashboard. v3.3: verdict phải **khớp kết quả** – lệnh thua đủ 1R (≤ −0,9R) không thể là GOOD_TRADE: AI giải thích là thua đúng quy tắc (trường `rule_correct`) thì đổi thành UNLUCKY; không thì tổng kết bị đánh dấu "không khớp kết quả" (tin báo, `/lessons`, web) và **không** đưa vào prompt; LUCKY cho lệnh thua, UNLUCKY cho lệnh lãi cũng vậy. Bản cũ chấm GOOD_TRADE cho lệnh BEAT thua −1R rồi đưa "bài học" đó vào prompt. Tổng kết đã lưu từ trước 3.3 được xét lại theo cùng luật mỗi lần đọc.
 
-**Cầu dao**: lỗ 12% vốn trong ngày (~4 lệnh thua) → nghỉ đến ngày mai; drawdown 30% từ đỉnh → dừng hẳn, chờ `/resume`. Hạn mức AI mặc định 80 lần/ngày (`AI_MAX_CALLS_PER_DAY`), hết hạn mức bot không vào lệnh mới.
+**Cầu dao**: lỗ 12% vốn trong ngày (~4 lệnh thua) → nghỉ đến ngày mai; drawdown **15%** từ đỉnh (`MAX_DRAWDOWN`, v3.4: 30% → 15%, bằng ngưỡng "tạm dừng & thiết kế lại" ở mục 5; chạy ảo 30/10–27/11 sụt 19,3% mà cầu dao 30% không kêu) → dừng hẳn, chờ `/resume`. Hạn mức AI mặc định 80 lần/ngày (`AI_MAX_CALLS_PER_DAY`), hết hạn mức bot không vào lệnh mới.
 
 Trong lần quét thử 40 coin thật chỉ có 3 coin qua được bộ lọc, và chỉ 1 được hỏi AI → thực tế bot gọi AI khoảng 5–15 lần/ngày.
 
@@ -117,7 +120,7 @@ python run.py
 - **Đừng chỉnh tham số chiến lược theo vài ngày dữ liệu** (mục 5): backtest 88 ngày, 1.335 tổ hợp, không tổ hợp nào dương ngoài mẫu chắc chắn. Các tham số chính: `MIN_SCORE` 5,0, `MIN_ADX` 20, `ATR_SL_MULT` 2,0, `TP1_R` 1,0.
 - `OPENROUTER_MODELS=auto` (mặc định): bot tự đọc danh sách model `:free` hiện còn trên OpenRouter, làm mới mỗi 12h; model trả 404 (bị gỡ) tự loại và dò lại ngay. `openrouter/free` luôn đứng cuối làm lưới an toàn.
 - `AI_FAIL_POLICY`: khi mọi model lỗi – `score` vẫn vào nếu điểm KT ≥ `AI_FAIL_MIN_SCORE` (mặc định 7), `skip` bỏ qua. Để trống: chạy ảo = score, chạy thật = skip.
-- `AI_VETO_CONF` / `AI_OVERRIDE_MIN_SCORE`: AI phản đối với độ chắc < ngưỡng (để trống: chạy ảo 65%, chạy thật 0%) thì tín hiệu điểm ≥ 6,5 vẫn vào nửa rủi ro, ghi nguồn `ai_override`. Bộ tự học so kết quả các tín hiệu AI phản đối để nâng/hạ ngưỡng ±5% (tối đa 1 lần/48h).
+- `AI_VETO_CONF` / `AI_OVERRIDE_MIN_SCORE`: AI phản đối với độ chắc < ngưỡng (để trống: chạy ảo 65%, chạy thật 0%) thì tín hiệu điểm ≥ `AI_OVERRIDE_MIN_SCORE` (v3.4: 5,0 = mọi tín hiệu đã đạt điểm; bản cũ 6,5) vẫn vào nửa rủi ro, ghi nguồn `ai_override`. Muốn AI chặn cứng như cũ: `AI_OVERRIDE_MIN_SCORE=6.5` hoặc `AI_VETO_CONF=0`. Bộ tự học so kết quả các tín hiệu AI phản đối để nâng/hạ ngưỡng ±5% (tối đa 1 lần/48h).
 - `BREAKOUT_ENABLED`: trigger breakout, mặc định `false` (mục "Trigger breakout").
 - Phiên bản đang chạy hiện ở góc tiêu đề dashboard, `/health`, lệnh `status` và tin nhắn khởi động.
 - `AI_MAX_CALLS_PER_DAY`: hạn mức tổng (phân tích + tổng kết), chỉ tính lượt AI trả lời thành công. `AI_REVIEW_ENABLED=false` nếu muốn tiết kiệm chỉ gọi 1 lần/lệnh.
@@ -137,7 +140,7 @@ python run.py
   |---|---|---|
   | `taken` | Đã vào lệnh | AI duyệt, bot vào lệnh |
   | `ai_weak` | Vào (AI chưa chắc) | AI đồng ý 50–59%, vào nửa rủi ro |
-  | `ai_override` | Vào dù AI phản đối yếu | AI phản đối dưới ngưỡng phủ quyết, điểm ≥ 6,5 |
+  | `ai_override` | Vào dù AI phản đối yếu | AI phản đối dưới ngưỡng phủ quyết, điểm ≥ `AI_OVERRIDE_MIN_SCORE` (v3.4: 5,0) |
   | `ai_rejected` | AI từ chối | |
   | `ai_error` | AI lỗi/hết lượt | |
   | `skipped` (v3.3) | Không vào được | AI duyệt nhưng engine không vào được: giá đã vượt SL, hết ngân sách rủi ro, lot, kiểm tra rủi ro live – lý do ở `features.skip` (bản cũ ghi nhầm là AI từ chối) |
@@ -158,6 +161,7 @@ python run.py
    - trọng số từng trigger (0,6 – 1,4; vùng chết ±0,1R, mỗi lần đổi tối đa 0,2);
    - ngưỡng điểm MIN_SCORE (4,0 – 7,0, mỗi lần ±0,5);
    - cách thoát lệnh (mục 9), mức TP1, ngưỡng phủ quyết AI.
+   v3.4 – **AI đoán chuẩn không (Brier)**: trên mọi tín hiệu đã hỏi AI và có kết quả bóng, xác suất thắng AI ngụ ý (đồng ý cùng hướng: confidence/100; SKIP hoặc đòi hướng ngược: 1 − confidence/100) so với kết quả thật: Brier = trung bình (p − thắng)². So với Brier của một "AI" luôn đoán đúng bằng tỉ lệ thắng nền (nền × (1 − nền)); skill = 1 − Brier/nền: dương là AI phân biệt được tín hiệu tốt/xấu, âm là có AI tệ hơn không có. Hiện ở trang Tự học và trong số liệu AI tổng kết ngày; 29 ngày chạy ảo 30/10–27/11: Brier 0,345 so với nền 0,234, skill −0,47 (155 quyết định) – AI đoán ngược chiều kết quả. Đây là tiêu chí để trả lại quyền chặn cho AI (`AI_OVERRIDE_MIN_SCORE=6.5`): chỉ khi skill > 0 trên ≥ 150 quyết định.
    Mỗi tham số chỉ đổi tối đa 1 lần/48h (`LEARN_COOLDOWN_H`). v3.2: `LEARN_MIN_T` = 2,0; không bao giờ chặn cả một phía (long_side/short_side chỉ để thống kê); cách thoát lệnh cần ≥ `LEARN_EXIT_MIN_SAMPLES` = 60 cặp.
    v3.3: sai số chuẩn **gom cụm theo ngày** (tín hiệu cùng ngày là cùng một nhịp thị trường, không độc lập – bản cũ coi chúng độc lập nên t quá lớn); trọng số trigger và ngưỡng điểm chỉ học từ tín hiệu **không bị luật đang chặn** (tín hiệu bị chặn không vào lệnh được dù điểm thế nào; trọng số pullback 0,82 của bản cũ học từ 32 tín hiệu, 22 trong đó đã bị luật chặn sẵn). Lần đầu chạy 3.3 ở chế độ **chạy ảo + `LEARN_MODE=auto`** bot đưa mọi tham số tự học của bản cũ về mặc định **một lần** (ghi log, dòng `migrate v3.3` trong lịch sử tự học và báo "🧬 TỰ HỌC – v3.3: …" qua Telegram/Zoom). **Chạy thật** hoặc `LEARN_MODE` `suggest` / `off`: bot không tự đổi luật đang chạy (tham số có thể do anh/chị duyệt tay) mà tạo một đề xuất "Khôi phục" chờ duyệt (web hoặc `/apply`). Luật phiên giờ được thống kê theo đúng giờ bot đã xét luật (lúc chẩn đoán). Luật đã chặn vẫn được theo dõi bóng, nên nếu nhóm đó tốt lên bot sẽ tự bỏ chặn. (v3.1: trước đây 13–20 mẫu đã đổi, trọng số trigger nhảy qua lại trong 1 ngày – nay không còn.)
 3. Mỗi sáng (7h) AI đọc thống kê, viết nhận xét và gợi ý – **không tự áp dụng**, anh bấm "Áp dụng" nếu đồng ý. Tốn 1 lượt AI/ngày.
@@ -218,10 +222,10 @@ Lệnh dùng chung: `status, trades, signals, ai, learn, apply, lessons, btc, pa
 
 ## 11. Bối cảnh BTC, Open Interest, tỉ lệ long/short
 
-Mỗi lượt quét bot lấy BTC 15m/1h (xu hướng, % thay đổi 1h/4h). Với mỗi tín hiệu đã qua bộ lọc kỹ thuật, bot lấy thêm Open Interest thay đổi 1h, tỉ lệ tài khoản long/short và funding của coin đó. Các dữ liệu này:
+Mỗi lượt quét bot lấy BTC 15m/1h (xu hướng, % thay đổi 1h/4h) và, từ v3.4, nến 1D đã đóng: regime khung ngày `btc_trend_1d` (1 tăng / −1 giảm / 0 chưa rõ, cùng định nghĩa EMA21/EMA50 với khung 1h – `market.daily_regime`) và `btc_chg_7d` (% đổi 7 ngày); nến ngày OKX mở 00:00 giờ Hồng Kông, bot chỉ dùng nến đã đóng nên regime đổi tối đa một lần mỗi ngày. Với mỗi tín hiệu đã qua bộ lọc kỹ thuật, bot lấy thêm Open Interest thay đổi 1h, tỉ lệ tài khoản long/short và funding của coin đó. Các dữ liệu này:
 - được gửi cho AI khi phân tích;
 - được lưu cùng tín hiệu (tải được trong signals.csv);
-- tạo thành các **luật ứng viên** cho bộ tự học: long khi BTC 1h giảm, short khi BTC tăng, ngược xu hướng BTC, BTC biến động mạnh, giá tăng nhưng OI giảm, OI tăng đột biến, đám đông long/short quá đông, funding cực đoan.
+- tạo thành các **luật ứng viên** cho bộ tự học: long khi BTC 1h giảm, short khi BTC tăng, ngược xu hướng BTC, BTC biến động mạnh, long khi BTC ngày đang giảm / short khi BTC ngày đang tăng (v3.4, `long_btc_bear_1d` / `short_btc_bull_1d` – đo song song với cổng cứng `BTC_DAILY_GATE`), giá tăng nhưng OI giảm, OI tăng đột biến, đám đông long/short quá đông, funding cực đoan.
 
 Các luật BTC / OI / đám đông này **không chặn sẵn** (luật chặn sẵn – `DEFAULT_BLOCKS` – là setup range, phiên 0h–7h, phiên 13h–19h, volume cao trào). Mỗi luật được theo dõi kết quả bóng; chỉ khi một nhóm có đủ mẫu (≥ 30, ≥ 7 ngày) và thua rõ rệt (kỳ vọng < −0,25R, t ≥ 2) thì mới bị chặn – xem bảng "Theo luật lọc" trong thẻ Tự học.
 
@@ -267,6 +271,24 @@ check_db.py       – kiểm tra kết nối Supabase trước khi deploy
 ```
 
 > Các mục dưới đây là **lịch sử thay đổi** theo từng bản; giá trị đang dùng ở mục 1, 8, 9, 12 và `bot/config.py`.
+
+## Regime BTC khung ngày, AI chỉ điều tiết khối lượng (v3.4)
+Rút từ 29 ngày chạy ảo bản 3.3 (30/10–27/11/2026, 59 lệnh, 991 tín hiệu bóng có kết quả) và backtest 88 ngày 01/09–28/11
+(50 coin, 793 lệnh vào được) – chi tiết và script chạy lại ở `docs/chandoan_2026-11-28`:
+- **Cổng regime BTC khung ngày** (`BTC_DAILY_GATE`, `market.daily_regime`): BTC rơi 77.600 → 60.600 trong 29 ngày, long thua cả 5
+  tuần (−0,45R, t −4,2) dù cổng 1h cho qua 176 tín hiệu long lúc BTC 1h đang tăng. Backtest: nhóm bị cổng ngày loại −0,05R
+  trong mẫu (166 short lúc BTC ngày tăng) và −0,44R ngoài mẫu (50 long trên 11 ngày BTC giảm), không loại nhóm nào có lãi;
+  sau cổng cả kỳ vẫn chỉ +0,05R ± 0,08 – cổng cắt một nhóm lỗ, không tạo lợi thế. Định nghĩa "% đổi 7 ngày" bị loại vì
+  chặn nhầm nhóm long tốt nhất trong mẫu (+0,44R).
+- **AI chỉ điều tiết khối lượng** (`AI_OVERRIDE_MIN_SCORE` 6,5 → 5,0): AI từ chối 92 tín hiệu +0,36R (t +2,3), duyệt 52 lệnh
+  −0,02R; nhóm điểm 5,5–6,5 bị sàn 6,5 chặn là nhóm tốt nhất (+0,51R). Bộ tự học đã nâng ngưỡng phủ quyết 65 → 90 nhưng kẹt
+  ở sàn. **Brier** (mục 8) 0,345 so với 0,234 nếu đoán theo tỉ lệ nền: AI đoán ngược chiều kết quả. Trả lại quyền chặn
+  chỉ khi skill > 0 trên ≥ 150 quyết định.
+- **Cầu dao drawdown 30% → 15%**: chạy ảo sụt 19,3% (01/11 → 09/11) mà cầu dao không kêu, trong khi mục 5.4 coi 15% là ngưỡng
+  tạm dừng.
+- Không đổi TP1 (2R hơn 1R +0,13R, t 1,8 – chưa đủ), SL 2,5 ATR (+0,08R, t 1,5), giờ giao dịch (06–09h +0,38R trên 54 tín hiệu
+  tới AI – lát cắt trên cùng dữ liệu). Bộ tự học quyết với t ≥ 2.
+- Không dùng thêm dịch vụ AI nào (prompt lan truyền "AgenKit + Jev" đề xuất dựng lại bot: bot đã có tương đương, xem chẩn đoán).
 
 ## Tối ưu lợi nhuận kỳ vọng (v2.9)
 Mục tiêu là **lợi nhuận kỳ vọng** = tỉ lệ thắng × lãi trung bình − tỉ lệ thua × lỗ trung bình, không chỉ tỉ lệ thắng.
