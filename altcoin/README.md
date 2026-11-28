@@ -286,7 +286,9 @@ chỉ dùng API công khai của OKX (giá, nến), không bao giờ gọi API �
 `book='noai'`, nhận **đúng danh sách ứng viên** đã qua cổng, đạt `MIN_SCORE` và xếp theo điểm mà sổ chính nhận – ngay trước khi sổ
 chính hỏi AI – và vào ứng viên điểm cao nhất chưa có vị thế cùng mã, tối đa 1 lệnh mỗi lượt quét, hệ số rủi ro theo AI 1,0×
 (không 0,85× / 1,2× / 0,5×), cùng cỡ lệnh, phí, trượt giá, `plan_exit` và `EXIT_MODE` (cùng `BaseEngine`). Giá last lúc quyết
-định ghi một lần trên tín hiệu nên hai sổ vào cùng giá; khác biệt chỉ do AI. Cầu dao riêng: sụt 15% từ đỉnh (đỉnh đo từ đầu đợt)
+định của sổ noai lấy lúc quét; sổ chính vẫn lấy giá mới sau khi AI trả lời (như trước) – độ trễ của AI là một phần chi phí
+của AI; khác biệt chỉ do AI (quyết định, hệ số rủi ro, độ trễ). Sổ chính dừng vì cầu dao thì sổ noai vẫn nhận ứng viên. Cầu
+dao riêng: sụt 15% từ đỉnh (đỉnh đo từ đầu đợt)
 → ngừng mở lệnh mới, báo một tin, sổ chính không ảnh hưởng; `/resume` mở lại. Không gửi tin mở/đóng từng lệnh. Cột `book` thêm
 vào `trades` và `equity` (dữ liệu cũ = `main`), mọi truy vấn của sổ chính lọc `book='main'`; lệnh hai sổ ghi `sid` của dòng tín
 hiệu, lệnh noai ghi thêm `ai_verdict` (phán quyết AI của sổ chính, chỉ để phân tích). **So sánh** (`/alt compare`, thẻ "So sánh

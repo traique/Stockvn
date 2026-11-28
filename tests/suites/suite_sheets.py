@@ -240,6 +240,17 @@ t.ok("next cycle: the failed tab's rows are written, once; the error cleared",
 status = sh.status_text(DATA)
 t.ok("/bangtinh: rows per tab, the last write", "• ck_nav: 7 dòng, lần cuối" in status and "• ck_trades: 3 dòng" in status, status)
 
+# the key list is bounded: once trimmed, the forgotten (older) keys still count as written (floor)
+_kept = sh.KEYS_KEPT
+sh.KEYS_KEPT = 3
+cur = sh.Cursor(DATA)
+cur.wrote("ck_x", [f"2026-01-0{i}|a" for i in (1, 2, 3, 4, 5)])
+t.ok("cursor trimmed to KEYS_KEPT newest keys, with the oldest kept one as the floor",
+     cur.tab("ck_x")["keys"] == ["2026-01-03|a", "2026-01-04|a", "2026-01-05|a"] and cur.tab("ck_x")["floor"] == "2026-01-03|a")
+t.ok("a forgotten older key is still 'written'; a newer unknown key is not",
+     cur.written("ck_x", "2026-01-01|a") and cur.written("ck_x", "2026-01-04|a") and not cur.written("ck_x", "2026-01-06|a"))
+sh.KEYS_KEPT = _kept
+
 
 class Boom:
     def _headers(self):

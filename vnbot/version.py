@@ -27,7 +27,7 @@ from pathlib import Path
 
 VERSION = "v1.25.0"
 RELEASED = "2026-11-28"
-RELEASE_BUILD = "f83b82d"          # written by `python -m vnbot.version --stamp`
+RELEASE_BUILD = "c80867c"          # written by `python -m vnbot.version --stamp`
 
 # Newest first: (version, release day, what changed - short lines for a phone).
 # Versions are vMAJOR.MINOR.PATCH; the history before 1.0.0 was dropped on purpose.

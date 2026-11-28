@@ -118,8 +118,8 @@ class Store:
             f"""CREATE TABLE IF NOT EXISTS grid_runs(id {pk}, pair TEXT, round INTEGER, low {real}, high {real},
                 levels INTEGER, spacing TEXT, capital {real}, start_price {real}, started_at {real}, ended_at {real},
                 reason TEXT, state TEXT)""",
-            f"""CREATE TABLE IF NOT EXISTS grid_fills(ts {real}, run_id INTEGER, pair TEXT, level INTEGER, price {real},
-                side TEXT, amount {real}, fee {real}, profit {real})""",
+            f"""CREATE TABLE IF NOT EXISTS grid_fills(id {pk}, ts {real}, run_id INTEGER, pair TEXT, level INTEGER,
+                price {real}, side TEXT, amount {real}, fee {real}, profit {real})""",
             f"""CREATE TABLE IF NOT EXISTS grid_equity(ts {real}, run_id INTEGER, pair TEXT, usdt {real}, coin {real},
                 price {real}, value {real}, hodl {real}, realized {real})""",
         ])
@@ -318,6 +318,12 @@ class Store:
                 out.append(r)
         return out
 
+    def signal_sid(self, sig):
+        """sid của dòng đã có của CÙNG tín hiệu (cùng mã, hướng, nến 15m), ưu tiên dòng hỏi AI; None khi chưa có."""
+        rows = self._same_signal(sig, getattr(sig, "ref_ts", None) or time.time())
+        rows.sort(key=lambda r: r["source"] in self.AI_SOURCES, reverse=True)
+        return rows[0]["sid"] if rows else None
+
     def log_signal(self, sig, ai, taken, source="ai"):
         """source: taken | ai_weak | ai_override | ai_rejected | ai_error | skipped | not_sent | slot_taken | max_positions |
         below_score | blocked | breakout_off (tín hiệu chỉ có breakout khi cờ BREAKOUT_ENABLED tắt – chỉ đo)
@@ -368,6 +374,8 @@ class Store:
             for r in same:
                 if r["source"] in self.SHADOW_SOURCES:
                     self.db.run("UPDATE signals SET outcome='DUP', outcome_ts=?, alt_open=NULL WHERE sid=?", (time.time(), r["sid"]))
+                    # v3.5: lệnh (sổ noai) đã gắn sid của dòng bóng cũ → chuyển sang dòng hỏi AI để so theo cặp (books._paired)
+                    self.db.run("UPDATE trades SET sid=? WHERE sid=?", (sid, r["sid"]))
                     log.debug("tín hiệu %s %s: dòng bóng %s (%s) trùng dòng hỏi AI %s", sig.symbol, sig.side, r["sid"],
                               r["source"], sid)
         return sid
@@ -478,9 +486,14 @@ class Store:
 
     def grid_fills(self, run_id=None, limit=200, since=0.0):
         if run_id is not None:
-            return self.db.run("SELECT * FROM grid_fills WHERE run_id=? AND ts>=? ORDER BY ts DESC LIMIT ?",
+            return self.db.run("SELECT * FROM grid_fills WHERE run_id=? AND ts>=? ORDER BY id DESC LIMIT ?",
                                (run_id, since, limit), fetch=True)
-        return self.db.run("SELECT * FROM grid_fills WHERE ts>=? ORDER BY ts DESC LIMIT ?", (since, limit), fetch=True)
+        return self.db.run("SELECT * FROM grid_fills WHERE ts>=? ORDER BY id DESC LIMIT ?", (since, limit), fetch=True)
+
+    def grid_fills_after(self, last_id, limit=2000):
+        """Khớp lưới có id > last_id, theo id (xuất Sheets: luồng grid ghi từng cặp nối tiếp, con trỏ theo id không bỏ sót
+        khớp cùng mốc giờ của cặp sau)."""
+        return self.db.run("SELECT * FROM grid_fills WHERE id>? ORDER BY id LIMIT ?", (int(last_id or 0), limit), fetch=True)
 
     def grid_add_equity(self, ts, run_id, pair, usdt, coin, price, value, hodl, realized):
         self.db.run("INSERT INTO grid_equity(ts, run_id, pair, usdt, coin, price, value, hodl, realized) VALUES(?,?,?,?,?,?,?,?,?)",

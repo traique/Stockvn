@@ -205,9 +205,13 @@ def _():
     assert ex.last_error and "503" in ex.last_error and SECRET_TOKEN not in ex.last_error, ex.last_error
     assert ex._cursor().get("alt_trades") is None               # tab đầu lỗi → con trỏ chưa đổi
     assert "alt_trades" in http.tabs and len(http.rows.get("alt_trades", [])) == 0     # tab đã tạo, tiêu đề chờ lượt sau
+    ex.tick(now=time.time() + 60)                   # lượt phút sau, chưa tới giờ ghi: lỗi vẫn hiện, không "thành công" giả
+    assert ex.last_error and "503" in ex.last_error and ex.last_ok is None
     ex.tick(now=time.time() + cfg.SHEETS_INTERVAL + 1)
     assert ex.last_error is None and len(http.rows["alt_trades"]) == 3 and ex._cursor().get("alt_trades")
     assert len(http.rows["alt_signals"]) == 3
+    last_id = max(r["id"] for r in st.grid_fills_after(0))
+    assert isinstance(ex._cursor().get("grid_fills"), int) and ex._cursor()["grid_fills"] == last_id      # con trỏ theo id
 
 
 @section("không lộ khoá: mọi ô chữ qua redact (token Telegram, URL có mật khẩu, Bearer); không đọc/ghi tab proposals")

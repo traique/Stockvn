@@ -256,11 +256,12 @@ class SheetsExporter:
         return out, sorted(done)[-200:]
 
     def _grid_fills(self, cur):
-        last = float(cur or 0)
-        rows = self.store.db.run("SELECT * FROM grid_fills WHERE ts>? ORDER BY ts, run_id, level LIMIT 2000", (last,), fetch=True)
+        """Con trỏ = id dòng cuối (không theo ts: luồng grid ghi khớp của từng cặp nối tiếp, khớp cùng phút của cặp sau có thể
+        được ghi sau khi lượt xuất đã đọc)."""
+        rows = self.store.grid_fills_after(int(cur or 0))
         out = [[f"{r['run_id']}:{int(r['ts'])}:{r['level']}:{r['side']}", _ts(r["ts"]), r["run_id"], r["pair"], r["level"], r["price"],
                 r["side"], r["amount"], r["fee"], r["profit"]] for r in rows]
-        return out, (rows[-1]["ts"] if rows else cur)
+        return out, (rows[-1]["id"] if rows else cur)
 
     def _summary_rows(self, date):
         from . import version as ver
@@ -332,13 +333,16 @@ class SheetsExporter:
             return
         now = time.time() if now is None else now
         try:
-            n = 0
+            n, ran = 0, False
             if now - self.last_run >= cfg.SHEETS_INTERVAL:
                 n += self.export_hourly()
-                self.last_run = now
-            if time.strftime("%H:%M", time.localtime(now)) >= cfg.SHEETS_SUMMARY_TIME:
-                n += self.export_summary(time.strftime("%Y-%m-%d", time.localtime(now)))
-            self.last_ok, self.last_error = now, None
+                self.last_run, ran = now, True
+            day = time.strftime("%Y-%m-%d", time.localtime(now))
+            if time.strftime("%H:%M", time.localtime(now)) >= cfg.SHEETS_SUMMARY_TIME and self._cursor().get("alt_summary") != day:
+                n += self.export_summary(day)
+                ran = True
+            if ran:                      # chỉ lượt có ghi thật mới đổi trạng thái (lỗi của lượt trước giữ tới lượt ghi sau)
+                self.last_ok, self.last_error = now, None
             if n:
                 log.info("Sheets: đã ghi %d dòng (%s)", n, ", ".join(f"{k} {v}" for k, v in self.written.items()))
         except Exception as e:

@@ -1,11 +1,15 @@
 """Sổ (book) và so sánh sổ – v3.5.
 
+Giá vào: sổ noai vào ở giá last lúc quét (trước khi hỏi AI); sổ chính vào ở giá last MỚI sau khi AI trả lời (như trước 3.5) –
+độ trễ của AI (tới vài phút khi hỏi 3 ứng viên) là một phần chi phí của AI, so theo cặp tín hiệu đo luôn cả phần đó.
+
 Sổ chính ``main`` là sổ cũ (paper hoặc live). Sổ ``noai`` là một PaperEngine thứ hai chạy song song trong cùng tiến trình:
 nhận đúng danh sách ứng viên đã qua cổng, đạt MIN_SCORE và đã xếp theo điểm mà sổ chính nhận (main.Bot.scan), vào lệnh
 KHÔNG hỏi AI, hệ số rủi ro theo AI = 1,0×, cùng cách tính cỡ lệnh / phí / trượt giá / cách thoát như sổ chính (cùng
 BaseEngine). Hai sổ cùng thị trường, cùng thời điểm, cùng giá last lúc quyết định (engine.stamp ghi một lần trên tín hiệu),
-nên khác biệt chỉ đến từ AI. Sổ noai không bao giờ gọi AI, không gửi tin từng lệnh, có cầu dao drawdown riêng
-(MAX_DRAWDOWN), và luôn là PaperEngine kể cả khi MODE=live.
+nên khác biệt chỉ đến từ AI (quyết định, hệ số rủi ro và độ trễ). Sổ noai không bao giờ gọi AI, không gửi tin từng lệnh,
+có cầu dao drawdown riêng (MAX_DRAWDOWN), và luôn là PaperEngine kể cả khi MODE=live. Sổ chính dừng vì cầu dao thì sổ noai
+vẫn nhận ứng viên (main.scan(main_active=False)).
 
 So sánh (compare): mỗi sổ – số lệnh, R trung bình với sai số chuẩn GOM CỤM THEO NGÀY (learner._tstat), tỉ lệ thắng, vốn,
 sụt tối đa trong đợt đo, tổng phí và phí / lãi gộp. Và hiệu THEO CẶP TÍN HIỆU: mỗi lệnh noai có sid (dòng signals của tín
@@ -102,7 +106,8 @@ def _paired(store, since):
         diffs.append(r - rm)
         days.append(_day(t.get("closed_at") or t.get("opened_at")))
     se, tt = _tstat(diffs, days) if len(diffs) >= 2 else (0.0, 0.0)
-    main_only = sum(1 for sid in main_by_sid if not any(t.get("sid") == sid for t in noai))
+    noai_sids = {t["sid"] for t in noai}
+    main_only = sum(1 for sid in main_by_sid if sid not in noai_sids and not store.trade_by_sid(sid, NOAI))
     return {"n": len(diffs), "matched": matched, "main_only": main_only, "pending": main_open,
             "diff": round(sum(diffs) / len(diffs), 3) if diffs else None, "se": round(se, 3), "t": round(tt, 2),
             "days": len(set(days))}

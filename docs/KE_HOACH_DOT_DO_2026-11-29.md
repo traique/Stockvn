@@ -243,7 +243,7 @@ Làm theo năm PR nhỏ (thêm một PR tuỳ chọn), mỗi PR có test và ch�
 
 - **Mặc định rủi ro:** hạ `LEVERAGE` / `RISK_PER_TRADE` chỉ khi `MODE=live` (x3, 1%); chạy ảo giữ x10 / 3% vì tài liệu vận hành bảo xoá `ALT_RISK_PER_TRADE`, `ALT_LEVERAGE` khỏi panel – đổi mặc định paper là đổi sổ đang đo.
 - **Mốc đỉnh cầu dao:** `peak_equity` lưu vĩnh viễn trong kv là đỉnh trước đợt sụt 19,3%; bản 3.5.0 ghi kv `period` và đặt lại mốc đỉnh về vốn lúc khởi động để sổ chính và sổ noai cùng điều kiện.
-- **So sánh hai sổ:** thêm hiệu theo cặp tín hiệu (cùng `sid`), không chỉ chênh trung bình; từ 3.4 AI gần như không chặn nên khác biệt phần lớn là hệ số rủi ro.
+- **So sánh hai sổ:** thêm hiệu theo cặp tín hiệu (cùng `sid`), không chỉ chênh trung bình; từ 3.4 AI gần như không chặn nên khác biệt phần lớn là hệ số rủi ro. Sổ noai vào ở giá lúc quét, sổ chính vẫn vào ở giá mới sau khi AI trả lời (độ trễ AI tính vào chi phí của AI). Sổ chính dừng vì cầu dao thì sổ noai vẫn nhận ứng viên.
 - **Lệnh `/alt compare`, `/alt grid`, `/alt sheets`:** thêm ở ba nơi (`vnbot/altcoin_bridge.READ`, `altcoin/hosted.COMMANDS`, `Bot.handle_command`).
 - **Grid:** vòng mới không tự mở; tăng `ALT_GRID_ROUND` trên panel rồi khởi động lại. Giá bắt đầu lấy từ ticker (API công khai). Lấy bù nến tối đa 20.000 nến 1m (~14 ngày).
 - **Sheets:** không thêm thư viện Google; JWT RS256 bằng `cryptography`, REST v4 bằng `requests`; `ALT_SHEETS_*` tự đi qua allowlist `ALT_` (không sửa `altcoin_host`). Dòng tiêu đề đi cùng lần ghi đầu của mỗi tab.

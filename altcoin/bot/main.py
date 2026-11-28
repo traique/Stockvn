@@ -397,13 +397,15 @@ class Bot:
             if tried >= max(1, cfg.AI_CANDIDATES_PER_SCAN):
                 break
             tried += 1
-            skip0 = sig.skip
+            skip0, ref0 = sig.skip, (sig.ref_price, sig.ref_ts)
             try:
                 t = self.noai.open(sig, books.noai_ai(sig))
             except Exception as e:
                 log.warning("[noai] mở %s lỗi: %s", sig.symbol, str(e)[:160])
                 t = None
-            sig.skip = skip0            # lý do bỏ của sổ noai không lẫn vào dòng tín hiệu của sổ chính
+            # lý do bỏ và giá last của sổ noai không lẫn vào sổ chính: sổ chính lấy giá MỚI sau khi AI trả lời (như trước
+            # 3.5 – độ trễ của AI là một phần chi phí của AI), dòng tín hiệu cũng ghi giá đó
+            sig.skip, (sig.ref_price, sig.ref_ts) = skip0, ref0
             if t:
                 log.info("[noai] vào %s %s điểm %s: %.2f USDT @ %.6g SL %.6g", sig.symbol, sig.side, sig.score,
                          t["notional"], t["entry"], t["sl"])
@@ -412,7 +414,15 @@ class Bot:
         return out
 
     def _link_books(self, sig, sid, ai, taken):
-        """Gắn sid của dòng tín hiệu vào lệnh của hai sổ; lệnh noai ghi thêm phán quyết AI của sổ chính (chỉ để phân tích)."""
+        """Gắn sid của dòng tín hiệu vào lệnh của hai sổ; lệnh noai ghi thêm phán quyết AI của sổ chính (chỉ để phân tích).
+        sid trống (tín hiệu đã có dòng từ lượt quét trước trong cùng nến – _shadow / log_signal không ghi lại) → dùng sid của
+        dòng đã có (storage.signal_sid); lượt sau sổ chính hỏi AI về đúng tín hiệu đó thì log_signal chuyển sid của lệnh
+        sang dòng mới (dòng bóng cũ thành DUP) – cặp noai / main vẫn khớp nhau."""
+        if not sid:
+            try:
+                sid = self.store.signal_sid(sig)
+            except Exception as e:
+                log.debug("signal_sid: %s", e)
         if not sid:
             return
         try:
@@ -445,8 +455,10 @@ class Bot:
         self.notify.send(f"📅 BÁO CÁO NGÀY\nLệnh: {len(rows)} | Thắng: {wins} | PnL: {pnl:+.4f} USDT\n"
                      f"Vốn: {self.engine.equity(self.last_prices):.4f} USDT" + extra)
 
-    def scan(self):
+    def scan(self, main_active=True):
         """Quét coin, chấm tín hiệu, hỏi AI tối đa AI_CANDIDATES_PER_SCAN ứng viên (vào được 1 lệnh thì dừng).
+        v3.5: main_active=False – sổ chính đã dừng (cầu dao) nhưng sổ noai còn chạy: quét chỉ để sổ noai nhận ứng viên; sổ
+        chính không hỏi AI, không vào lệnh và không ghi tín hiệu bóng (như trước: bot dừng thì không có dòng nào).
         v3.3: đủ MAX_OPEN_POSITIONS lệnh mở vẫn quét (bản cũ ngừng im lặng – mất log quét và dữ liệu bóng ~9% thời gian):
         không hỏi AI, không vào lệnh, ứng viên đạt được ghi bóng nguồn "max_positions". Ứng viên xếp sau ứng viên vừa vào
         lệnh (bản cũ bỏ mất, không hỏi AI cũng không ghi) được ghi bóng nguồn "slot_taken". Lượt quét sau hỏi AI về đúng
@@ -538,6 +550,10 @@ class Bot:
             log.debug("add_scan: %s", e)
         # v3.5: sổ noai nhận đúng danh sách ứng viên này TRƯỚC khi sổ chính hỏi AI (books.py)
         self._noai_map = self._noai_pass(candidates)
+        if not main_active:
+            for sig in candidates:
+                self._link_books(sig, None, None, None)      # sid của dòng đã có (nếu có) cho lệnh noai
+            return
         if full:                            # đủ lệnh mở: không hỏi AI, không vào lệnh – chỉ theo dõi kết quả bóng
             for sig in candidates:
                 self._link_books(sig, self._shadow(sig, "max_positions"), None, None)
@@ -636,6 +652,10 @@ class Bot:
         except Exception as e:
             log.debug("shadow log: %s", e)
             return None
+
+    def _noai_active(self):
+        """Sổ noai còn được mở lệnh mới (bật và chưa dừng vì cầu dao riêng)."""
+        return bool(self.noai) and not self.store.get("noai_halted")
 
     @property
     def _noai_open(self):
@@ -774,10 +794,11 @@ class Bot:
                         self.store.set("noai_last_equity", neq)
                         self.store.log_equity(neq, books.NOAI)
                     last_eq_log = time.time()
-                # 2. kiểm tra rủi ro + quét tín hiệu
-                if self._risk_ok(equity) and not self.paused and time.time() - self.last_scan > cfg.SCAN_INTERVAL:
+                # 2. kiểm tra rủi ro + quét tín hiệu (v3.5: sổ chính dừng vì cầu dao thì vẫn quét cho sổ noai)
+                main_ok = self._risk_ok(equity)
+                if not self.paused and time.time() - self.last_scan > cfg.SCAN_INTERVAL and (main_ok or self._noai_active()):
                     self.last_scan = time.time()
-                    self.scan()
+                    self.scan(main_active=main_ok)
                 # 3. tự học: cập nhật kết quả bóng, điều chỉnh tham số, AI tổng kết ngày
                 self.learner.tick()
             except (KeyboardInterrupt, SystemExit):

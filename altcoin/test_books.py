@@ -81,12 +81,14 @@ STORE.set("paper_balance", 10.0)
 
 
 class ScanOKX:
-    def __init__(self, syms, price=100.0): self.syms, self.p, self.asked = syms, price, 0
+    def __init__(self, syms, price=100.0, prices=None): self.syms, self.p, self.asked, self.seq = syms, price, 0, list(prices or [])
     def top_altcoins(self, n): return [(s, 1e6 * (len(self.syms) - i), 0.0) for i, s in enumerate(self.syms)]
     def ohlcv(self, *a, **k): return []
     def ohlcv_since(self, *a, **k): return []
     def seconds(self, *a, **k): return []
-    def price(self, s): self.asked += 1; return self.p
+    def price(self, s):
+        self.asked += 1
+        return self.seq.pop(0) if self.seq else self.p
     def prices(self, syms): return {s: self.p for s in syms}
     def market(self, s): return {"contractSize": 1, "limits": {"amount": {"min": 0.001}}, "precision": {"amount": 0.001}}
     def contracts_for_notional(self, s, notional, price):
@@ -141,7 +143,7 @@ def sig_rows():
     return [(r["symbol"].split("/")[0], r["source"], r["sid"]) for r in STORE.db.run("SELECT * FROM signals ORDER BY rowid", fetch=True)]
 
 
-@section("sổ noai: cùng ứng viên, vào không hỏi AI, cùng giá vào với sổ chính, gắn sid & phán quyết AI; sổ chính y hệt khi không có noai")
+@section("sổ noai: cùng ứng viên, vào không hỏi AI, gắn sid & phán quyết AI; sổ chính y hệt khi không có noai (cùng giá, cùng cỡ)")
 def _():
     sigs = {"AAA/USDT:USDT": (trend_sig("AAA/USDT:USDT", 7.0), ""), "BBB/USDT:USDT": (trend_sig("BBB/USDT:USDT", 6.0), "")}
     bot0 = make_bot({k: (trend_sig(k, v[0].score), "") for k, v in sigs.items()}, noai=False)
@@ -160,7 +162,7 @@ def _():
     assert len(noai) == 1 and noai[0]["symbol"] == "AAA/USDT:USDT" and noai[0]["book"] == "noai", noai
     main = STORE.open_trades("main")
     assert len(main) == 1 and main[0]["book"] == "main"
-    assert abs(noai[0]["entry"] - main[0]["entry"]) < 1e-12, "hai sổ phải vào cùng giá last lúc quyết định"
+    assert abs(noai[0]["entry"] - main[0]["entry"]) < 1e-12          # giá giả không đổi → cùng giá
     assert noai[0]["ai_model"] == "noai" and noai[0]["ai_conf"] is None
     assert abs(noai[0]["risk_mult"] - 1.0) < 0.05, noai[0]["risk_mult"]        # 1,0× (sổ chính AI 80% → 1,2×)
     assert abs(main[0]["risk_mult"] - 1.2) < 0.05, main[0]["risk_mult"]
@@ -171,6 +173,55 @@ def _():
     # BBB: slot_taken ở sổ chính, noai không mở lệnh thứ hai trong cùng lượt
     assert [src for sym, src, _ in rows1 if sym == "BBB"] == ["slot_taken"]
     assert len(STORE.open_trades("noai")) == 1
+
+
+@section("sổ chính lấy giá MỚI sau khi AI trả lời (như trước 3.5), không dùng giá sổ noai đã lấy lúc quét; dòng tín hiệu ghi giá đó")
+def _():
+    okx = ScanOKX(["HHH/USDT:USDT"], prices=[100.0, 100.8])      # lần 1: sổ noai lúc quét; lần 2: sổ chính sau AI
+    bot = make_bot({"HHH/USDT:USDT": (trend_sig("HHH/USDT:USDT", 6.5), "")}, okx=okx)
+    bot.scan()
+    noai, main = STORE.open_trades("noai")[0], STORE.open_trades("main")[0]
+    assert abs(noai["ref_price"] - 100.0) < 1e-9 and abs(main["ref_price"] - 100.8) < 1e-9, (noai["ref_price"], main["ref_price"])
+    assert abs(STORE.db.run("SELECT entry FROM signals", fetch=True)[0]["entry"] - 100.8) < 1e-9
+    assert okx.asked == 2
+
+
+@section("lượt quét sau trong cùng nến: lệnh noai lấy sid của dòng đã có; sổ chính hỏi AI sau đó → sid lệnh noai chuyển sang dòng hỏi AI")
+def _():
+    sigs = {"III/USDT:USDT": (trend_sig("III/USDT:USDT", 6.5), "")}
+    bot = make_bot(sigs)
+    STORE.set("paper_balance_noai", 0.01)             # lượt 1: noai không vào được (ký quỹ), sổ chính đủ lệnh → bóng max_positions
+    for i in range(cfg.MAX_OPEN_POSITIONS):
+        STORE.open_trade(dict(mode="paper", symbol=f"OPEN{i}/USDT:USDT", side="long", entry=1.0, sl=0.9, tp=1.2, notional=5.0,
+                              status="open", opened_at=time.time()))
+    bot.scan()
+    rows = sig_rows()
+    assert rows == [("III", "max_positions", rows[0][2])] and STORE.open_trades("noai") == []
+    sid_shadow = rows[0][2]
+    STORE.set("paper_balance_noai", 10.0)             # lượt 2 (5 phút sau, cùng nến): noai vào; _shadow không ghi lại (đã thấy)
+    bot.scan()
+    assert sig_rows() == rows                          # không có dòng tín hiệu mới
+    t = STORE.open_trades("noai")[0]
+    assert t["sid"] == sid_shadow, t["sid"]
+    STORE.db.run("DELETE FROM trades WHERE symbol LIKE 'OPEN%'")     # lượt 3: sổ chính trống chỗ, hỏi AI → dòng mới, bóng cũ DUP
+    bot.cooldown.clear()
+    bot.scan()
+    rows3 = sig_rows()
+    assert [(s, src) for s, src, _ in rows3] == [("III", "max_positions"), ("III", "taken")], rows3
+    sid_ai = rows3[1][2]
+    assert STORE.db.run("SELECT outcome FROM signals WHERE sid=?", (sid_shadow,), fetch=True)[0]["outcome"] == "DUP"
+    assert STORE.open_trades("noai")[0]["sid"] == sid_ai and STORE.open_trades("main")[0]["sid"] == sid_ai
+
+
+@section("sổ chính dừng vì cầu dao: vẫn quét cho sổ noai (main_active=False) – noai vào, sổ chính không hỏi AI, không ghi bóng")
+def _():
+    bot = make_bot({"JJJ/USDT:USDT": (trend_sig("JJJ/USDT:USDT", 6.5), "")})
+    bot.scan(main_active=False)
+    assert len(STORE.open_trades("noai")) == 1 and STORE.open_trades("main") == [] and bot.ai.asked == []
+    assert sig_rows() == [] and STORE.open_trades("noai")[0]["sid"] is None
+    assert bot._noai_active() is True
+    STORE.set("noai_halted", True)
+    assert bot._noai_active() is False
 
 
 @section("AI từ chối: sổ chính không vào, sổ noai vẫn vào; lệnh noai ghi phán quyết AI; sig.skip của noai không lẫn sang sổ chính")

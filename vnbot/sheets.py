@@ -11,9 +11,10 @@ the same design), so one side failing never stops the other.
   library, the disk of a small host is short), exchanged at oauth2.googleapis.com for a token
   kept ~50 minutes. Writes: the Sheets REST API with ``requests``; a missing tab is added
   (``batchUpdate`` addSheet) with its header row.
-- Appends only, one call per tab per cycle (many rows). Every row has a key; the keys
-  written per tab are kept (``data/results/sheets_cursor.json``) so a rerun never writes a
-  row twice. A failed tab keeps its cursor and is tried again next cycle; nothing here raises
+- Appends only, one call per tab per cycle (many rows). Every row has a key starting with
+  its session day; the newest KEYS_KEPT keys written per tab are kept with the oldest one
+  still remembered as a floor (``data/results/sheets_cursor.json``), so a rerun never writes a
+  row twice even once the key list has been trimmed. A failed tab keeps its cursor and is tried again next cycle; nothing here raises
   into the scheduler. The spreadsheet is never read but for its list of tabs: no tab
   (``proposals`` included) is read back into the bot.
 - Every text cell goes through ``vnbot.eventlog.redact``.
@@ -222,9 +223,19 @@ class Cursor:
     def keys(self, name: str) -> set[str]:
         return set(self.tab(name).get("keys") or [])
 
+    def written(self, name: str, key: str) -> bool:
+        """The key was written: remembered, or older than the oldest key still remembered (every key starts with the
+        session day, so the keys sort by time; the oldest ones are forgotten once KEYS_KEPT is exceeded)."""
+        t = self.tab(name)
+        return key in self.keys(name) or bool(t.get("floor")) and key < t["floor"]
+
     def wrote(self, name: str, keys: list[str]) -> None:
         t = self.tab(name)
-        t["keys"] = (list(t.get("keys") or []) + keys)[-KEYS_KEPT:]
+        kept = sorted(set(list(t.get("keys") or []) + keys))
+        if len(kept) > KEYS_KEPT:
+            kept = kept[-KEYS_KEPT:]
+            t["floor"] = max(t.get("floor") or "", kept[0])
+        t["keys"] = kept
         t["written"] = int(t.get("written") or 0) + len(keys)
         t["at"] = datetime.now().isoformat(timespec="seconds")
         t["error"] = ""
@@ -457,7 +468,7 @@ class Exporter:
             self.cursor.save()
             return result
         for tab, header in TABS.items():
-            new = [r for r in rows.get(tab) or [] if r["key"] not in self.cursor.keys(tab)][:MAX_ROWS_PER_CALL]
+            new = [r for r in rows.get(tab) or [] if not self.cursor.written(tab, r["key"])][:MAX_ROWS_PER_CALL]
             try:
                 sheet.ensure_tab(tab, header)
                 sheet.append(tab, [_cells(r, header) for r in new])

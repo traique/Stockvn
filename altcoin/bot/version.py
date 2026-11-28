@@ -18,7 +18,7 @@ from pathlib import Path
 
 VERSION = "3.5.0"
 RELEASED = "2026-11-29"
-RELEASE_BUILD = "6245435"          # ghi bởi `python -m bot.version --stamp`
+RELEASE_BUILD = "aa841a8"          # ghi bởi `python -m bot.version --stamp`
 BUILD = RELEASED                   # tương thích các chỗ cũ dùng BUILD
 
 # Mới nhất ở trên: (phiên bản, ngày, các thay đổi – câu ngắn, đọc tốt trên điện thoại)
