@@ -147,7 +147,7 @@ function renderLearn(L){
   const st=L.stats||{},p=L.params,tot=(st.total||{}).n||0,pend=st.pending||0;
   const MODE={auto:'tự áp dụng',suggest:'chờ duyệt',off:'tắt'};
   sub.innerHTML=`${MODE[L.mode]||L.mode} · ${tot} kết quả · ${pend} đang theo dõi`;
-  const tech=st.tech||{},av=st.ai_veto||{};
+  const tech=st.tech||{},av=st.ai_veto||{},cal=st.ai_calibration||{};
   const pending=(L.log||[]).filter(r=>r.status==='pending');
   const KIND={block:'Chặn',unblock:'Bỏ chặn',trigger_w:'Trọng số',min_score:'Ngưỡng điểm',exit_mode:'Cách thoát lệnh',ai_veto_conf:'Ngưỡng phủ quyết AI',tp1_r:'Mức TP1',reset:'Khôi phục'};
   let h=`<div class="note">
@@ -155,7 +155,8 @@ function renderLearn(L){
     ${st.legacy_excluded?`Không tính <b>${st.legacy_excluded}</b> kết quả của bản trước 3.3 (giá vào và phí khác – xem Phiên bản).<br>`:''}
     Tín hiệu kỹ thuật: <b>${tech.n||0}</b> kết quả · thắng <b>${tech.winrate||0}%</b> · kỳ vọng <b class="${(tech.exp_r||0)>=0?'up':'dn'}">${(tech.exp_r||0)>=0?'+':''}${f(tech.exp_r||0,2)}R</b>/tín hiệu
     ${av.veto_accuracy!=null?`<br>AI chặn đúng <b>${av.veto_accuracy}%</b> (${av.rejected.n} lần chặn, những lệnh đó nếu vào sẽ có kỳ vọng ${f(av.rejected.exp_r,2)}R)`:''}
-    ${av.veto_conf!=null?`<br>Ngưỡng phủ quyết AI: <b>${av.veto_conf}%</b> – AI phản đối dưới mức này thì tín hiệu điểm ≥ ${(L.params||{}).ai_override_min_score??6.5} vẫn vào${av.override&&av.override.n?` (đã vào ${av.override.n} lệnh như vậy, kỳ vọng ${f(av.override.exp_r,2)}R)`:''}`:''}
+    ${av.veto_conf!=null?`<br>Ngưỡng phủ quyết AI: <b>${av.veto_conf}%</b> – AI phản đối dưới mức này thì tín hiệu điểm ≥ ${(L.params||{}).ai_override_min_score??5} vẫn vào${av.override&&av.override.n?` (đã vào ${av.override.n} lệnh như vậy, kỳ vọng ${f(av.override.exp_r,2)}R)`:''}`:''}
+    ${cal.n?`<br>AI đoán chuẩn không (Brier, ${cal.n} quyết định có kết quả): <b class="${cal.skill>0?'up':'dn'}">${f(cal.brier,3)}</b> so với <b>${f(cal.brier_base,3)}</b> nếu luôn đoán theo tỉ lệ thắng nền ${Math.round(cal.base_rate*100)}% → ${cal.skill>0?`AI phân biệt được tín hiệu tốt/xấu (skill +${f(cal.skill,2)})`:`AI tệ hơn không có AI (skill ${f(cal.skill,2)})`}${cal.enough?'':' – mẫu còn ít'}`:''}
   </div>
   <div class="chips" style="padding:0 20px 14px">
     <span class="pill gold">Ngưỡng điểm ${p.min_score}${p.min_score!=p.min_score_default?` (mặc định ${p.min_score_default})`:''}</span>

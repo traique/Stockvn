@@ -64,6 +64,13 @@ RULES = {
                           lambda side, c: _v(c, "btc_trend_1h", 0) == (-1 if side == "long" else 1)),
     "btc_volatile": ("BTC biến động mạnh (>1.5% trong 1h)", lambda side, c: abs(_v(c, "btc_chg_1h", 0)) > 1.5),
     "btc_dump_4h": ("BTC giảm >3% trong 4h", lambda side, c: _v(c, "btc_chg_4h", 0) < -3),
+    # v3.4: regime BTC khung NGÀY (market.daily_regime). 29 ngày chạy ảo 30/10–27/11/2026, BTC 77.600 → 60.600: 320 tín hiệu
+    # long -0,45R (t -4,2 theo ngày), âm cả 5 tuần, kể cả 176 tín hiệu long lúc BTC 1h đang tăng (-0,38R) – cổng 1h không
+    # thấy xu hướng lớn. Hai luật này theo dõi bóng như mọi luật BTC; cổng cứng riêng: cfg.BTC_DAILY_GATE (xem _gates).
+    "long_btc_bear_1d": ("Long khi BTC khung ngày đang giảm (EMA21 < EMA50, giá dưới EMA21)",
+                         lambda side, c: side == "long" and _v(c, "btc_trend_1d", 0) == -1),
+    "short_btc_bull_1d": ("Short khi BTC khung ngày đang tăng (EMA21 > EMA50, giá trên EMA21)",
+                          lambda side, c: side == "short" and _v(c, "btc_trend_1d", 0) == 1),
     # ---- Open Interest: có tiền mới vào hay chỉ là đóng vị thế
     "long_oi_falling": ("Long khi giá tăng nhưng OI giảm (không có tiền mới)",
                         lambda side, c: side == "long" and _v(c, "px_chg_1h", 0) > 0 and _v(c, "oi_chg_1h", 0) < -1),
@@ -251,6 +258,25 @@ def _triggers(df, side):
     return out
 
 
+def btc_gate(side, m):
+    """Cổng BTC dùng chung cho setup xu hướng và range: lý do loại, hoặc ''.
+    1h: xu hướng 1h ngược hoặc BTC vừa chạy ngược ≥ BTC_GATE_CHG %/1h (v2.8).
+    v3.4 – khung NGÀY (BTC_DAILY_GATE): long khi BTC ngày đang giảm / short khi BTC ngày đang tăng (market.daily_regime).
+    Thiếu dữ liệu ngày (btc_trend_1d không có) → không chặn. Tắt cổng thì hai luật long_btc_bear_1d / short_btc_bull_1d
+    vẫn theo dõi bóng để bộ tự học chặn khi đủ mẫu."""
+    m = m or {}
+    if side == "long" and (m.get("btc_trend_1h") == -1 or (m.get("btc_chg_1h") or 0) < -cfg.BTC_GATE_CHG):
+        return "BTC đang xu hướng giảm"
+    if side == "short" and (m.get("btc_trend_1h") == 1 or (m.get("btc_chg_1h") or 0) > cfg.BTC_GATE_CHG):
+        return "BTC đang xu hướng tăng"
+    if cfg.BTC_DAILY_GATE:
+        if side == "long" and m.get("btc_trend_1d") == -1:
+            return "BTC khung ngày đang giảm"
+        if side == "short" and m.get("btc_trend_1d") == 1:
+            return "BTC khung ngày đang tăng"
+    return ""
+
+
 def _gates(r, side, trend, market=None, chg1h=None):
     """Các điều kiện bắt buộc. Trả về chuỗi lý do loại, hoặc '' nếu qua hết.
     chg1h: % giá đổi trong 4 nến 15m đã đóng gần nhất (nhịp 1h của chính coin)."""
@@ -263,10 +289,9 @@ def _gates(r, side, trend, market=None, chg1h=None):
     if chg1h is not None and cfg.CHASE_1H_PCT > 0 and -want * chg1h >= cfg.CHASE_1H_PCT:
         return f"ngược nhịp 1h của coin ({chg1h:+.2f}%/1h)"
     # Cổng BTC bắt buộc: altcoin đi theo BTC, không đánh ngược xu hướng / động lượng BTC
-    if side == "long" and (m.get("btc_trend_1h") == -1 or (m.get("btc_chg_1h") or 0) < -cfg.BTC_GATE_CHG):
-        return "BTC đang xu hướng giảm"
-    if side == "short" and (m.get("btc_trend_1h") == 1 or (m.get("btc_chg_1h") or 0) > cfg.BTC_GATE_CHG):
-        return "BTC đang xu hướng tăng"
+    why = btc_gate(side, m)
+    if why:
+        return why
     if r.adx < cfg.MIN_ADX:
         return f"ADX thấp ({r.adx:.0f} < {cfg.MIN_ADX:.0f})"
     if r.atr_pct < cfg.MIN_ATR_PCT:
@@ -484,10 +509,9 @@ def _range_setup(symbol, df, htf, funding, change24h, market, info):
         return None, "1h sideway – chưa có nhịp đảo chiều tại biên"
     info["side"] = side
     m = market or {}
-    if side == "long" and (m.get("btc_trend_1h") == -1 or (m.get("btc_chg_1h") or 0) < -cfg.BTC_GATE_CHG):
-        return None, "BTC đang xu hướng giảm"
-    if side == "short" and (m.get("btc_trend_1h") == 1 or (m.get("btc_chg_1h") or 0) > cfg.BTC_GATE_CHG):
-        return None, "BTC đang xu hướng tăng"
+    why = btc_gate(side, m)
+    if why:
+        return None, why
     price, a = float(r.close), float(r.atr)
     if side == "long":
         sl = min(df.low[n - 3:n]) - 0.25 * a
